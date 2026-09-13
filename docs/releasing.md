@@ -104,7 +104,7 @@ maps a short name onto the namespaced component when only that one exists.
 
 ### One version for everything
 
-All eleven manifests carry `version:` equal to `version.txt`, and every
+Every manifest carries `version:` equal to `version.txt`, and every
 dependency between espOS components is `^<that version>` with an
 `override_path` to the sibling directory. The `override_path` is what an
 in-tree build — and a firmware that vendors espOS as a submodule — uses: the
@@ -113,15 +113,15 @@ for an espOS component. The version range is what a registry consumer sees,
 and lockstep versions keep it from ever mixing two espOS releases in one
 firmware.
 
-Lockstep has to be maintained by the release, not by hand. `scripts/release.sh`
-must, for every `components/*/idf_component.yml`:
+Lockstep is maintained by the release, not by hand. `scripts/release.sh`
+does this for every `components/*/idf_component.yml`:
 
 * set the top-level `version:` to the release version;
 * set each `signalk-espos/espos_*` dependency's `version:` to `^<release version>`
   (pre-1.0, `^0.7.0` excludes `0.8.0`, so a minor bump that leaves the
   ranges behind publishes components that cannot be installed together);
 * `git add` the manifests with `version.txt`, so the release commit carries
-  all twelve files.
+  them all.
 
 The manifests are the registry's contract; a manifest that fails to pack
 fails the release. CI runs `compote component pack` for every component on

@@ -79,6 +79,32 @@ fi
 
 printf '%s\n' "$version" > version.txt
 git add version.txt
+
+# The manifests move with version.txt, and docs/releasing.md says so: every
+# component carries the release version, and every espOS-to-espOS dependency
+# carries ^<release version>. Doing it here rather than by hand because the
+# failure is quiet and total -- pre-1.0, ^0.7.0 EXCLUDES 0.8.0, so ranges left
+# behind publish a set of components the dependency solver cannot install
+# together, and nothing notices until someone tries.
+for manifest in components/*/idf_component.yml; do
+    python3 - "$manifest" "$version" <<'PYEOF'
+import re, sys
+path, version = sys.argv[1], sys.argv[2]
+with open(path) as f:
+    text = f.read()
+# The component's own version: the first top-level version: line.
+text = re.sub(r'^version: *"[^"]*"', f'version: "{version}"', text, count=1, flags=re.M)
+# Every sibling dependency's range. Indented version: lines that follow a
+# signalk-espos/espos_* key -- third-party pins (espressif/...) are left alone.
+def bump(m):
+    return f'{m.group(1)}version: "^{version}"'
+text = re.sub(r'(signalk-espos/espos_[a-z_]+:\n(?:[ \t]+[^\n]*\n)*?[ \t]+)version: *"\^[^"]*"',
+              bump, text)
+with open(path, "w") as f:
+    f.write(text)
+PYEOF
+    git add "$manifest"
+done
 # version.txt may already hold this version -- the first tag of a version
 # developed under it, or a re-cut after an aborted run. Nothing to commit is
 # then correct, not an error: tag the commit that is already there.
