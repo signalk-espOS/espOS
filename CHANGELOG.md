@@ -92,6 +92,13 @@ Entries name the component the way commit scopes do (`wifi`, `sk`, `ble`,
 
 ### Added
 
+- n2k: `espos_n2k/examples/n2k_candump`, an NMEA 2000 gateway — CAN frames off
+  the bus, out over TCP as candump ASCII for canboatjs. Deferred until now for
+  want of a CAN bus to verify against; the README carries what actually goes
+  wrong (a transceiver and termination are not optional, and both fail looking
+  exactly like a software fault) and how `GET /api/v1/n2k` tells a quiet bus
+  from a misconfigured one.
+
 - prov: `espos_prov`, BLE provisioning -- WiFi credentials from a phone over
   GATT, with no access point and no captive portal. Off by default
   (`CONFIG_ESPOS_PROV`, about 25 KB of flash).
@@ -398,6 +405,14 @@ Entries name the component the way commit scopes do (`wifi`, `sk`, `ble`,
   CMakeLists already required. `docs/releasing.md` gains "Registry publishing".
 
 ### Fixed
+
+- n2k: `esp_driver_gpio` is a PUBLIC requirement, not a private one.
+  `twai_receiver.h` is a public header and `TwaiReceiverConfig` exposes
+  `gpio_num_t`, so every consumer needs `driver/gpio.h` on its include path —
+  and a private requirement does not propagate. **A project that required only
+  `espos_n2k` could not compile**, failing inside espOS's own header. The
+  cockpit never hit it because its HAL happens to require `esp_driver_gpio`
+  too; writing the first example that does not is what found it.
 
 - ble/wifi: the setup portal was slow to join and often handed out no address
   at all. Two faults, both on the ESP32-P4 where the C6 co-processor is ONE
