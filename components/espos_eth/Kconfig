@@ -1,0 +1,28 @@
+menu "espOS Ethernet"
+    depends on ETH_USE_ESP32_EMAC
+
+    config ESPOS_ETH_PHY_ADDR
+        int "PHY address (-1 to detect)"
+        default 1 if IDF_TARGET_ESP32P4
+        default -1
+        range -1 31
+        help
+            The MDIO address of the RMII PHY. The Waveshare
+            ESP32-P4-WIFI6-POE-ETH strap-configures its IP101GRI at 1, which is
+            the ESP32-P4 default here. -1 makes the driver scan the bus at
+            start, which works on a board with one PHY and costs a little
+            start-up time.
+
+    config ESPOS_ETH_PHY_RST_GPIO
+        int "PHY reset GPIO (-1 for none)"
+        default 51 if IDF_TARGET_ESP32P4
+        default -1
+        range -1 63
+        help
+            The GPIO wired to the PHY's active-low reset, pulsed low at start.
+            GPIO 51 on the Waveshare ESP32-P4-WIFI6-POE-ETH. -1 for a board
+            whose PHY comes out of reset on its own. A wrong pin here does not
+            fail loudly: the PHY simply never answers, which looks the same as
+            no cable.
+
+endmenu

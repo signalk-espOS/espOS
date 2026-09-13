@@ -24,6 +24,7 @@ threading, boot order, the server's REST tree, TLS.
 | `tls_server` | Advanced | https/wss to the server (`CONFIG_ESPOS_SK_TLS`) | `ssl_connection` | `components/espos_sk/examples/tls_server` |
 | `ble_gateway` | Advanced | a BLE→Signal K gateway: the whole firmware is `espos_start(NULL)`, the configuration is the content | — (SensESP has no equivalent) | `components/espos_ble/examples/ble_gateway` |
 | `n2k_candump` | Advanced | an NMEA 2000→Signal K gateway: CAN frames out as candump ASCII over TCP, decoded by canboatjs on the server | — (SensESP has no equivalent) | `components/espos_n2k/examples/n2k_candump` |
+| `ethernet` | Newbie | an espOS device on a cable: the whole firmware is `espos_start()`, WiFi off, the route on wired Ethernet | — (SensESP's `p4_ethernet`) | `components/espos_eth/examples/ethernet` |
 
 The three below are the same ideas as a **data-flow graph**, in C++. Nothing
 needs them — a firmware is free to stay with the C examples above, which is

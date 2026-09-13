@@ -1,0 +1,9 @@
+# SPDX-FileCopyrightText: 2026 Dirk Wahrheit
+# SPDX-License-Identifier: Apache-2.0
+#
+# An Ethernet device, not a WiFi device with a port: the station, its setup
+# portal and the /wifi endpoints never start. espos_wifi is still linked
+# (espos_core requires it on chips with a radio); this only keeps it from
+# running. Configure the device over the cable -- its DHCP address, or
+# <hostname>.local.
+CONFIG_ESPOS_WIFI=n

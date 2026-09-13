@@ -8,7 +8,7 @@ idf_component_register(
     SRCS main.c
     INCLUDE_DIRS "."
     PRIV_REQUIRES espos_core espos_config espos_sk espos_wifi
-                  espos_ota espos_ble espos_n2k espos_voice espos_audio)
+                  espos_ota espos_ble espos_eth espos_n2k espos_voice espos_audio)
 
 espos_config_add_descriptor(config/app.json)
 
