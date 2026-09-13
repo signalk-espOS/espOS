@@ -399,6 +399,30 @@ Entries name the component the way commit scopes do (`wifi`, `sk`, `ble`,
 
 ### Fixed
 
+- ble/wifi: the setup portal was slow to join and often handed out no address
+  at all. Two faults, both on the ESP32-P4 where the C6 co-processor is ONE
+  radio serving WiFi and BLE.
+
+  The scan suspension added for the portal never took effect at boot.
+  `espos_ble_start()` ran first and armed a scan, and arming is asynchronous
+  -- `esp_ble_gap_set_scan_params()` returns at once and the scan only starts
+  when the controller acknowledges -- so the suspension that followed found
+  `s_scanning` still false, stopped nothing, and the scan started a
+  millisecond later. The log said "scanning suspended" and the scanner then
+  held half the airtime for the whole session. The hold is now taken BEFORE
+  the gateway starts, so it never arms a scan; and `espos_ble_scan_stop()`
+  marks a scan stopped while it is still arming, so a pending start does not
+  run on regardless.
+
+  And the DHCP server could end up bound while the access point was down.
+  `esp_wifi_set_mode(APSTA)` brings the AP up carrying the driver's default
+  configuration and `esp_wifi_set_config()` then applies ours, which restarts
+  it; IDF starts the DHCP server off the netif's up-event, so the restart
+  could leave nothing serving and a client would associate and never get a
+  lease. The portal now makes sure the server is running. (Configuring before
+  the mode is not available: `esp_wifi_set_config(WIFI_IF_AP)` answers
+  `ESP_ERR_WIFI_MODE` while the current mode has no AP.)
+
 - ble/wifi: the setup portal was painfully slow to join on the ESP32-P4 --
   half a minute to get a DHCP lease, minutes to reach the page, sometimes
   never. The C6 co-processor is ONE radio serving both WiFi and BLE, and the

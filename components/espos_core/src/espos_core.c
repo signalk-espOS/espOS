@@ -246,23 +246,29 @@ esp_err_t espos_start_network(void)
     STAGE(espos_ota_start());
 #endif
 #if START_BLE
-    STAGE(espos_ble_start());
 #if ESPOS_HAVE_WIFI
-    /* The setup portal is raised inside espos_wifi_start(), which ran above,
-     * so the gateway missed the PORTAL_UP event that tells it to stand down.
-     * Catch up here.
+    /* BEFORE espos_ble_start(), not after. The portal is raised inside
+     * espos_wifi_start() above, so the gateway missed the PORTAL_UP event --
+     * but suspending after it has started is too late: it has already armed a
+     * scan, and arming is asynchronous, so the suspension finds s_scanning
+     * still false, stops nothing, and the scan starts a millisecond later.
+     * Observed exactly that: "scanning suspended" at 4516 ms, "scanning" at
+     * 4517 ms, and the scanner then held half the airtime for the whole
+     * portal session while the log claimed it was suspended.
+     *
+     * Taking the hold first means espos_ble_start() sees a non-zero count and
+     * never arms the scan at all.
      *
      * This is not a nicety on a co-processor part: the ESP32-P4's C6 is ONE
      * radio serving WiFi and BLE, and the gateway's default scan takes half
-     * the airtime (160 ms window, 320 ms interval). Joining the portal then
-     * takes minutes, or fails at DHCP -- measured on the bench, and reported
-     * from a phone as "takes ages". A device showing its portal has nowhere
-     * to publish advertisements to anyway. */
+     * the airtime (160 ms window, 320 ms interval). A device showing its
+     * setup portal has nowhere to publish advertisements to anyway. */
     espos_wifi_status_t wst;
     if (espos_wifi_get_status(&wst) == ESP_OK && wst.sm.portal_active) {
         espos_ble_portal_hold(true);
     }
 #endif
+    STAGE(espos_ble_start());
 #endif
 #if START_PROV
     /* Only when nothing is configured to join. A device already on a network

@@ -294,6 +294,32 @@ static esp_err_t p_portal_start(void *ctx)
         esp_wifi_set_mode(WIFI_MODE_STA);
         return err;
     }
+    /* esp_wifi_set_mode(APSTA) brings the access point up carrying the
+     * driver's default configuration, and the set_config above then applies
+     * ours -- which restarts it. IDF starts the DHCP server off the netif's
+     * up-event, so on a restart it can end up bound while the interface is
+     * down, and a client then associates but never gets a lease. Observed on
+     * the P4: "softap started / stopped", DHCP started, "softap started".
+     *
+     * Configuring before the mode is not an option -- esp_wifi_set_config()
+     * answers ESP_ERR_WIFI_MODE while the current mode has no AP -- so make
+     * sure the server is running once the interface has settled instead. */
+    esp_netif_t *ap_netif = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+    if (ap_netif) {
+        /* This runs while the interface is still coming up, so the server is
+         * normally not started yet and we start it here; IDF starting it again
+         * on the netif's up-event is harmless. What this removes is the case
+         * where the restart leaves nothing bound and a client gets no lease. */
+        esp_netif_dhcp_status_t st = ESP_NETIF_DHCP_INIT;
+        if (esp_netif_dhcps_get_status(ap_netif, &st) == ESP_OK && st != ESP_NETIF_DHCP_STARTED) {
+            esp_err_t derr = esp_netif_dhcps_start(ap_netif);
+            if (derr != ESP_OK && derr != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED) {
+                ESP_LOGE(TAG, "portal: dhcps_start: %s (clients will not get an address)",
+                         esp_err_to_name(derr));
+            }
+        }
+    }
+
     s_portal_clients = 0;
     s_portal_up = true;
     espos_wifi_portal_dns_start(PORTAL_IP);

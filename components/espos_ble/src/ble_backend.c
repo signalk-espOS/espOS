@@ -38,6 +38,9 @@ static const char *TAG = "espos_ble_backend";
 
 static espos_ble_callbacks_t s_cb;
 static bool s_scanning;
+/* A scan was stopped while it was still arming. Cleared by the next deliberate
+ * start; see the SCAN_PARAM_SET_COMPLETE_EVT case. */
+static bool s_scan_inhibited;
 static uint32_t s_scan_hits;
 static char s_mac[ESPOS_BLE_ADDR_LEN];
 static esp_ble_scan_params_t s_scan_params;
@@ -46,10 +49,23 @@ static void gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param)
 {
     switch (event) {
     /* Setting scan parameters only arms the scan; it starts here, once the
-     * controller acknowledges them. */
+     * controller acknowledges them.
+     *
+     * Which makes starting a two-step, asynchronous affair, and leaves a
+     * window: a suspension that arrives between espos_ble_scan_start() and
+     * this event would be ignored, because espos_ble_scan_stop() sees
+     * s_scanning still false and returns without doing anything -- and then
+     * the scan starts here anyway. On an unconfigured device that window is
+     * where the setup portal lives: the scanner took half the airtime for the
+     * whole session while the log said "scanning suspended". Observed as
+     * "scanning suspended" at 4450 ms followed by "scanning" at 4458 ms. */
     case ESP_GAP_BLE_SCAN_PARAM_SET_COMPLETE_EVT:
         if (param->scan_param_cmpl.status != ESP_BT_STATUS_SUCCESS) {
             ESP_LOGE(TAG, "scan param set failed: %d", param->scan_param_cmpl.status);
+            break;
+        }
+        if (s_scan_inhibited) {
+            ESP_LOGI(TAG, "scan armed but suspended meanwhile; not starting");
             break;
         }
         esp_ble_gap_start_scanning(0); /* 0 = until stopped */
@@ -204,6 +220,7 @@ static uint16_t ms_to_units(uint32_t ms)
 
 esp_err_t espos_ble_scan_start(bool active, uint16_t interval_ms, uint16_t window_ms)
 {
+    s_scan_inhibited = false;
     if (window_ms > interval_ms) window_ms = interval_ms;
 
     s_scan_params.scan_type = active ? BLE_SCAN_TYPE_ACTIVE : BLE_SCAN_TYPE_PASSIVE;
@@ -220,6 +237,10 @@ esp_err_t espos_ble_scan_start(bool active, uint16_t interval_ms, uint16_t windo
 
 esp_err_t espos_ble_scan_stop(void)
 {
+    /* Set before the early return: a scan that has been ARMED but has not yet
+     * reported SCAN_START_COMPLETE has s_scanning == false, and without this
+     * flag the pending start would run on regardless of having been stopped. */
+    s_scan_inhibited = true;
     if (!s_scanning) return ESP_OK;
     return esp_ble_gap_stop_scanning();
 }
