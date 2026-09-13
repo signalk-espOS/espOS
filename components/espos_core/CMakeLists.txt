@@ -38,7 +38,7 @@ idf_component_register(
 # Optional stages: link them only when they are in the build, and tell the
 # source which ones are, so espos_start() can call into them without an
 # #include that would fail in a firmware built without them.
-idf_component_optional_requires(PRIVATE espos_sk espos_ota espos_ble espos_prov)
+idf_component_optional_requires(PRIVATE espos_sk espos_ota espos_ble espos_prov espos_eth)
 idf_build_get_property(comps BUILD_COMPONENTS)
 if(espos_wifi IN_LIST comps)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE ESPOS_HAVE_WIFI=1)
@@ -62,6 +62,13 @@ endif()
 # it started -- it suspends BLE scanning while it runs.
 if(espos_prov IN_LIST comps AND NOT target STREQUAL "linux")
     target_compile_definitions(${COMPONENT_LIB} PRIVATE ESPOS_HAVE_PROV=1)
+endif()
+
+# Ethernet, same shape. The source additionally needs CONFIG_ETH_USE_ESP32_EMAC
+# (a chip without an internal EMAC links only espos_eth's stubs) and the
+# CONFIG_ESPOS_ETH switch.
+if(espos_eth IN_LIST comps AND NOT target STREQUAL "linux")
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE ESPOS_HAVE_ETH=1)
 endif()
 
 # espOS's own version, as distinct from the application's PROJECT_VER: in the

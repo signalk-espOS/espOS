@@ -34,6 +34,15 @@
 #else
 #define START_WIFI 0
 #endif
+/* Wired Ethernet: the component, a chip with an internal EMAC, and the switch.
+ * Started beside the WiFi station, not instead of it -- espos_net picks the
+ * route and prefers the cable. */
+#if ESPOS_HAVE_ETH && CONFIG_ETH_USE_ESP32_EMAC && CONFIG_ESPOS_ETH
+#define START_ETH 1
+#include "espos_eth.h"
+#else
+#define START_ETH 0
+#endif
 #if ESPOS_HAVE_SK
 #include "espos_sk.h"
 #endif
@@ -234,6 +243,18 @@ esp_err_t espos_start_network(void)
     STAGE(espos_wifi_start());
 #else
     ESP_LOGW(TAG, "no WiFi in this build: the network comes up only if a transport reports into espos_net");
+#endif
+#if START_ETH
+    /* After the seam (the netif takes its hostname from espos_net), and NOT
+     * through STAGE(): a PHY that does not answer -- a board without one, a
+     * wrong reset GPIO -- must not fail espos_start(), or every
+     * ESP_ERROR_CHECK(espos_start()) becomes a reboot loop on a device that
+     * could have come up on WiFi. A cable that is simply not plugged in is not
+     * an error at all: the driver starts and waits for a link. */
+    esp_err_t eth_err = espos_eth_start();
+    if (eth_err != ESP_OK) {
+        ESP_LOGW(TAG, "wired Ethernet unavailable: %s", esp_err_to_name(eth_err));
+    }
 #endif
 #if ESPOS_HAVE_SK
     /* Shows up in the server's access-request list as "<app> <hostname>"

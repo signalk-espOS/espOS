@@ -1,0 +1,35 @@
+# SPDX-FileCopyrightText: 2026 Dirk Wahrheit
+# SPDX-License-Identifier: Apache-2.0
+## espos_eth component manifest: registry metadata for signalk-espos/espos_eth.
+## The version is espOS's (version.txt) and moves with it, see docs/releasing.md.
+version: "0.7.0"
+description: "Wired Ethernet (internal EMAC + RMII PHY) as an espos_net transport; preferred over WiFi when both are up"
+url: "https://github.com/signalk-espOS/espOS/tree/main/components/espos_eth"
+repository: "https://github.com/signalk-espOS/espOS.git"
+documentation: "https://github.com/signalk-espOS/espOS/blob/main/docs/net.md"
+issues: "https://github.com/signalk-espOS/espOS/issues"
+license: "Apache-2.0"
+maintainers:
+  - "Dirk Wahrheit <dirkwahrheit@gmail.com>"
+tags:
+  - signalk
+  - marine
+  - esp-idf
+  - espos
+  - ethernet
+  - poe
+files:
+  exclude:
+    - "build/**/*"
+    - "build-*/**/*"
+    - "sdkconfig*"
+    - "managed_components/**/*"
+    - "dependencies.lock"
+dependencies:
+  idf: ">=6.0.0,<6.1.0"
+  # The network seam this transport reports into. override_path makes an
+  # in-tree build (and a firmware that vendors espOS as a submodule) use the
+  # checkout next to this file; a registry copy has no such directory.
+  signalk-espos/espos_net:
+    version: "^0.7.0"
+    override_path: "../espos_net"

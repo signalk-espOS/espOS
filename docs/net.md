@@ -1,7 +1,7 @@
 # Network (`espos_net`)
 
 The one place espOS answers "is the network up, and how". Every transport —
-the WiFi station today, Ethernet and 802.15.4 next — reports its link into
+the WiFi station and wired Ethernet today, 802.15.4 next — reports its link into
 `espos_net`; SignalK, OTA, mDNS and the health policy ask `espos_net`, never
 a radio. Configuration is the `net` namespace (`hostname`); status is
 `GET /api/v1/net/status` and the `net` SSE event.
@@ -154,6 +154,44 @@ both `espos_wifi_get_status()` and `espos_net_get_status()` already say
 (`wifi.ip_mode` and friends, [wifi.md](wifi.md), "Addressing"): the netif
 still raises `GOT_IP` with a static address, so `espos_net` sees no
 difference.
+
+## Wired Ethernet (`espos_eth`)
+
+The second transport, and the checklist above applied: the chip's internal
+EMAC and an RMII PHY with DHCP, the netif registered as `ESPOS_NET_IF_ETH`,
+`IP_EVENT_ETH_GOT_IP` reported up and link loss or `IP_EVENT_ETH_LOST_IP`
+reported down. It starts beside the WiFi station, not instead of it, and the
+static preference above puts the route on the cable whenever it has a link.
+
+There is little to configure. The EMAC's pins are IDF's
+`ETH_ESP32_EMAC_DEFAULT_CONFIG`, which on the ESP32-P4 is exactly the Waveshare
+ESP32-P4-WIFI6-POE-ETH wiring (MDC 31, MDIO 52, RMII clock in on GPIO 50). What
+varies per board is under menu "espOS Ethernet":
+
+| Kconfig | ESP32-P4 default | |
+|---|---|---|
+| `CONFIG_ESPOS_ETH_PHY_ADDR` | `1` | the PHY's MDIO address; `-1` scans |
+| `CONFIG_ESPOS_ETH_PHY_RST_GPIO` | `51` | the PHY's active-low reset; `-1` for none |
+
+The PHY is driven by IDF's generic IEEE 802.3 driver. IDF 6 moved the named
+PHY drivers (IP101, LAN87xx, ...) to the component registry; the generic one
+reads link, speed and duplex from the standard registers, which is all a
+transport needs, and adds no dependency.
+
+`espos_start()` starts it when the component is in the build and
+`CONFIG_ESPOS_ETH` is on, and **does not fail if it cannot**: a PHY that does
+not answer is logged and the device carries on, rather than turning
+`ESP_ERROR_CHECK(espos_start())` into a reboot loop on a device that could
+have come up on WiFi. An unplugged cable is not an error at all. A wrong PHY
+address or reset GPIO fails the same quiet way, which is why the install error
+names both settings.
+
+mDNS follows the cable without help: the netif is IDF's default Ethernet netif
+(`ETH_DEF`), which the responder picks up when `CONFIG_MDNS_PREDEF_NETIF_ETH`
+is on, its default.
+
+On a chip without an internal EMAC (ESP32-C3, C6, S3) the component compiles to
+stubs: `espos_eth_start()` returns `ESP_ERR_NOT_SUPPORTED`.
 
 ## mDNS
 

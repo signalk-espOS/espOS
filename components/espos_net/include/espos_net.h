@@ -48,7 +48,7 @@ extern "C" {
 typedef enum {
     ESPOS_NET_IF_NONE = 0,     /* no default route */
     ESPOS_NET_IF_WIFI_STA = 1, /* espos_wifi's station */
-    ESPOS_NET_IF_ETH = 2,      /* wired Ethernet (future transport) */
+    ESPOS_NET_IF_ETH = 2,      /* wired Ethernet (espos_eth) */
     ESPOS_NET_IF_THREAD = 3,   /* 802.15.4 / Thread (future transport) */
     ESPOS_NET_IF_MAX = 4,
 } espos_net_if_t;

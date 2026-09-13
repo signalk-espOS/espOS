@@ -98,6 +98,16 @@ Entries name the component the way commit scopes do (`wifi`, `sk`, `ble`,
   wrong (a transceiver and termination are not optional, and both fail looking
   exactly like a software fault) and how `GET /api/v1/n2k` tells a quiet bus
   from a misconfigured one.
+- eth: `espos_eth`, wired Ethernet as an `espos_net` transport -- the internal
+  EMAC and an RMII PHY with DHCP, started by `espos_start()` beside the WiFi
+  station. `espos_net` already preferred Ethernet over WiFi, so the route moves
+  to the cable whenever it has a link. The ESP32-P4 EMAC defaults are the
+  Waveshare ESP32-P4-WIFI6-POE-ETH wiring; the PHY address and reset GPIO are
+  Kconfig (defaults 1 and 51 on the P4). The PHY uses IDF's generic 802.3
+  driver, because IDF 6 moved the named ones to the registry. A PHY that does
+  not answer is logged and **does not fail `espos_start()`**, so a firmware
+  that could come up on WiFi does not reboot-loop over a missing cable
+  interface. Compiles to stubs on chips without an EMAC.
 
 - prov: `espos_prov`, BLE provisioning -- WiFi credentials from a phone over
   GATT, with no access point and no captive portal. Off by default

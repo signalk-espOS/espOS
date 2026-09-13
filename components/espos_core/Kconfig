@@ -32,4 +32,24 @@ menu "espOS core"
             radio. Not offered on chips without WiFi (the 802.15.4-only
             H-series), where espos_wifi is not built at all.
 
+    config ESPOS_ETH
+        bool "Start wired Ethernet (espos_eth) in espos_start()"
+        default y
+        depends on ETH_USE_ESP32_EMAC
+        help
+            espos_start() brings espos_eth up right after the network seam,
+            beside the WiFi station rather than instead of it: espos_net
+            routes over the cable whenever it has a link, and over the
+            station otherwise. Only matters in a firmware that builds
+            espos_eth, on a chip with an internal EMAC.
+
+            A failure here does not stop espos_start(). A PHY that does not
+            answer -- a board without one, a wrong reset GPIO -- is logged
+            and the device carries on, because a firmware that could have
+            come up on WiFi should not reboot-loop over a missing cable
+            interface.
+
+            Turn this off for an application that starts Ethernet itself,
+            for instance only after enabling a board power rail.
+
 endmenu
