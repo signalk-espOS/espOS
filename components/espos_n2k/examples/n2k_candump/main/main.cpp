@@ -91,17 +91,27 @@ extern "C" void app_main(void) {
    * something is worth saying -- a gateway that logs every frame is a
    * gateway nobody can read the log of. */
   bool announced = false;
+  bool warned_quiet = false;
   for (;;) {
     vTaskDelay(pdMS_TO_TICKS(10000));
     if (!announced && rx.ever_received()) {
       announced = true;
       ESP_LOGI(TAG, "bus is live: %u frames", (unsigned)rx.frames_received());
     }
-    /* A bus that was live and went quiet is worth one line, because it is
-     * indistinguishable from a working gateway from the outside. */
+    /* A bus that was live and went quiet is worth saying, because from the
+     * outside it is indistinguishable from a working gateway. Once per
+     * outage, not once per tick: a warning every ten seconds is how a log
+     * stops being read. The flag clears when frames return, so the next
+     * outage warns again. */
     const int64_t idle = rx.seconds_since_last_rx();
     if (announced && idle > 30) {
-      ESP_LOGW(TAG, "no frames for %lld s -- check the bus", (long long)idle);
+      if (!warned_quiet) {
+        warned_quiet = true;
+        ESP_LOGW(TAG, "no frames for %lld s -- check the bus", (long long)idle);
+      }
+    } else if (warned_quiet) {
+      warned_quiet = false;
+      ESP_LOGI(TAG, "frames again after a quiet spell");
     }
   }
 }
