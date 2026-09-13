@@ -15,8 +15,14 @@ idf_component_register(
          src/api_n2k.cpp
          src/candump_tcp_server.cpp src/candump_format.cpp
     INCLUDE_DIRS include
-    REQUIRES esp_driver_twai esp_timer
-    PRIV_REQUIRES lwip espressif__mdns esp_driver_gpio)
+    # esp_driver_gpio is PUBLIC, not private: twai_receiver.h is a public
+    # header and its TwaiReceiverConfig exposes gpio_num_t, so every consumer
+    # needs driver/gpio.h on its include path. As a PRIV_REQUIRES it did not
+    # propagate, and a project that required only espos_n2k failed to compile
+    # on the component's own header -- which the cockpit never hit only because
+    # its HAL happens to require esp_driver_gpio too.
+    REQUIRES esp_driver_twai esp_timer esp_driver_gpio
+    PRIV_REQUIRES lwip espressif__mdns)
 
 # GET /api/v1/n2k is worth having but not worth requiring: a headless N2K
 # gateway with no web server is a legitimate firmware, and api_n2k.cpp guards
