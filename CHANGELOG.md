@@ -423,6 +423,28 @@ Entries name the component the way commit scopes do (`wifi`, `sk`, `ble`,
   the mode is not available: `esp_wifi_set_config(WIFI_IF_AP)` answers
   `ESP_ERR_WIFI_MODE` while the current mode has no AP.)
 
+- ui: the setup portal could sit on a blank page for ever. `useStore()`
+  subscribed to its store from an effect, and effects run after paint, so a
+  value written between render and subscribe notified nobody -- and nothing
+  would notify again. `bootstrapAuth()` resolving quickly did exactly that,
+  leaving `authStore` set but the component still rendering its first read.
+
+  It looked like a device fault and was not. Over WiFi `/auth/status` answers
+  in about 8 ms and loses the race, so the app renders; on the setup portal it
+  is slower, wins, and the page never moves. `useStore()` now re-reads when
+  the effect runs.
+
+  Two things found while chasing it, both worth keeping on their own:
+  `fetch()` had no timeout, so one wedged request was indistinguishable from a
+  dead device (now 15 s); and the shell rendered `null` while authentication
+  was pending, which showed as a black page with nothing to explain it (now a
+  "Loading..." line).
+
+- ui: the built `index.html` no longer marks its module script and stylesheet
+  `crossorigin`. The device serves no `Access-Control-Allow-Origin` -- the
+  bundle is same origin and does not need one -- and a browser that takes the
+  attribute at its word fetches in CORS mode and blocks the script outright.
+
 - ble/wifi: the setup portal was painfully slow to join on the ESP32-P4 --
   half a minute to get a DHCP lease, minutes to reach the page, sometimes
   never. The C6 co-processor is ONE radio serving both WiFi and BLE, and the

@@ -33,6 +33,10 @@ function setDevKey(key: string | null) {
   try { if (key) sessionStorage.setItem(KEY_STORAGE, key); else sessionStorage.removeItem(KEY_STORAGE); } catch { /* storage blocked: the key lives for this page only */ }
 }
 
+/* Long enough for a slow flash read over a busy shared radio, short enough
+ * that a wedged request does not look like a broken device. */
+const REQUEST_TIMEOUT_MS = 15000;
+
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = {};
   const init: RequestInit = { method, headers, credentials: "same-origin" };
@@ -45,6 +49,14 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
   }
   const key = devKey();
   if (key) headers["Authorization"] = `Bearer ${key}`;
+  // Bounded, because an unbounded fetch is indistinguishable from a hang and
+  // the caller has no way to recover: the app renders nothing until the first
+  // /auth/status settles, so one request that never answers is a permanently
+  // blank page. A device on the other side of a captive-portal association is
+  // exactly where that happens. AbortSignal.timeout is on every browser that
+  // runs this bundle; the optional chain keeps an ancient webview working
+  // (unbounded, as before) rather than throwing.
+  init.signal = AbortSignal.timeout?.(REQUEST_TIMEOUT_MS);
   const r = await fetch(BASE + path, init);
   const text = await r.text();
   let js: unknown = null;
@@ -211,7 +223,20 @@ export const authStore = new Store<AuthState>();
 
 export function useStore<T>(s: Store<T>): T | undefined {
   const [, tick] = useState(0);
-  useEffect(() => s.subscribe(() => tick((n) => n + 1)), [s]);
+  useEffect(() => {
+    const unsub = s.subscribe(() => tick((n) => n + 1));
+    // Re-read on subscribe. Effects run after paint, so a store written
+    // between render and here -- bootstrapAuth() resolving fast, an SSE
+    // snapshot arriving at once -- would have notified nobody, and nothing
+    // would ever notify again: the component keeps rendering the value it
+    // first read, for ever.
+    //
+    // That is not hypothetical. Over WiFi /auth/status answers in about 8 ms
+    // and wins this race, so the app renders; on the setup portal it is
+    // slower, loses, and the page sits on "Loading..." until reloaded.
+    if (s.value !== undefined) tick((n) => n + 1);
+    return unsub;
+  }, [s]);
   return s.value;
 }
 

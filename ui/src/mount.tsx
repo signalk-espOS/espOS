@@ -36,7 +36,11 @@ function Root() {
     // the gated ones have answered: a nav that grows, not a blank page.
     void resolveRoutes().then(setRoutes);
   }, [live]);
-  if (auth === undefined) return null;
+  // Only while the very first /auth/status is in flight, and only briefly:
+  // bootstrapAuth() below cannot hang for ever (its fetch is bounded), so
+  // this resolves. Returning null unbounded is how a device that could not
+  // answer that one request showed a permanently black page.
+  if (auth === undefined) return <p class="muted" style="padding:1rem">Loading…</p>;
   if (!live) return <LoginPage />;
   return <App key={session} routes={routes} />;
 }
