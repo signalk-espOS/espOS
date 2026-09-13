@@ -89,19 +89,58 @@ git add version.txt
 for manifest in components/*/idf_component.yml; do
     python3 - "$manifest" "$version" <<'PYEOF'
 import re, sys
+
 path, version = sys.argv[1], sys.argv[2]
 with open(path) as f:
-    text = f.read()
-# The component's own version: the first top-level version: line.
-text = re.sub(r'^version: *"[^"]*"', f'version: "{version}"', text, count=1, flags=re.M)
-# Every sibling dependency's range. Indented version: lines that follow a
-# signalk-espos/espos_* key -- third-party pins (espressif/...) are left alone.
-def bump(m):
-    return f'{m.group(1)}version: "^{version}"'
-text = re.sub(r'(signalk-espos/espos_[a-z_]+:\n(?:[ \t]+[^\n]*\n)*?[ \t]+)version: *"\^[^"]*"',
-              bump, text)
+    lines = f.readlines()
+
+# Line-based rather than one regex over the whole file. A regex that walks
+# from a dependency key to the next `version:` runs PAST a dependency that has
+# none -- an espOS component pinned only by override_path, say -- and rewrites
+# the next dependency's pin instead. That turns espressif/esp_hosted into
+# ^0.8.0, which is not a version of anything.
+own_done = False
+in_sibling = False          # inside a signalk-espos/espos_* block
+sibling_key = None
+sibling_indent = 0
+bumped_sibling = False
+out = []
+
+def indent_of(line):
+    return len(line) - len(line.lstrip(" \t"))
+
+for line in lines:
+    stripped = line.strip()
+    # The component's own version: the first top-level `version:`.
+    if not own_done and re.match(r'^version: *"', line):
+        out.append(re.sub(r'"[^"]*"', f'"{version}"', line, count=1))
+        own_done = True
+        continue
+    if in_sibling:
+        # The block ends at the first line indented no deeper than its key.
+        if stripped and indent_of(line) <= sibling_indent:
+            if not bumped_sibling:
+                sys.exit(f"{path}: {sibling_key} has no version: to bump")
+            in_sibling = False
+        elif re.match(r'^[ \t]+version: *"', line):
+            out.append(re.sub(r'"[^"]*"', f'"^{version}"', line, count=1))
+            bumped_sibling = True
+            continue
+    m = re.match(r'^([ \t]+)(signalk-espos/espos_[a-z_]+): *$', line)
+    if m:
+        if in_sibling and not bumped_sibling:
+            sys.exit(f"{path}: {sibling_key} has no version: to bump")
+        in_sibling, sibling_key = True, m.group(2)
+        sibling_indent, bumped_sibling = len(m.group(1)), False
+    out.append(line)
+
+if in_sibling and not bumped_sibling:
+    sys.exit(f"{path}: {sibling_key} has no version: to bump")
+if not own_done:
+    sys.exit(f"{path}: no top-level version: found")
+
 with open(path, "w") as f:
-    f.write(text)
+    f.writelines(out)
 PYEOF
     git add "$manifest"
 done
