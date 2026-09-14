@@ -90,10 +90,12 @@ typedef void (*espos_flow_cb_t)(void *arg);
 esp_err_t espos_flow_start(void);
 
 /**
- * Stop the loop and delete its task. Pending timers are cancelled and
- * anything still in the mailbox is dropped (counted in `dropped`). Mostly for
- * tests and for a device going into deep sleep; a normal firmware starts the
- * loop and leaves it running.
+ * Stop the loop and delete its task. Anything still in the mailbox is dropped
+ * (counted in `dropped`); timers stay armed, so a later espos_flow_start() or
+ * espos_flow_run_until_idle() fires whatever is due. To keep work that was
+ * already posted, post a marker and wait for it to run before stopping: the
+ * mailbox is first in, first out. Mostly for tests and for a device going
+ * into deep sleep; a normal firmware starts the loop and leaves it running.
  *
  * Must not be called from the flow task itself (ESP_ERR_INVALID_STATE): a
  * task cannot wait for its own exit.

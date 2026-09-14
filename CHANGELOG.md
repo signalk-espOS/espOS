@@ -101,7 +101,7 @@ Entries name the component the way commit scopes do (`wifi`, `sk`, `ble`,
 - eth: `espos_eth`, wired Ethernet as an `espos_net` transport -- the internal
   EMAC and an RMII PHY with DHCP, started by `espos_start()` beside the WiFi
   station. `espos_net` already preferred Ethernet over WiFi, so the route moves
-  to the cable whenever it has a link. The ESP32-P4 EMAC defaults are the
+  to the cable once it has an address. The ESP32-P4 EMAC defaults are the
   Waveshare ESP32-P4-WIFI6-POE-ETH wiring; the PHY address and reset GPIO are
   Kconfig (defaults 1 and 51 on the P4). The PHY uses IDF's generic 802.3
   driver, because IDF 6 moved the named ones to the registry. A PHY that does
@@ -415,6 +415,17 @@ Entries name the component the way commit scopes do (`wifi`, `sk`, `ble`,
   CMakeLists already required. `docs/releasing.md` gains "Registry publishing".
 
 ### Fixed
+
+- sk: `espos_sk_flush()` could return `ESP_OK` while the last message was
+  still being written. The stream task takes a message off the queue and then
+  spends up to the send timeout writing it, and for that time the message was
+  counted neither as pending nor as buffered; a send that then failed requeued
+  it after the caller had been told the stream was drained. A device that
+  deep-slept on that answer lost its last reading. The message being written
+  now counts as `pending` in the stream status, so the flush waits for it.
+- flow: `espos_flow_stop()`'s documentation said pending timers are cancelled.
+  They are not, and `espos_flow_run_until_idle()` after a stop relies on that;
+  the header now says timers stay armed and how to keep posted work.
 
 - sk: with `sk.scheme` `auto` and a manually configured server, a scheme probe
   that reached nothing was remembered as plain http for that address. A device
