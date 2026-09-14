@@ -5,7 +5,6 @@
   "bump-minor-pre-major": true,
   "changelog-path": "CHANGELOG.md",
   "pull-request-title-pattern": "chore: release ${version}",
-  "last-release-sha": "aa32713661271b1c401f71ddc2fdb6a1c811a5c2",
   "changelog-sections": [
     { "type": "feat", "section": "Added" },
     { "type": "fix", "section": "Fixed" },
