@@ -137,9 +137,10 @@ key kept outside the project ([ota.md](ota.md), "Signing key").
 A project that installs espOS's components from the registry and writes its
 own `CMakeLists.txt` bypasses the prologue. `espos_core`'s
 `project_include.cmake` then checks the sdkconfig values whose absence shows
-only in the field — the event and timer task stacks, and on the ESP32-P4 the
-L2 cache line with the hosted mempool in PSRAM and the block-ack window with
-PSRAM — and fails the configure with the exact line to add.
+only in the field — the event and timer task stacks, and on the ESP32-P4
+PSRAM itself, the L2 cache line with the hosted mempool in PSRAM and the
+block-ack window with PSRAM — and fails the configure with the exact line to
+add.
 
 ## Multi-target
 
