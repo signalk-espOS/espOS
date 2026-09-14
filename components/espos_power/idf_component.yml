@@ -1,0 +1,51 @@
+# SPDX-FileCopyrightText: 2026 Dirk Wahrheit
+# SPDX-License-Identifier: Apache-2.0
+## espos_power component manifest: registry metadata for signalk-espos/espos_power.
+## The version is espOS's (version.txt) and moves with it, see docs/releasing.md.
+version: "0.7.0"
+description: "Deep-sleep duty cycle for battery devices: wake, publish, flush, sleep — without losing the way back in"
+url: "https://github.com/signalk-espOS/espOS/tree/main/components/espos_power"
+repository: "https://github.com/signalk-espOS/espOS.git"
+documentation: "https://github.com/signalk-espOS/espOS/blob/main/docs/power.md"
+issues: "https://github.com/signalk-espOS/espOS/issues"
+license: "Apache-2.0"
+maintainers:
+  - "Dirk Wahrheit <dirkwahrheit@gmail.com>"
+tags:
+  - signalk
+  - marine
+  - esp-idf
+  - espos
+  - deep-sleep
+  - battery
+  - low-power
+files:
+  exclude:
+    - "build/**/*"
+    - "build-*/**/*"
+    - "sdkconfig*"
+    - "managed_components/**/*"
+    - "dependencies.lock"
+    - "examples/*/build/**/*"
+    - "examples/*/build-*/**/*"
+    - "examples/*/managed_components/**/*"
+    - "examples/*/dependencies.lock"
+    - "examples/*/sdkconfig*"
+    - "examples/*/*.pem"
+dependencies:
+  idf: ">=6.0.0,<6.1.0"
+  espressif/cjson: "==1.7.19~2"
+  # Sibling espOS components. override_path makes an in-tree build (and a
+  # firmware that vendors espOS as a submodule) use the checkout next to this
+  # file; a registry copy has no such directory. espos_sk is optional and
+  # deliberately absent: with it in the build the cycle waits for the stream
+  # and flushes it before sleeping.
+  signalk-espos/espos_config:
+    version: "^0.7.0"
+    override_path: "../espos_config"
+  signalk-espos/espos_httpd:
+    version: "^0.7.0"
+    override_path: "../espos_httpd"
+  signalk-espos/espos_net:
+    version: "^0.7.0"
+    override_path: "../espos_net"

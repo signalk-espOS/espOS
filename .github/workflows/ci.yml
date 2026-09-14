@@ -300,6 +300,8 @@ jobs:
           - { example: components/espos_ble/examples/ble_gateway, target: esp32p4 }
           - { example: components/espos_n2k/examples/n2k_candump, target: esp32p4 }
           - { example: components/espos_eth/examples/ethernet, target: esp32p4 }
+          - { example: components/espos_power/examples/duty_cycle, target: esp32c6 }
+          - { example: components/espos_power/examples/duty_cycle, target: esp32p4 }
     steps:
       - uses: actions/checkout@v7
         with:

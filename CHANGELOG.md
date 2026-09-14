@@ -98,6 +98,19 @@ Entries name the component the way commit scopes do (`wifi`, `sk`, `ble`,
   wrong (a transceiver and termination are not optional, and both fail looking
   exactly like a software fault) and how `GET /api/v1/n2k` tells a quiet bus
   from a misconfigured one.
+- power: `espos_power`, a deep-sleep duty cycle for devices on a battery —
+  wake, publish, flush the SignalK stream, sleep for `power.interval_s`, again.
+  Off by default (`power.mode`), started by `espos_start()` when built, status
+  at `GET /api/v1/power`, and `espos_power_hold()`/`_release()` for an
+  application that needs a wake to last. The decision is pure C and host-tested,
+  and its rules are about staying reachable: **no sleep while an update is
+  unconfirmed** (every wake is a boot, and the bootloader aborts an image still
+  pending verification, so sleeping first would roll every update back), an
+  **awake window** after any boot that is not the cycle's own wake (power-on,
+  update, crash) so the web UI and OTA can be reached, and a **deadline** on
+  every wake so a missing network does not drain the battery. Example
+  `duty_cycle` for the ESP32-C6 and the ESP32-P4 PoE board.
+
 - eth: `espos_eth`, wired Ethernet as an `espos_net` transport -- the internal
   EMAC and an RMII PHY with DHCP, started by `espos_start()` beside the WiFi
   station. `espos_net` already preferred Ethernet over WiFi, so the route moves

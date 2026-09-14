@@ -67,6 +67,14 @@
 #else
 #define START_PROV 0
 #endif
+/* The deep-sleep duty cycle. Off until power.mode says cycle; linking it only
+ * starts the task that watches for that. */
+#if ESPOS_HAVE_POWER
+#define START_POWER 1
+#include "espos_power.h"
+#else
+#define START_POWER 0
+#endif
 
 static const char *TAG = "espos";
 
@@ -309,6 +317,15 @@ esp_err_t espos_start_network(void)
         if (prov_err != ESP_OK) {
             ESP_LOGW(TAG, "BLE provisioning unavailable: %s", esp_err_to_name(prov_err));
         }
+    }
+#endif
+#if START_POWER
+    /* Last: it waits for everything above. Not fatal either -- a device that
+     * cannot run its duty cycle is still a device, and one that stays awake is
+     * better than one that reboot-loops. */
+    esp_err_t power_err = espos_power_start();
+    if (power_err != ESP_OK) {
+        ESP_LOGW(TAG, "duty cycle unavailable: %s", esp_err_to_name(power_err));
     }
 #endif
     s.network_started = true;
