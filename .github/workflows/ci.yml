@@ -333,6 +333,31 @@ jobs:
           target: esp32h2
           command: scripts/build_example.sh components/espos_core/examples/minimal esp32h2
 
+  # espos_ble with the WiFi station off (CONFIG_ESPOS_WIFI=n) is a PoE-powered
+  # BLE gateway, and espos_core compiles different code for it that no example
+  # builds -- it failed to compile once, on a guard that tested for the WiFi
+  # component rather than for the station starting. sdkconfig.local is the
+  # prologue's own overlay slot, so espOS's and the example's defaults still
+  # apply underneath it.
+  ble-without-wifi:
+    name: ble_gateway on esp32p4 with WiFi off
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: read pinned IDF version
+        id: idf
+        run: echo "version=$(cat .idf-version)" >> "$GITHUB_OUTPUT"
+      - name: turn the WiFi station off
+        run: echo "CONFIG_ESPOS_WIFI=n" > components/espos_ble/examples/ble_gateway/sdkconfig.local
+      - uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: ${{ steps.idf.outputs.version }}
+          target: esp32p4
+          command: scripts/build_example.sh components/espos_ble/examples/ble_gateway esp32p4
+
   host-tests:
     name: host tests (linux target)
     runs-on: ubuntu-latest
