@@ -232,5 +232,5 @@ direct_dependencies:
 - signalk-espos/espos_sk_flow
 - signalk-espos/espos_wifi
 manifest_hash: f31f4f0a2b6199a86ece6a74efb396deffe0f4ebec063f4dad01d2a5a01f5e24
-target: esp32c3
+target: esp32c6
 version: 3.0.0
