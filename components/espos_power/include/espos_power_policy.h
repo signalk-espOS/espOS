@@ -48,7 +48,8 @@ typedef enum {
     ESPOS_POWER_WHY_HOLD = 6,        /* STAY: the application holds the device awake */
     ESPOS_POWER_WHY_DONE = 7,        /* SLEEP: everything this wake was for is done */
     ESPOS_POWER_WHY_DEADLINE = 8,    /* SLEEP: the wake ran out of time */
-    ESPOS_POWER_WHY_MAX = 9,
+    ESPOS_POWER_WHY_OTA = 9,         /* STAY: an update is being checked, downloaded or installed */
+    ESPOS_POWER_WHY_MAX = 10,
 } espos_power_why_t;
 
 typedef struct {
@@ -61,6 +62,7 @@ typedef struct {
     bool enabled;           /* power.mode is cycle */
     bool timer_wake;        /* this boot is the cycle's own wake from deep sleep */
     bool image_unconfirmed; /* the running OTA image is still pending verification */
+    bool ota_busy;          /* an update is being checked, downloaded or installed */
     bool net_up;
     uint32_t net_up_for_ms; /* how long the network has been up; ignored when it is not */
     bool have_stream;       /* SignalK is built and streaming is enabled: wait for it */

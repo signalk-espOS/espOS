@@ -23,6 +23,7 @@ in this order, each winning over every later one:
 |---|---|
 | `power.mode` off → stay awake | the default: a freshly flashed device must learn its network and server first |
 | running image unconfirmed → stay awake | every wake from deep sleep is a boot, and the bootloader marks an image still pending verification as aborted. Sleeping before an update confirmed itself would roll it back at the next wake. espOS confirms an image once the network is up, and rolls it back itself after `ota.confirm_tmo_s` if it never gets there |
+| an update being checked, downloaded or installed → stay awake | a wake lasts seconds, and an update longer than that would be cut off on every wake and never finish. `espos_ota`'s own timeouts end a download that hangs. Needs `espos_ota` in the build |
 | a boot that is not the cycle's timer wake, inside `power.window_s` → stay awake | after a power-on, an update or a crash the web UI and OTA are reachable. **Cutting the power always reopens this window** — it is the way back in |
 | past the wake's deadline → sleep | a network that never comes up must not drain the battery. The deadline is `power.awake_max_s` after a timer wake, and `window_s + awake_max_s` after any other boot |
 | network down → stay awake | |
@@ -74,14 +75,16 @@ A power-on starts the counter at 0.
  "last_awake_ms": 4210, "interval_s": 300, "uptime_ms": 2600, "deadline_ms": 30000, "holds": 0}
 ```
 
-`why` is one of `off unconfirmed window network stream publishing hold done
-deadline`.
+`why` is one of `off unconfirmed ota window network stream publishing hold
+done deadline`.
 
 ## Not here yet
 
-- **OTA for a sleeping fleet.** The manifest check waits 20 s after boot and
-  keeps its schedule in RAM, so a short wake never checks. Update a sleeper in
-  its awake window after a power cycle, for now.
+- **OTA for a sleeping fleet.** An update that has started holds the device
+  awake until it is done, but nothing starts one on a short wake: the manifest
+  check waits 20 s after boot and keeps its schedule in RAM. For now, push an
+  update (`POST /api/v1/ota`) while the device is awake, or in its awake window
+  after a power cycle.
 - **WiFi fast connect.** A wake scans every channel; connecting straight to the
   cached access point and channel is the obvious next step.
 - **Light sleep** between readings for a device that must stay connected.

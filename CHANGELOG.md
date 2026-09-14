@@ -108,7 +108,9 @@ Entries name the component the way commit scopes do (`wifi`, `sk`, `ble`,
   pending verification, so sleeping first would roll every update back), an
   **awake window** after any boot that is not the cycle's own wake (power-on,
   update, crash) so the web UI and OTA can be reached, and a **deadline** on
-  every wake so a missing network does not drain the battery. Example
+  every wake so a missing network does not drain the battery. An update being
+  checked, downloaded or installed holds the device awake past that deadline
+  (`espos_ota_busy()`), or an update longer than a wake would never finish. Example
   `duty_cycle` for the ESP32-C6 and the ESP32-P4 PoE board.
 
 - eth: `espos_eth`, wired Ethernet as an `espos_net` transport -- the internal

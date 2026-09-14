@@ -35,6 +35,9 @@
 #if ESPOS_POWER_HAVE_SK
 #include "espos_sk.h"
 #endif
+#if ESPOS_POWER_HAVE_OTA
+#include "espos_ota.h"
+#endif
 
 static const char *TAG = "espos_power";
 
@@ -168,6 +171,9 @@ static void power_task(void *arg)
             .enabled = s.enabled && !s.sim_slept,
             .timer_wake = s.timer_wake,
             .image_unconfirmed = s.unconfirmed,
+#if ESPOS_POWER_HAVE_OTA
+            .ota_busy = espos_ota_busy(),
+#endif
             .net_up = up,
             .net_up_for_ms = up ? now - s.net_up_since_ms : 0,
             .have_stream = have_stream,

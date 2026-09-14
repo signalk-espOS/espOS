@@ -26,10 +26,15 @@ idf_component_register(
 
 # With SignalK in the build the cycle waits for the stream and flushes it
 # before sleeping; without it, the network being up is what a wake waits for.
-idf_component_optional_requires(PRIVATE espos_sk)
+idf_component_optional_requires(PRIVATE espos_sk espos_ota)
 idf_build_get_property(comps BUILD_COMPONENTS)
 if(espos_sk IN_LIST comps)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE ESPOS_POWER_HAVE_SK=1)
+endif()
+# With espos_ota in the build, an update in progress keeps the device awake:
+# a wake lasts seconds, and a download cut off by every sleep never finishes.
+if(espos_ota IN_LIST comps)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE ESPOS_POWER_HAVE_OTA=1)
 endif()
 
 espos_config_add_descriptor(config/power.json)

@@ -37,9 +37,10 @@ dependencies:
   espressif/cjson: "==1.7.19~2"
   # Sibling espOS components. override_path makes an in-tree build (and a
   # firmware that vendors espOS as a submodule) use the checkout next to this
-  # file; a registry copy has no such directory. espos_sk is optional and
-  # deliberately absent: with it in the build the cycle waits for the stream
-  # and flushes it before sleeping.
+  # file; a registry copy has no such directory. espos_sk and espos_ota are
+  # optional and deliberately absent: with espos_sk in the build the cycle
+  # waits for the stream and flushes it before sleeping, with espos_ota it
+  # stays awake while an update is under way.
   signalk-espos/espos_config:
     version: "^0.7.0"
     override_path: "../espos_config"

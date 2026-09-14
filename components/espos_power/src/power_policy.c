@@ -40,6 +40,12 @@ espos_power_decision_t espos_power_policy_decide(const espos_power_policy_cfg_t 
     if (in->image_unconfirmed) {
         return decided(why, ESPOS_POWER_WHY_UNCONFIRMED);
     }
+    /* Also before the deadline: a wake lasts seconds, and an update longer
+     * than one would otherwise be cut off on every wake and never finish.
+     * espos_ota's own timeouts end a download that hangs. */
+    if (in->ota_busy) {
+        return decided(why, ESPOS_POWER_WHY_OTA);
+    }
     if (!in->timer_wake && in->uptime_ms < cfg->window_ms) {
         return decided(why, ESPOS_POWER_WHY_WINDOW);
     }
@@ -74,6 +80,7 @@ const char *espos_power_why_str(espos_power_why_t why)
         [ESPOS_POWER_WHY_HOLD] = "hold",
         [ESPOS_POWER_WHY_DONE] = "done",
         [ESPOS_POWER_WHY_DEADLINE] = "deadline",
+        [ESPOS_POWER_WHY_OTA] = "ota",
     };
     return (why >= 0 && why < ESPOS_POWER_WHY_MAX) ? names[why] : "?";
 }

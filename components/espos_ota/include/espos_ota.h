@@ -53,6 +53,15 @@ esp_err_t espos_ota_confirm(void);
 /** Mark the running image invalid and reboot into the other slot. */
 esp_err_t espos_ota_rollback(void);
 
+/**
+ * True while an update is under way: a manifest check, a download, the
+ * verification or the reboot after it -- or a request queued for the OTA task
+ * that it has not taken yet, because POST /api/v1/ota answers before the task
+ * does. For code that must not sleep or cut the power in the middle of one
+ * (espos_power). False before espos_ota_start(). Safe from any task.
+ */
+bool espos_ota_busy(void);
+
 /** Status document of docs/rest-api.md (malloc'ed). */
 char *espos_ota_status_json(void);
 

@@ -204,6 +204,31 @@ TEST_CASE("an application hold keeps the device awake, but not past the deadline
     TEST_ASSERT_EQUAL(ESPOS_POWER_WHY_DEADLINE, why);
 }
 
+TEST_CASE("an update in progress keeps the device awake, even past the deadline", "[power]")
+{
+    /* A wake lasts seconds; an update that takes longer would otherwise be
+     * cut off on every wake and never finish. */
+    espos_power_policy_in_t in = ready_wake();
+    in.ota_busy = true;
+    espos_power_why_t why = ESPOS_POWER_WHY_MAX;
+    TEST_ASSERT_EQUAL(ESPOS_POWER_STAY, decide(&in, &why));
+    TEST_ASSERT_EQUAL(ESPOS_POWER_WHY_OTA, why);
+
+    in.uptime_ms = 10 * CFG.awake_max_ms;
+    TEST_ASSERT_EQUAL(ESPOS_POWER_STAY, decide(&in, &why));
+    TEST_ASSERT_EQUAL(ESPOS_POWER_WHY_OTA, why);
+
+    /* An unconfirmed image still answers first: it is the older question. */
+    in.image_unconfirmed = true;
+    TEST_ASSERT_EQUAL(ESPOS_POWER_STAY, decide(&in, &why));
+    TEST_ASSERT_EQUAL(ESPOS_POWER_WHY_UNCONFIRMED, why);
+
+    /* The update finishing hands the decision back. */
+    in = ready_wake();
+    TEST_ASSERT_EQUAL(ESPOS_POWER_SLEEP, decide(&in, &why));
+    TEST_ASSERT_EQUAL(ESPOS_POWER_WHY_DONE, why);
+}
+
 TEST_CASE("the deadline is awake_max for a timer wake and window + awake_max otherwise", "[power]")
 {
     TEST_ASSERT_EQUAL_UINT32(CFG.awake_max_ms, espos_power_policy_deadline_ms(&CFG, true));
