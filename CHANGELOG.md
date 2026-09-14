@@ -439,7 +439,6 @@ Entries name the component the way commit scopes do (`wifi`, `sk`, `ble`,
   mempool setting also depends on PSRAM and was being dropped silently.
   `espos_core`'s configure lint now refuses a P4 build without PSRAM.
   **Consumers** that set `CONFIG_SPIRAM=y` themselves can drop the line.
->>>>>>> b675539 (fix(p4): enable PSRAM in the ESP32-P4 defaults)
 
 - sk: `espos_sk_flush()` could return `ESP_OK` while the last message was
   still being written. The stream task takes a message off the queue and then
