@@ -13,7 +13,7 @@
  * WiFi is off in this example's sdkconfig.defaults, and that is what makes it
  * an Ethernet device rather than a WiFi device that happens to have a port.
  * With WiFi on, both transports run and the cable still carries the route
- * whenever it has a link.
+ * whenever it has an address.
  */
 #include "esp_log.h"
 #include "espos.h"

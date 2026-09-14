@@ -7,7 +7,8 @@
  * The chip's internal EMAC and an RMII PHY, with DHCP. Nothing above the
  * network seam knows it exists: the transport registers its netif and reports
  * its link into espos_net, and espos_net decides the default route. When the
- * WiFi station is up too, Ethernet carries the route -- the preference is
+ * WiFi station is up too, Ethernet carries the route as soon as the cable has
+ * an address -- the preference is
  * static (Ethernet over WiFi over Thread, docs/net.md), because a wired link is
  * the one somebody ran a cable for.
  *

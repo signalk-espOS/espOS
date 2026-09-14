@@ -17,6 +17,7 @@
  */
 #include "sdkconfig.h"
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdio.h>
 
@@ -37,10 +38,10 @@ static const char *TAG = "espos_eth";
 
 static struct {
     bool installed; /* driver, netif and event handlers exist */
-    bool started;   /* esp_eth_start() succeeded and no stop() since */
-    /* Written on the default event loop's task, read from any task by
-     * espos_eth_link_up(); a single bool, so volatile is enough. */
-    volatile bool link;
+    /* Both read from any task by espos_eth_link_up(); link is written on the
+     * default event loop's task, started by whoever calls start/stop. */
+    atomic_bool started; /* esp_eth_start() succeeded and no stop() since */
+    atomic_bool link;
     esp_eth_handle_t eth;
     esp_eth_mac_t *mac;
     esp_eth_phy_t *phy;
@@ -57,14 +58,20 @@ static void on_eth_event(void *arg, esp_event_base_t base, int32_t id, void *dat
 {
     (void)arg;
     (void)base;
-    (void)data;
+    /* ETH_EVENT is shared by every Ethernet driver in the process; an app that
+     * installs its own (a W5500 beside the EMAC, say) must not move this
+     * transport's link. The payload is the posting driver's handle. */
+    const esp_eth_handle_t *eth = data;
+    if (!eth || *eth != s.eth) {
+        return;
+    }
     switch (id) {
     case ETHERNET_EVENT_CONNECTED:
-        s.link = true;
+        atomic_store(&s.link, true);
         ESP_LOGI(TAG, "link up; waiting for an address");
         break;
     case ETHERNET_EVENT_DISCONNECTED:
-        s.link = false;
+        atomic_store(&s.link, false);
         /* Reported on the link as well as on LOST_IP, so the route leaves an
          * unplugged cable at once rather than whenever the address is
          * declared lost. espos_net treats the repeat as the no-op it is. */
@@ -80,8 +87,13 @@ static void on_ip_event(void *arg, esp_event_base_t base, int32_t id, void *data
 {
     (void)arg;
     (void)base;
+    /* The same for IP_EVENT_ETH_*: any Ethernet netif raises them, and both
+     * carry an ip_event_got_ip_t naming it. */
+    const ip_event_got_ip_t *e = data;
+    if (!e || e->esp_netif != s.netif) {
+        return;
+    }
     if (id == IP_EVENT_ETH_GOT_IP) {
-        const ip_event_got_ip_t *e = data;
         char ip[ESPOS_NET_IP_MAX];
         char netmask[ESPOS_NET_IP_MAX];
         char gateway[ESPOS_NET_IP_MAX];
@@ -189,10 +201,6 @@ static esp_err_t install(void)
         return ESP_FAIL;
     }
 
-    /* Before the driver starts: espos_net sets the hostname on the netif now,
-     * and the first DHCP request has to carry it. */
-    (void)espos_net_register_if(ESPOS_NET_IF_ETH, s.netif);
-
     err = esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, on_eth_event, NULL);
     if (err == ESP_OK) {
         err = esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, on_ip_event, NULL);
@@ -205,13 +213,24 @@ static esp_err_t install(void)
         uninstall_partial();
         return err;
     }
+
+    /* Last, so a failure above never leaves espos_net holding a netif that
+     * uninstall_partial() destroyed. Still before the driver starts: espos_net
+     * sets the hostname on the netif now, and the first DHCP request has to
+     * carry it. */
+    err = espos_net_register_if(ESPOS_NET_IF_ETH, s.netif);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "espos_net_register_if: %s", esp_err_to_name(err));
+        uninstall_partial();
+        return err;
+    }
     s.installed = true;
     return ESP_OK;
 }
 
 esp_err_t espos_eth_start(void)
 {
-    if (s.started) {
+    if (atomic_load(&s.started)) {
         return ESP_OK;
     }
     /* The hostname the DHCP request carries is espos_net's, so the order is
@@ -232,7 +251,7 @@ esp_err_t espos_eth_start(void)
         ESP_LOGE(TAG, "esp_eth_start: %s", esp_err_to_name(err));
         return err;
     }
-    s.started = true;
+    atomic_store(&s.started, true);
     /* Not "connected": a cable may not be plugged in, and that is not an
      * error. The link and the address are logged when they arrive. */
     ESP_LOGI(TAG, "started (PHY address %d, reset GPIO %d); waiting for a link", CONFIG_ESPOS_ETH_PHY_ADDR,
@@ -242,7 +261,7 @@ esp_err_t espos_eth_start(void)
 
 esp_err_t espos_eth_stop(void)
 {
-    if (!s.started) {
+    if (!atomic_load(&s.started)) {
         return ESP_OK;
     }
     esp_err_t err = esp_eth_stop(s.eth);
@@ -250,8 +269,8 @@ esp_err_t espos_eth_stop(void)
         ESP_LOGE(TAG, "esp_eth_stop: %s", esp_err_to_name(err));
         return err;
     }
-    s.started = false;
-    s.link = false;
+    atomic_store(&s.started, false);
+    atomic_store(&s.link, false);
     report_down();
     ESP_LOGI(TAG, "stopped");
     return ESP_OK;
@@ -259,7 +278,7 @@ esp_err_t espos_eth_stop(void)
 
 bool espos_eth_link_up(void)
 {
-    return s.started && s.link;
+    return atomic_load(&s.started) && atomic_load(&s.link);
 }
 
 #else /* no internal EMAC on this chip, or CONFIG_ETH_USE_ESP32_EMAC is off */

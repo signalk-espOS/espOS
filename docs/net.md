@@ -161,7 +161,10 @@ The second transport, and the checklist above applied: the chip's internal
 EMAC and an RMII PHY with DHCP, the netif registered as `ESPOS_NET_IF_ETH`,
 `IP_EVENT_ETH_GOT_IP` reported up and link loss or `IP_EVENT_ETH_LOST_IP`
 reported down. It starts beside the WiFi station, not instead of it, and the
-static preference above puts the route on the cable whenever it has a link.
+static preference above puts the route on the cable whenever it has an
+address. Only Ethernet events from its own driver and netif count, so an app
+that installs a second Ethernet driver of its own does not move this one's
+route.
 
 There is little to configure. The EMAC's pins are IDF's
 `ETH_ESP32_EMAC_DEFAULT_CONFIG`, which on the ESP32-P4 is exactly the Waveshare
