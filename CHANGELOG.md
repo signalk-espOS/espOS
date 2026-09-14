@@ -416,6 +416,18 @@ Entries name the component the way commit scopes do (`wifi`, `sk`, `ble`,
 
 ### Fixed
 
+- build: the prologue's `SIGNING_KEY <path>` never reached IDF. It generated
+  and fingerprinted the key at that path, but IDF signs with
+  `CONFIG_SECURE_BOOT_SIGNING_KEY`, which stayed at `secure_boot_signing_key.pem`
+  in the project. With no key there the build failed; with one there it signed
+  with that key while re-sign tracking followed the other, so an image could
+  install over USB and then be refused by every OTA. The path now reaches IDF
+  through a generated defaults fragment; a named key that is missing is an
+  error instead of a freshly generated development key; and an existing
+  `sdkconfig` that names a different key stops the configure, because defaults
+  do not reach it. No espOS consumer passed `SIGNING_KEY`, so no device got a
+  wrongly signed image from this.
+
 - sk: `espos_sk_flush()` could return `ESP_OK` while the last message was
   still being written. The stream task takes a message off the queue and then
   spends up to the send timeout writing it, and for that time the message was

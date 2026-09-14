@@ -49,6 +49,14 @@ espsecure generate_signing_key --version 2 --scheme rsa3072 secure_boot_signing_
 # keep it outside the repo (password manager, CI secret) and copy it in for release builds
 ```
 
+Or leave it where it is and name it: `espos_project_prologue(... SIGNING_KEY
+/path/to/key.pem)`. The prologue then hands that path to IDF's signing step
+(`CONFIG_SECURE_BOOT_SIGNING_KEY`, through a generated defaults fragment) and
+never generates a key there — a named key that is missing stops the build.
+Because defaults only reach a fresh `sdkconfig`, an existing one that names a
+different key also stops the configure with an explanation: it would
+otherwise keep signing with the old key.
+
 Every device that should take your updates must have been flashed at least
 once (USB) with a build carrying that key's public part. Rotating the key
 means one signed update built with the *old* key that already contains the

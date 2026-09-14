@@ -131,7 +131,8 @@ espos_project_ui_partition()
 `espos_project_ui_partition()` (after `project()`) packs the committed
 `espos/ui/dist-gz` into the LittleFS `storage` partition; `PARTITION` and
 `DIR` change that, and a custom `DIR` that is missing is a warning, not an
-error. Further prologue options: `IDF_VERSION_FILE`, `SIGNING_KEY`.
+error. Further prologue options: `IDF_VERSION_FILE`, and `SIGNING_KEY` for a
+key kept outside the project ([ota.md](ota.md), "Signing key").
 
 A project that installs espOS's components from the registry and writes its
 own `CMakeLists.txt` bypasses the prologue. `espos_core`'s
