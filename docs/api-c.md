@@ -63,6 +63,8 @@ table before calling anything from inside a callback.
 | [`espos_ble.h`](api-c/espos__ble_8h.md) | `espos_ble` | the BLE gateway: start, status |
 | [`espos_prov.h`](api-c/espos__prov_8h.md) | `espos_prov` | BLE provisioning: WiFi credentials over GATT, written to config |
 | [`espos_eth.h`](api-c/espos__eth_8h.md) | `espos_eth` | wired Ethernet as an espos_net transport: start, stop, link |
+| [`espos_power.h`](api-c/espos__power_8h.md) | `espos_power` | the deep-sleep duty cycle: start, holds, sleep now, status |
+| [`espos_power_policy.h`](api-c/espos__power__policy_8h.md) | `espos_power` | when a duty-cycling device may sleep (pure C) |
 | [`espos_flow.h`](api-c/espos__flow_8h.md) | `espos_flow` | the loop task, timers and mailbox, callable from plain C |
 | [`espos_sched.h`](api-c/espos__sched_8h.md) | `espos_sched` | the wrap-safe timer wheel over an injected clock (pure C) |
 | [`espos_adc.h`](api-c/espos__adc_8h.md) | `espos_sensors` | calibrated one-shot ADC reads, in volts |

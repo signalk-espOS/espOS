@@ -512,6 +512,20 @@ esp_err_t espos_ota_rollback(void)
     return send_cmd(CMD_ROLLBACK, NULL);
 }
 
+bool espos_ota_busy(void)
+{
+    if (!s.lock) {
+        return false;
+    }
+    lock();
+    bool busy = s.state == ESPOS_OTA_CHECKING || s.state == ESPOS_OTA_DOWNLOADING || s.state == ESPOS_OTA_VERIFYING ||
+                s.state == ESPOS_OTA_READY;
+    unlock();
+    /* The task polls its queue once a second, and POST /ota has answered 202
+     * by then: a request still waiting in the queue is an update too. */
+    return busy || (s.q && uxQueueMessagesWaiting(s.q) > 0);
+}
+
 static void json_str(char *dst, size_t n, const char *src)
 {
     size_t o = 0;

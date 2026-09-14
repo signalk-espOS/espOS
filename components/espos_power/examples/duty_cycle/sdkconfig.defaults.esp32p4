@@ -1,0 +1,8 @@
+# SPDX-FileCopyrightText: 2026 Dirk Wahrheit
+# SPDX-License-Identifier: Apache-2.0
+#
+# On the ESP32-P4 this example is the Waveshare PoE board on its cable: WiFi
+# off, so the WiFi/BLE co-processor is not brought up on every wake, and the
+# network is espos_eth. On a chip with a native radio (ESP32-C6) the example
+# uses WiFi and this file does not apply.
+CONFIG_ESPOS_WIFI=n

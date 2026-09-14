@@ -2469,6 +2469,73 @@ class SkPlaintextUnauthTests(unittest.TestCase):
         self.assertTrue(js["token"]["has_token"])
 
 
+class PowerTests(unittest.TestCase):
+    """espos_power's task on the host: the configuration, the status endpoint
+    and a full wake up to its deadline. The host never sleeps, so the last step
+    is a refused sleep that the status keeps reporting."""
+
+    @classmethod
+    def setUpClass(cls):
+        # No WiFi credentials: the network never comes up, so a wake can only
+        # end at its deadline.
+        cls.h = Harness(fresh=True, extra_env={"ESPOS_SIM_SK_SERVERS": ""})
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.h.stop()
+
+    def test_01_off_by_default(self):
+        st, _, _, js = req("GET", "/api/v1/power")
+        self.assertEqual(st, 200, js)
+        self.assertEqual(js["mode"], "off")
+        self.assertEqual(js["decision"], "stay")
+        self.assertEqual(js["why"], "off")
+        self.assertFalse(js["timer_wake"])      # the host is never a wake from sleep
+        self.assertEqual(js["wake_count"], 0)
+        self.assertEqual(js["interval_s"], 300)
+
+    def test_02_mode_is_an_enum_and_the_limits_hold(self):
+        st, _, _, schema = req("GET", "/api/v1/config/schema")
+        power = schema["properties"]["power"]["properties"]
+        self.assertEqual(power["mode"]["enum"], ["off", "cycle"])
+        self.assertEqual(power["mode"]["default"], "off")
+        st, _, _, js = req("PUT", "/api/v1/config", {"power": {"mode": "always"}})
+        self.assertEqual(st, 400, js)
+        st, _, _, js = req("PUT", "/api/v1/config", {"power": {"window_s": 5}})
+        self.assertEqual(st, 400, js)            # below the 30 s floor: the way back in cannot be shut
+        st, _, _, js = req("GET", "/api/v1/power")
+        self.assertEqual(js["mode"], "off")      # nothing changed
+
+    def test_03_a_wake_without_a_network_sleeps_at_its_deadline(self):
+        st, _, _, js = req("PUT", "/api/v1/config",
+                           {"power": {"mode": "cycle", "window_s": 30, "awake_max_s": 5, "publish_ms": 0}})
+        self.assertEqual(st, 200, js)
+        # Followed live: the window applies, measured from this boot.
+        js = wait_for(lambda: (lambda d: d if d["mode"] == "cycle" else None)(req("GET", "/api/v1/power")[3]),
+                      timeout=5)
+        self.assertIsNotNone(js)
+        self.assertEqual(js["deadline_ms"], 35000)
+        if js["uptime_ms"] < 30000:
+            self.assertEqual(js["why"], "window", js)
+            self.assertEqual(js["decision"], "stay")
+        # Past window + awake_max with no network: sleep. The host refuses, and
+        # the status keeps saying what was decided rather than re-deciding.
+        js = wait_for(lambda: (lambda d: d if d["decision"] == "sleep" else None)(req("GET", "/api/v1/power")[3]),
+                      timeout=45)
+        self.assertIsNotNone(js, req("GET", "/api/v1/power")[3])
+        self.assertEqual(js["why"], "deadline", js)
+        self.assertGreaterEqual(js["uptime_ms"], 35000)
+        time.sleep(1)
+        again = req("GET", "/api/v1/power")[3]
+        self.assertEqual((again["decision"], again["why"]), ("sleep", "deadline"), again)
+        # A configuration change is a new question.
+        req("PUT", "/api/v1/config", {"power": {"mode": "off"}})
+        js = wait_for(lambda: (lambda d: d if d["why"] == "off" else None)(req("GET", "/api/v1/power")[3]),
+                      timeout=5)
+        self.assertIsNotNone(js, req("GET", "/api/v1/power")[3])
+        self.assertEqual(js["decision"], "stay")
+
+
 if __name__ == "__main__":
     if not os.path.exists(ELF):
         print(f"missing {ELF}; build first (idf.py --preview set-target linux && idf.py build)")
