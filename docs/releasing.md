@@ -191,6 +191,12 @@ the Actions tab (`publish` → *Run workflow*, `dry_run` on) or with
 all: the action skips authentication entirely for it. A published version that turns out wrong
 is yanked with a message, never deleted, and fixed by the next patch release.
 
+Each component also gets a `README.md` -- the registry shows it as the
+component's page -- and the publish workflow copies the root `LICENSE` and
+`NOTICE` into every component directory just before uploading, because each
+archive is a redistribution and Apache-2.0 asks for both. They are copied on
+the runner rather than committed 23 times over.
+
 What the registry ships is the packed archive: the component directory
 minus `build/`, `sdkconfig*`, `managed_components/`, `dependencies.lock`
 and the manager's own defaults (`.git`, `__pycache__`, ...). Anything a
