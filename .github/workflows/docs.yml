@@ -42,7 +42,7 @@ jobs:
       - run: mkdocs build --strict
       # The two Pages steps run on main only: a pull request proves the build
       # and stops there.
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v6
         if: github.event_name == 'push'
       - uses: actions/upload-pages-artifact@v3
         if: github.event_name == 'push'
