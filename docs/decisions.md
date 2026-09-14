@@ -18,8 +18,9 @@ was retired.
   test or the M5 UI; drop any of them if unwanted before the API is frozen.
 * ESP32-P4 pulls `espressif/esp_hosted` + `espressif/esp_wifi_remote`
   (P4-only) because the chip has no radio; approved 2026-08-18.
-* M2 ships the SoftAP captive portal; BLE provisioning
-  (`espressif/network_provisioning`) is a follow-up, as agreed.
+* M2 ships the SoftAP captive portal; BLE provisioning followed in
+  `espos_prov` — but built on protocomm directly, not on
+  `espressif/network_provisioning` (see the 2026-09-15 entry below).
 * M3 adds `espressif/mdns` (registry, exact-pinned) for discovery, approved
   2026-08-18. Discovery of `_signalk-ws._tcp` is folded into the
   `_signalk-http._tcp` browse (every server advertises both with the same
@@ -64,3 +65,18 @@ was retired.
   both reachable from the network, neither visible to review or to unit tests.
 - 2026-09-07: `espressif/mdns` is espos_net's dependency (moved from espos_wifi with the T3 network seam) and a public `REQUIRES` (espos_sk browses through it); the responder is brought up from `espos_net_start()` on the caller's task, never from an event handler (mdns 1.11.3 hostname/service calls block on the responder task).
 - 2026-09-07: REST authentication is a shared secret as `Authorization: Bearer <key>` plus an optional HttpOnly session cookie, enforced centrally in `espos_httpd` (every endpoint registered through `espos_httpd_register()` is protected unless it opts out); not HTTP Digest, because machine clients (the designer, a fleet plugin, scripts) speak Bearer, the cookie rides along with `EventSource`, and Digest has no logout. Device HTTPS is deliberately not part of it (RAM cost); the key crosses a plain-http LAN like the SignalK token does. Empty key = open, so existing devices keep working; the setup-portal network is exempt as the lockout recovery path.
+- 2026-09-15: **BLE provisioning uses protocomm directly, not
+  `espressif/network_provisioning`.** That manager drives the station itself
+  — `esp_wifi_set_config()`, `esp_wifi_connect()`, `esp_wifi_start()` and its
+  own retry logic — and espOS's WiFi state machine already owns exactly those
+  calls, with a priority list, backoff, reason codes and the portal, all
+  host-tested. Two owners of one radio is a fault that only appears in the
+  field, so `espos_prov` uses the same Espressif stack (protocomm, Security 2,
+  SRP6a) as a **BLE transport only**: credentials land in the `wifi` config
+  namespace, the same keys the web UI writes, and the state machine connects
+  as it always does. The cost is accepted deliberately: Espressif's "ESP BLE
+  Provisioning" phone app speaks the manager's protobuf schema and will not
+  talk to this device, whose endpoint is plain JSON. Adopting the manager
+  would mean reworking or retiring espOS's WiFi state machine, not swapping a
+  component; reaffirmed by the owner 2026-09-15 (no phone app needed).
+  [provisioning.md](provisioning.md).

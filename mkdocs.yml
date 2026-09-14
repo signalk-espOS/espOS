@@ -139,6 +139,7 @@ nav:
       - Configuration store: config.md
       - Network and mDNS: net.md
       - WiFi: wifi.md
+      - BLE provisioning: provisioning.md
       - Signal K: signalk.md
       - OTA: ota.md
       - Web UI: ui.md

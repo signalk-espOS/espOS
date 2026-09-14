@@ -285,5 +285,7 @@ route, and the knobs are `CONFIG_ESPOS_NET_MDNS` and
   runs subscriber callbacks). `espos_net` decides whether the default route
   changed and posts `NETWORK_UP`/`NETWORK_DOWN`; the port's `GOT_IP` handler
   only logs the "connected to … web UI" line.
-* Not yet: BLE provisioning (`espressif/network_provisioning`, planned as a
-  follow-up), country code.
+* BLE provisioning is a separate optional component,
+  [`espos_prov`](provisioning.md): it writes the same `wifi` keys this
+  component reads and never touches the radio itself.
+* Not yet: country code.
