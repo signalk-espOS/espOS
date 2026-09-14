@@ -104,6 +104,17 @@ jobs:
           # pack step reads: shallow is fine, complete is not.
           fetch-depth: 1
 
+      # Apache-2.0 asks that a copy of the licence, and our NOTICE, travel with
+      # every redistribution -- and each registry archive IS a redistribution.
+      # Copied on the runner rather than committed 23 times: the packed archive
+      # is the component directory, so whatever sits here at upload time ships.
+      - name: put LICENSE and NOTICE in every component
+        run: |
+          set -euo pipefail
+          for c in ${{ needs.order.outputs.components }}; do
+            cp LICENSE NOTICE "components/$c/"
+          done
+
       - name: what will be uploaded, and in what order
         id: list
         run: |
