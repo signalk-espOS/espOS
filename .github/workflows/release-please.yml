@@ -44,8 +44,14 @@ jobs:
   publish:
     needs: release-please
     if: needs.release-please.outputs.release_created == 'true'
+    # A called workflow cannot ask for more than the calling job was granted:
+    # publish.yml's upload job needs id-token: write for the registry's OIDC
+    # exchange, and without it here GitHub rejects the whole workflow file
+    # ("nested job 'upload' is requesting 'id-token: write', but is only
+    # allowed 'id-token: none'").
     permissions:
       contents: read
+      id-token: write
     uses: ./.github/workflows/publish.yml
     with:
       tag: ${{ needs.release-please.outputs.tag_name }}
