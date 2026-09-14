@@ -169,6 +169,11 @@ jobs:
       # taken back.
       - name: components can be published in dependency order
         run: ./scripts/registry_order.py --check
+      # release-please bumps a manifest only when it is listed in
+      # release-please-config.json and its espOS version lines are marked;
+      # either half missing leaves a component at the old version.
+      - name: release-please bumps every espOS version
+        run: python3 scripts/check_release_markers.py
 
       # The responder lives in espos_wifi; a second declaration elsewhere is how
       # the dependency crept into espos_sk in the first place.

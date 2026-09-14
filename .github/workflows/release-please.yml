@@ -1,0 +1,53 @@
+# SPDX-FileCopyrightText: 2026 Dirk Wahrheit
+# SPDX-License-Identifier: Apache-2.0
+#
+# Releases, without anyone editing CHANGELOG.md or version numbers by hand.
+#
+# On every push to main, release-please keeps one pull request open, "chore:
+# release <version>", that bumps version.txt and every espOS version in the
+# component manifests and prepends the new CHANGELOG.md section, built from the
+# Conventional Commit subjects merged since the last release (PR titles, since
+# PRs are squash-merged). Merging that pull request IS the release: the next
+# run tags it, creates the GitHub release with that section as its notes, and
+# publishes the components to the registry below. Nothing is released until a
+# maintainer merges the release PR.
+#
+# docs/releasing.md has the whole process; release-please-config.json maps
+# commit types to CHANGELOG sections and lists the manifests it bumps.
+name: release-please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.rp.outputs.release_created }}
+      tag_name: ${{ steps.rp.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v5
+        id: rp
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  # Called here rather than triggered by the tag: a tag release-please creates
+  # with the workflow's own GITHUB_TOKEN starts no other workflow, so a
+  # publish.yml waiting for `push: tags` would never run. Calling it directly
+  # needs no personal access token.
+  publish:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/publish.yml
+    with:
+      tag: ${{ needs.release-please.outputs.tag_name }}
+      dry_run: false
+    secrets: inherit

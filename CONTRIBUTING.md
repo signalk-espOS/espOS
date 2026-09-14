@@ -77,13 +77,20 @@ the person with the hardware — say in the PR which board that was.
 ## Commits and pull requests
 
 * **Conventional Commits**: `type(scope): subject`, imperative, lower case,
-  no trailing period. Types: `feat`, `fix`, `perf`, `refactor`, `docs`,
-  `test`, `build`, `ci`, `chore`. The scope is the component without the
-  `espos_` prefix (`fix(wifi): …`, `feat(sk): …`), or `ui`, `docs`, `build`,
-  `release`. A change a consumer has to react to says so in the body and
-  gets the `breaking` label. Squash-merge PRs so the subject is the merged
-  commit; `scripts/release.sh` turns those subjects into the tag notes and
-  `.github/release.yml` sorts the PRs into the release page by label.
+  no trailing period. Types: `feat`, `fix`, `perf`, `refactor`, `revert`,
+  `docs`, `test`, `build`, `ci`, `chore`. The scope is the component without
+  the `espos_` prefix (`fix(wifi): …`, `feat(sk): …`), or `ui`, `docs`,
+  `build`, `release`.
+* **The PR title is the changelog entry.** Pull requests are squash-merged
+  with the title as the commit subject, and release-please builds
+  `CHANGELOG.md` and the next version from those subjects
+  ([docs/releasing.md](docs/releasing.md)); a check fails a title that is not
+  a Conventional Commit. `feat` lands under Added, `fix` under Fixed, `perf`
+  and `refactor` under Changed; the other types stay out of the notes. A
+  change a consumer has to react to puts `!` after the type and ends the PR
+  description with `BREAKING CHANGE: <what to change>` -- the description is
+  the squashed commit's body, so that line reaches the release notes. Do not
+  edit `CHANGELOG.md` in a pull request.
 * **Sign off every commit** (`git commit -s`). The `Signed-off-by` line is
   your statement under the [Developer Certificate of
   Origin](https://developercertificate.org) that you may contribute the
@@ -91,8 +98,8 @@ the person with the hardware — say in the PR which board that was.
 * **Docs change with the code**, in the same PR. `docs/rest-api.md` is a
   contract — an endpoint or field change is discussed before it is written.
   A new config key is documented in `docs/config.md`, a new Kconfig option
-  in the component's doc. User-visible changes get a line under
-  `Unreleased` in `CHANGELOG.md`.
+  in the component's doc. The changelog line comes from the PR title (above),
+  not from an edit to `CHANGELOG.md`.
 * **Ask before adding a registry dependency.** Open an issue or a Discussion
   before a new entry in any `idf_component.yml` (or `ui/package.json`); the
   manifests explain why each existing dependency is there, and a new one

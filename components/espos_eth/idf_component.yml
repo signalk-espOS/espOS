@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 ## espos_eth component manifest: registry metadata for signalk-espos/espos_eth.
 ## The version is espOS's (version.txt) and moves with it, see docs/releasing.md.
+# x-release-please-start-version
 version: "0.7.0"
+# x-release-please-end
 description: "Wired Ethernet (internal EMAC + RMII PHY) as an espos_net transport; preferred over WiFi when both are up"
 url: "https://github.com/signalk-espOS/espOS/tree/main/components/espos_eth"
 repository: "https://github.com/signalk-espOS/espOS.git"
@@ -31,5 +33,7 @@ dependencies:
   # in-tree build (and a firmware that vendors espOS as a submodule) use the
   # checkout next to this file; a registry copy has no such directory.
   signalk-espos/espos_net:
+    # x-release-please-start-version
     version: "^0.7.0"
+    # x-release-please-end
     override_path: "../espos_net"

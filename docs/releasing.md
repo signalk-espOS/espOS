@@ -6,29 +6,37 @@ the device reports.
 
 ## Cutting one
 
-```sh
-scripts/release.sh 0.7.0 --dry-run    # shows what would change
-scripts/release.sh 0.7.0              # bumps version.txt, commits, tags
-git push origin main && git push origin v0.7.0
-```
+Nobody edits `CHANGELOG.md` or a version number by hand.
+[release-please](https://github.com/googleapis/release-please)
+(`.github/workflows/release-please.yml`) runs on every push to `main` and
+keeps one pull request open, **`chore: release <version>`**, which
 
-The script refuses a dirty tree, refuses a tag that exists, and writes an
-*annotated* tag — `git describe` prefers annotated tags, and the firmware's
-reported version comes from `git describe` (below). The tag message carries
-the commit subjects since the previous tag, or the whole history when there
-is no previous tag.
+* prepends the new `CHANGELOG.md` section, built from the Conventional
+  Commit subjects merged since the last release — the PR titles, because
+  pull requests are squash-merged (`feat` → Added, `fix` → Fixed, `perf` and
+  `refactor` → Changed; `docs`, `build`, `ci`, `test` and `chore` stay out);
+* bumps `version.txt` and every espOS version in the component manifests
+  (below);
+* picks the version: a `feat` raises the minor, a `fix` the patch, and a
+  breaking change (`!` after the type, or a `BREAKING CHANGE:` line in the
+  squashed body) the minor as well while espOS is below 1.0.
 
-Then publish the tag on GitHub, so the Releases tab answers "what is the
-current version, and what changed" for anyone who is not already a consumer:
-
-```sh
-gh release create v0.7.0 --title "espOS 0.7.0" --generate-notes
-```
+**Merging that pull request is the release.** The next run tags the merge
+commit `v<version>`, creates the GitHub release with the new section as its
+notes, and publishes the components to the registry. Until a maintainer
+merges it, nothing is released. The release PR can be edited before merging
+— lead the notes with anything that requires a consumer to change its own
+code.
 
 There are no binaries to attach — espOS is source consumed as a submodule,
-and the tag remains the deliverable. The release is a readable front page for
-it, not a separate artifact. Lead the notes with anything that requires a
-consumer to change its own code.
+and the tag remains the deliverable; the release is a readable front page
+for it.
+
+The `[Unreleased]` block further down `CHANGELOG.md` is the hand-written
+changelog from before the switch. `last-release-sha` in
+`release-please-config.json` keeps the first generated section from repeating
+it; when the 0.8.0 release PR opens, fold that block into its section by hand
+and remove `last-release-sha`.
 
 ## What a device reports
 
@@ -113,15 +121,31 @@ for an espOS component. The version range is what a registry consumer sees,
 and lockstep versions keep it from ever mixing two espOS releases in one
 firmware.
 
-Lockstep is maintained by the release, not by hand. `scripts/release.sh`
-does this for every `components/*/idf_component.yml`:
+Lockstep is maintained by the release PR, not by hand. release-please bumps
+`version.txt` itself, and bumps a manifest because two things hold:
 
-* set the top-level `version:` to the release version;
-* set each `signalk-espos/espos_*` dependency's `version:` to `^<release version>`
-  (pre-1.0, `^0.7.0` excludes `0.8.0`, so a minor bump that leaves the
-  ranges behind publishes components that cannot be installed together);
-* `git add` the manifests with `version.txt`, so the release commit carries
-  them all.
+* the manifest is listed under `extra-files` in `release-please-config.json`
+  (type `generic`);
+* each espOS version line in it — the component's own `version:` and every
+  `signalk-espos/espos_*` dependency's `version:` — sits inside a marker
+  block:
+
+  ```yaml
+  # x-release-please-start-version
+  version: "0.7.0"
+  # x-release-please-end
+  ```
+
+  The generic updater rewrites every version inside such a block, keeping the
+  `^` of a range. Blocks wrap single lines on purpose: one around the
+  dependencies would rewrite the `idf:` and `espressif/*` pins as well.
+
+Either half missing fails quietly: pre-1.0, `^0.7.0` excludes `0.8.0`, so a
+release that leaves one manifest or one range behind publishes components that
+cannot be installed together. `scripts/check_release_markers.py` fails CI when
+a manifest is not listed, a version line is not marked, or a block holds
+anything but one version line — a new component copies an existing manifest's
+markers and adds its path to the config.
 
 The manifests are the registry's contract; a manifest that fails to pack
 fails the release. CI runs `compote component pack` for every component on
@@ -130,26 +154,21 @@ covers the manifests as well.
 
 ### Publishing a release
 
-`.github/workflows/publish.yml` runs on the `v*` tag. It re-checks that the
-tag, `version.txt` and every manifest agree — a registry version is
-immutable, and that check is worth repeating rather than assuming CI's copy
-ran — then uploads each component with `compote component upload`, taking
-the registry token from the `IDF_COMPONENT_API_TOKEN` repository secret.
-(The component manager reads it from the environment under that exact name;
-there is no `--token` flag.)
+`.github/workflows/publish.yml` is called by `release-please.yml` once
+merging a release PR has created the `v*` tag. It is called rather than
+triggered by the tag: a tag release-please creates with the workflow's own
+token starts no other workflow. It re-checks that the tag, `version.txt` and
+every manifest agree — a registry version is immutable, and that check is
+worth repeating rather than assuming the release PR had the right numbers —
+then uploads each component with `compote component upload`, taking the
+registry token from the `IDF_COMPONENT_API_TOKEN` repository secret. (The
+component manager reads it from the environment under that exact name; there
+is no `--token` flag.)
 
-**Before the first publish, the `signalk-espos` namespace has to exist on the
-registry.** It does not yet: a dry run today ends with
-
-```
-ERROR: Namespace "signalk-espos" not found
-```
-
-which is the same message a nonsense namespace produces, so it is a
-registration gap rather than an authentication one. Claim the namespace at
-[components.espressif.com](https://components.espressif.com) with the account
-that owns the token. Everything else is ready — the archive packs and the
-manifests validate up to that point.
+The `signalk-espos` namespace is registered on
+[components.espressif.com](https://components.espressif.com); the token has to
+belong to an account that owns it. Without the secret even a dry run fails on
+the first component.
 
 Upload order is computed, not written down: the registry resolves a
 component's dependencies when it accepts the upload, so a component must not
