@@ -92,6 +92,10 @@ jobs:
     if: always() && needs.order.result == 'success' && needs.version.result != 'failure'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # The OIDC token the registry trusts; nothing here writes to the repo.
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -101,37 +105,29 @@ jobs:
           fetch-depth: 1
 
       - name: what will be uploaded, and in what order
+        id: list
         run: |
           echo "${{ needs.order.outputs.components }}" | tr ' ' '\n' | nl
+          # One "name:path" pair per line, in dependency order: the action
+          # uploads them one at a time, in the order given (upload.py's
+          # upload_components loop), which is what the registry needs -- it
+          # resolves a component's dependencies when it accepts the upload.
+          {
+            echo "components<<EOF"
+            for c in ${{ needs.order.outputs.components }}; do echo "$c:components/$c"; done
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
-      # A loop rather than espressif/upload-components-ci-action, because
-      # order is the point: that action takes a directories list and gives no
-      # guarantee about sequencing, and a matrix would run them in parallel.
-      # compote refuses a version the registry already has, so a re-run after
-      # a partial failure stops on the first already-published component --
-      # which is the right shape for resuming by hand, not for silently
-      # continuing.
+      # Espressif's action rather than a compote loop of our own, because it
+      # is the only path that authenticates with GitHub OIDC: with no
+      # api_token it exchanges the job's id-token for a registry token
+      # (upload.py's ensure_token), so no long-lived secret exists anywhere.
+      # The namespace's trusted uploaders on the registry say which repository,
+      # workflow and branch may do that. A dry run skips authentication
+      # entirely, so it rehearses without any credential at all.
       - name: upload
-        env:
-          DRY: ${{ inputs.dry_run == true }}
-          # The component manager reads its token from the environment
-          # (env_prefix IDF_COMPONENT_ + API_TOKEN); there is no --token flag.
-          # Without it compote cannot even dry-run, so a missing secret fails
-          # loudly on the first component rather than quietly publishing
-          # nothing.
-          IDF_COMPONENT_API_TOKEN: ${{ secrets.IDF_COMPONENT_API_TOKEN }}
-        run: |
-          set -euo pipefail
-          pip install --quiet idf-component-manager
-          for c in ${{ needs.order.outputs.components }}; do
-            echo "==> $c"
-            if [ "$DRY" = "true" ]; then
-              compote component upload \
-                --namespace signalk-espos --name "$c" \
-                --project-dir "components/$c" --dry-run
-            else
-              compote component upload \
-                --namespace signalk-espos --name "$c" \
-                --project-dir "components/$c"
-            fi
-          done
+        uses: espressif/upload-components-ci-action@v2.2.1
+        with:
+          namespace: signalk-espos
+          components: ${{ steps.list.outputs.components }}
+          dry_run: ${{ inputs.dry_run == true && 'true' || '' }}
