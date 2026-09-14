@@ -41,7 +41,7 @@ hand-written loop with a line of wiring.
 ## How to build one
 
 An example is an ordinary ESP-IDF project. From its directory, with the IDF
-environment exported (`. $IDF_PATH/export.sh`, v6.0.2 — see `.idf-version`):
+environment exported (`. $IDF_PATH/export.sh`, v6.0.3 — see `.idf-version`):
 
 ```sh
 cd components/espos_core/examples/minimal
