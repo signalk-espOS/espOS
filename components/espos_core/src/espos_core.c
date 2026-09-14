@@ -267,7 +267,11 @@ esp_err_t espos_start_network(void)
     STAGE(espos_ota_start());
 #endif
 #if START_BLE
-#if ESPOS_HAVE_WIFI
+/* START_WIFI, not ESPOS_HAVE_WIFI: espos_wifi.h is only included when the
+ * station is actually started, and a station that never starts raises no
+ * portal to catch up on. Guarding on the component alone broke the build of
+ * any firmware with BLE and CONFIG_ESPOS_WIFI off -- an Ethernet gateway. */
+#if START_WIFI
     /* BEFORE espos_ble_start(), not after. The portal is raised inside
      * espos_wifi_start() above, so the gateway missed the PORTAL_UP event --
      * but suspending after it has started is too late: it has already armed a
