@@ -392,6 +392,24 @@ only matter to a phone that just joined the portal, and that network is
 exempt from authentication; on the station side they are ordinary protected
 endpoints.
 
+## BLE provisioning
+
+### `GET /prov` — protected
+
+Present only when the build has `espos_prov` ([provisioning.md](provisioning.md)).
+
+```json
+{"active": true, "got_credentials": false,
+ "service_name": "ESPOS_ca6a", "pop": "7K4M9QRT2WXY",
+ "scheme": "espos-ble-prov-1"}
+```
+
+`pop` is the proof of possession a phone must present, served here because a
+device-generated one is useless if nobody can read it. Reachable only over
+the network, which a device being provisioned does not have yet — it is for
+a device already on WiFi advertising for re-provisioning, and for the setup
+portal, which serves it over its own access point.
+
 ## Events
 
 ### `GET /events` — M2 · protected
