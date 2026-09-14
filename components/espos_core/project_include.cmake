@@ -45,6 +45,21 @@ foreach(_espos_stack CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE CONFIG_FREERTOS_TIM
 endforeach()
 
 if(CONFIG_IDF_TARGET STREQUAL "esp32p4")
+    # From espos.defaults.esp32p4: without PSRAM, esp_hosted's startup
+    # allocations leave so little internal RAM that FreeRTOS cannot allocate
+    # the timer task's stack when the scheduler starts, and every boot panics
+    # within seconds. Seen on a Waveshare P4 PoE board.
+    if(NOT CONFIG_SPIRAM)
+        message(FATAL_ERROR
+            "espos_core: CONFIG_SPIRAM is off on the ESP32-P4. esp_hosted's startup allocations "
+            "leave internal RAM so short that FreeRTOS cannot allocate its timer task's stack, and "
+            "the board panics within seconds of every boot (\"assert failed: "
+            "vApplicationGetTimerTaskMemory port_common.c:97\"). "
+            "CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM is dropped without it as well.\n"
+            "    CONFIG_SPIRAM=y\n"
+            "${_espos_lint_fix}")
+    endif()
+
     # From espos.defaults.esp32p4: "Keep the hosted transport mempool — the
     # transport's large DMA buffer pool — out of internal RAM [...]
     # CONSTRAINT: only safe with 64-byte L2 cache lines — the 1600-byte

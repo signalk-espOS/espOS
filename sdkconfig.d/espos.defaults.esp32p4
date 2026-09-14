@@ -52,6 +52,16 @@ CONFIG_FREERTOS_HZ=1000
 # esp_task_stack_is_sane_cache_disabled). A stack larger than SPM cannot.
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 
+# PSRAM on. Those same startup allocations leave internal RAM so short that,
+# without PSRAM, FreeRTOS cannot allocate the timer task's stack when the
+# scheduler starts: "assert failed: vApplicationGetTimerTaskMemory
+# port_common.c:97 (pxStackBufferTemp != NULL)", a panic within seconds of
+# every boot. Seen on a Waveshare ESP32-P4 PoE board running an image built
+# from these defaults alone; the same image with this line booted. It also
+# keeps CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM above in effect, which IDF
+# drops silently without SPIRAM. Every P4 board espOS targets carries PSRAM.
+CONFIG_SPIRAM=y
+
 # Receive block-ack window for the remote (C6) radio. IDF defaults this to
 # 6, but silently raises it to 16 as soon as a project enables PSRAM
 # (SPIRAM_TRY_ALLOCATE_WIFI_LWIP) — which any board with a display will.

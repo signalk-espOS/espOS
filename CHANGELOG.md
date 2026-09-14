@@ -428,6 +428,19 @@ Entries name the component the way commit scopes do (`wifi`, `sk`, `ble`,
   do not reach it. No espOS consumer passed `SIGNING_KEY`, so no device got a
   wrongly signed image from this.
 
+- P4: espOS's ESP32-P4 defaults enable PSRAM (`CONFIG_SPIRAM=y`). They left it
+  to the project, but without PSRAM `esp_hosted`'s startup allocations leave so
+  little internal RAM that FreeRTOS cannot allocate its timer task's stack, and
+  the board panics within seconds of every boot (`assert failed:
+  vApplicationGetTimerTaskMemory port_common.c:97`). Found installing a firmware
+  built from these defaults on a Waveshare ESP32-P4 PoE board; the same image
+  with only PSRAM added booted. Every P4 example except `ble_gateway`, which set
+  it itself, was affected: CI builds them but nothing ran them. The hosted
+  mempool setting also depends on PSRAM and was being dropped silently.
+  `espos_core`'s configure lint now refuses a P4 build without PSRAM.
+  **Consumers** that set `CONFIG_SPIRAM=y` themselves can drop the line.
+>>>>>>> b675539 (fix(p4): enable PSRAM in the ESP32-P4 defaults)
+
 - sk: `espos_sk_flush()` could return `ESP_OK` while the last message was
   still being written. The stream task takes a message off the queue and then
   spends up to the send timeout writing it, and for that time the message was

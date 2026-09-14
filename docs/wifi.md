@@ -269,7 +269,10 @@ route, and the knobs are `CONFIG_ESPOS_NET_MDNS` and
     `CONFIG_CACHE_L2_CACHE_LINE_128B` the SDIO driver rejects PSRAM
     buffers with `ESP_ERR_INVALID_ARG`
     ([esp-hosted-mcu#219](https://github.com/espressif/esp-hosted-mcu/issues/219)).
-    Keep the mempool internal on 128-byte-line configurations.
+    Keep the mempool internal on 128-byte-line configurations. The option
+    only exists with PSRAM, which the P4 defaults enable
+    (`CONFIG_SPIRAM=y`); without PSRAM IDF drops it silently, and the board
+    does not boot anyway ([hardware.md](hardware.md)).
 
   Since a wedged transport cannot be recovered from the host (there is no
   reconnect API, and the RPC that would carry one is exactly what times
