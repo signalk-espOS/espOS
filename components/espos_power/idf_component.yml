@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 ## espos_power component manifest: registry metadata for signalk-espos/espos_power.
 ## The version is espOS's (version.txt) and moves with it, see docs/releasing.md.
+# x-release-please-start-version
 version: "0.7.0"
+# x-release-please-end
 description: "Deep-sleep duty cycle for battery devices: wake, publish, flush, sleep — without losing the way back in"
 url: "https://github.com/signalk-espOS/espOS/tree/main/components/espos_power"
 repository: "https://github.com/signalk-espOS/espOS.git"
@@ -42,11 +44,17 @@ dependencies:
   # waits for the stream and flushes it before sleeping, with espos_ota it
   # stays awake while an update is under way.
   signalk-espos/espos_config:
+    # x-release-please-start-version
     version: "^0.7.0"
+    # x-release-please-end
     override_path: "../espos_config"
   signalk-espos/espos_httpd:
+    # x-release-please-start-version
     version: "^0.7.0"
+    # x-release-please-end
     override_path: "../espos_httpd"
   signalk-espos/espos_net:
+    # x-release-please-start-version
     version: "^0.7.0"
+    # x-release-please-end
     override_path: "../espos_net"
