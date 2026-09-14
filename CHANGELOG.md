@@ -103,6 +103,21 @@ switch and is folded into the 0.8.0 section when that release is cut.
   wrong (a transceiver and termination are not optional, and both fail looking
   exactly like a software fault) and how `GET /api/v1/n2k` tells a quiet bus
   from a misconfigured one.
+- power: `espos_power`, a deep-sleep duty cycle for devices on a battery —
+  wake, publish, flush the SignalK stream, sleep for `power.interval_s`, again.
+  Off by default (`power.mode`), started by `espos_start()` when built, status
+  at `GET /api/v1/power`, and `espos_power_hold()`/`_release()` for an
+  application that needs a wake to last. The decision is pure C and host-tested,
+  and its rules are about staying reachable: **no sleep while an update is
+  unconfirmed** (every wake is a boot, and the bootloader aborts an image still
+  pending verification, so sleeping first would roll every update back), an
+  **awake window** after any boot that is not the cycle's own wake (power-on,
+  update, crash) so the web UI and OTA can be reached, and a **deadline** on
+  every wake so a missing network does not drain the battery. An update being
+  checked, downloaded or installed holds the device awake past that deadline
+  (`espos_ota_busy()`), or an update longer than a wake would never finish. Example
+  `duty_cycle` for the ESP32-C6 and the ESP32-P4 PoE board.
+
 - eth: `espos_eth`, wired Ethernet as an `espos_net` transport -- the internal
   EMAC and an RMII PHY with DHCP, started by `espos_start()` beside the WiFi
   station. `espos_net` already preferred Ethernet over WiFi, so the route moves
@@ -432,6 +447,18 @@ switch and is folded into the 0.8.0 section when that release is cut.
   `sdkconfig` that names a different key stops the configure, because defaults
   do not reach it. No espOS consumer passed `SIGNING_KEY`, so no device got a
   wrongly signed image from this.
+
+- P4: espOS's ESP32-P4 defaults enable PSRAM (`CONFIG_SPIRAM=y`). They left it
+  to the project, but without PSRAM `esp_hosted`'s startup allocations leave so
+  little internal RAM that FreeRTOS cannot allocate its timer task's stack, and
+  the board panics within seconds of every boot (`assert failed:
+  vApplicationGetTimerTaskMemory port_common.c:97`). Found installing a firmware
+  built from these defaults on a Waveshare ESP32-P4 PoE board; the same image
+  with only PSRAM added booted. Every P4 example except `ble_gateway`, which set
+  it itself, was affected: CI builds them but nothing ran them. The hosted
+  mempool setting also depends on PSRAM and was being dropped silently.
+  `espos_core`'s configure lint now refuses a P4 build without PSRAM.
+  **Consumers** that set `CONFIG_SPIRAM=y` themselves can drop the line.
 
 - sk: `espos_sk_flush()` could return `ESP_OK` while the last message was
   still being written. The stream task takes a message off the queue and then

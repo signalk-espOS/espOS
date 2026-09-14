@@ -1,0 +1,20 @@
+{
+  "namespace": "power",
+  "version": 1,
+  "title": "Power",
+  "description": "Duty cycling for a device on a battery: wake, publish, deep-sleep, again. Off by default — a sleeping device is reachable only for the few seconds it is awake, plus a window after every power-on or update.",
+  "keys": [
+    {"name": "mode", "type": "string", "default": "off", "enum": ["off", "cycle"], "title": "Mode",
+     "description": "off: the device stays awake. cycle: after each wake it publishes, flushes the SignalK stream and deep-sleeps for the interval below. Takes effect immediately, but never while an update is still unconfirmed."},
+    {"name": "interval_s", "type": "int", "default": 300, "min": 10, "max": 86400, "unit": "s", "title": "Sleep between wakes",
+     "description": "How long the device sleeps before it wakes to publish again."},
+    {"name": "window_s", "type": "int", "default": 300, "min": 30, "max": 86400, "unit": "s", "title": "Awake window after power-on",
+     "description": "After a power-on, an update or a crash the device stays awake this long before the cycle starts, so its web UI and OTA can be reached. Cutting the power always reopens this window."},
+    {"name": "awake_max_s", "type": "int", "default": 30, "min": 5, "max": 600, "unit": "s", "title": "Longest wake",
+     "description": "A wake that has not finished by then sleeps anyway — a network that never comes up must not drain the battery. Application holds do not extend it."},
+    {"name": "publish_ms", "type": "int", "default": 1500, "min": 0, "max": 60000, "unit": "ms", "title": "Time connected before sleeping",
+     "description": "Once the SignalK stream is connected (or, without SignalK, the network is up), the device stays awake this long so the application's values go out."},
+    {"name": "flush_ms", "type": "int", "default": 3000, "min": 0, "max": 30000, "unit": "ms", "title": "Flush timeout",
+     "description": "How long to wait for buffered deltas to be sent before sleeping."}
+  ]
+}

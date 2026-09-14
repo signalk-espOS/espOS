@@ -38,7 +38,7 @@ idf_component_register(
 # Optional stages: link them only when they are in the build, and tell the
 # source which ones are, so espos_start() can call into them without an
 # #include that would fail in a firmware built without them.
-idf_component_optional_requires(PRIVATE espos_sk espos_ota espos_ble espos_prov espos_eth)
+idf_component_optional_requires(PRIVATE espos_sk espos_ota espos_ble espos_prov espos_eth espos_power)
 idf_build_get_property(comps BUILD_COMPONENTS)
 if(espos_wifi IN_LIST comps)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE ESPOS_HAVE_WIFI=1)
@@ -69,6 +69,12 @@ endif()
 # CONFIG_ESPOS_ETH switch.
 if(espos_eth IN_LIST comps AND NOT target STREQUAL "linux")
     target_compile_definitions(${COMPONENT_LIB} PRIVATE ESPOS_HAVE_ETH=1)
+endif()
+
+# The deep-sleep duty cycle, same shape. Started last, and on the linux
+# target too: there it never sleeps, but its status endpoint still answers.
+if(espos_power IN_LIST comps)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE ESPOS_HAVE_POWER=1)
 endif()
 
 # espOS's own version, as distinct from the application's PROJECT_VER: in the

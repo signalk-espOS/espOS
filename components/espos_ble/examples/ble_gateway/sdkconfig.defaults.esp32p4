@@ -2,17 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Waveshare ESP32-P4 + ESP32-C6 co-processor over SDIO. The hosted transport
-# and its pinout, the silicon revision, the main-task stack, the block-ack
-# window and the PSRAM-mempool/64-byte-cache-line pair all come from
+# and its pinout, the silicon revision, the main-task stack, PSRAM, the
+# block-ack window and the PSRAM-mempool/64-byte-cache-line pair all come from
 # sdkconfig.d/espos.defaults.esp32p4; this file adds the BLE half.
-
-# PSRAM on. The board has it and the gateway was brought up with it; espOS
-# leaves the choice to the project (its base P4 config enables none), but its
-# CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM=y depends on SPIRAM and is dropped
-# silently without this line — the transport's DMA pool would then sit in the
-# internal RAM the Bluetooth host stack and WiFi already share. Line mode
-# (hex) and clock (200 MHz) are IDF's P4 defaults and not restated.
-CONFIG_SPIRAM=y
 
 # --- Bluedroid over the hosted VHCI ------------------------------------
 # The P4 has no radio of its own: BT_CONTROLLER_DISABLED is what makes the

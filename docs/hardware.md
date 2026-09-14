@@ -70,6 +70,11 @@ Everything espOS knows about that transport is in
   mode (the stock C6 firmware is fixed in it).
 * `CONFIG_ESP32P4_REV_MIN_100` for the rev 1.x silicon, an 8 KB main task
   stack, `FREERTOS_HZ=1000`.
+* **PSRAM on** (`CONFIG_SPIRAM=y`). `esp_hosted`'s startup allocations leave
+  internal RAM so short that without PSRAM FreeRTOS cannot allocate its
+  timer task's stack and the board panics within seconds of every boot
+  (`assert failed: vApplicationGetTimerTaskMemory`). The hosted mempool
+  setting above also needs it, and IDF drops that one silently without.
 
 The co-processor needs no reflashing: a stock C6 slave reports
 `capabilities: 0xd` — WLAN and BT over SDIO, BLE only — which is what the BLE
