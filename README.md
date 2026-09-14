@@ -18,7 +18,9 @@ project, not an official Signal K repository.
 
 ## Status
 
-espOS is at **v0.7.0**. The core is done and in use: config store, HTTP
+espOS is pre-1.0; `version.txt` and the
+[releases](https://github.com/signalk-espOS/espOS/releases) say where it is
+today. The core is done and in use: config store, HTTP
 server and REST API, WiFi state machine with captive portal, SignalK
 discovery, access token and delta stream in both directions, web UI,
 device-health notifications and signed OTA with rollback -- all host-tested
@@ -41,6 +43,24 @@ idf.py build flash monitor           # on a shared or small host: scripts/build.
 The web UI bundle is committed, so Node is not needed to build a device that
 serves it. `scripts/build.sh` wraps `idf.py` with a machine-wide lock and a
 capped job count for hosts that freeze under a full parallel build.
+
+### Or from the component registry
+
+Every component is published to the [Espressif Component
+Registry](https://components.espressif.com/components?q=signalk-espos) under
+the `signalk-espos` namespace, so a firmware can use espOS without cloning
+it:
+
+```sh
+idf.py add-dependency "signalk-espos/espos_sk^0.7"
+```
+
+`espos_sk` names the rest of the core as its own dependencies, so that one
+line installs what a SignalK device needs. Keep the `^` range: espOS is
+pre-1.0, where a minor bump does the work a major will do later, so an
+unpinned dependency would take the next one unannounced. The components are
+released in lockstep — one version of any of them works with the same
+version of every other.
 
 The whole of an application on espOS is one call; everything else is yours
 ([docs/concepts.md](docs/concepts.md) has the order and the threading rules):
@@ -74,6 +94,7 @@ the rest are optional.
 
 | Component | What it gives you | Docs |
 |---|---|---|
+| `espos_core` | `espos_start()`: brings up everything below in the right order | [concepts.md](docs/concepts.md) |
 | `espos_config` | NVS config store, JSON-Schema descriptors, REST-backed settings | [config.md](docs/config.md) |
 | `espos_httpd` | HTTP server, REST API, SSE, the web UI from a LittleFS partition | [rest-api.md](docs/rest-api.md) · [ui.md](docs/ui.md) |
 | `espos_net` | Interface-agnostic network status and default route, mDNS responder, device id; WiFi/Ethernet plug in underneath | [net.md](docs/net.md) |
@@ -82,6 +103,16 @@ the rest are optional.
 | `espos_health` | Device conditions (warn/alarm) and the sinks that consume them | [health.md](docs/health.md) |
 | `espos_sk` | SignalK: mDNS discovery, access token, delta stream in and out | [signalk.md](docs/signalk.md) |
 | `espos_ota` | Signed OTA with rollback, from a URL or a version manifest | [ota.md](docs/ota.md) |
+| `espos_event` | The `ESPOS_EVENT` base other components post their state on | [concepts.md](docs/concepts.md) |
+| `espos_time` | SNTP, wall-clock timestamps on deltas and log lines | [time.md](docs/time.md) |
+| `espos_eth` | Ethernet as an `espos_net` transport (P4 EMAC, W5500 over SPI) | [net.md](docs/net.md) |
+| `espos_flow` | Typed data-flow graph, timer wheel, one loop task | [flow.md](docs/flow.md) |
+| `espos_formulas` | Marine maths with no IDF dependency: curves, dew point, densities | [transforms.md](docs/transforms.md) |
+| `espos_sensors` | ADC, GPIO, pulse counter, PWM, I2C, 1-Wire as flow nodes | [sensors.md](docs/sensors.md) |
+| `espos_sk_flow` | SignalK output, listener and PUT handler as flow nodes | [signalk.md](docs/signalk.md) |
+| `espos_devices` | Whole devices composed from the above: tank level, engine RPM, … | [devices.md](docs/devices.md) |
+| `espos_power` | Deep-sleep duty cycle: wake, publish, flush, sleep | [power.md](docs/power.md) |
+| `espos_prov` | BLE provisioning: WiFi credentials from a phone over GATT | [provisioning.md](docs/provisioning.md) |
 | `espos_ble` | BLE gateway | [ble.md](docs/ble.md) |
 | `espos_n2k` | NMEA 2000 over TWAI + a candump TCP server | [n2k.md](docs/n2k.md) |
 | `espos_audio` | The `AudioDriver` contract a board implements (header-only) | [voice.md](docs/voice.md) |
@@ -95,13 +126,12 @@ similar is needed.
 ## Layout
 
 ```
-components/espos_config/   NVS-backed config store, build-time descriptor → schema/tables
-components/espos_httpd/    esp_http_server, /api/v1, SSE, static UI
-components/espos_wifi/     station manager + portal (state machine host-testable)
-components/espos_sk/       SignalK discovery + access-token state machine
+components/espos_*/        one directory per component (table above), each with
+                           include/ src/ and, where it has one, examples/
 main/                      example app
 tools/                     generators
 test/host/                 linux-target tests (no hardware needed)
+test/fuzz/                 libFuzzer harnesses for the network-facing parsers
 docs/                      contracts and guides
 ```
 

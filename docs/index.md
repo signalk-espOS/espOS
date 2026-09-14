@@ -99,6 +99,7 @@ board.
   [decisions](decisions.md) taken so far; the
   [changelog](changelog.md) lists what is in the next release.
 
-espOS is at **v0.7.0**: the core is done and in use, host-tested and running
+espOS is pre-1.0 (`version.txt` says where it is today): the core is done
+and in use, host-tested and running
 on ESP32-P4 hardware against signalk-server 2.31; the BLE, NMEA 2000 and
 voice components serve firmware built on top.
