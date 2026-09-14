@@ -217,6 +217,11 @@ esp_err_t espos_sk_put_respond(const char *request_id, const char *state, int st
  * stream is not connected (nothing can drain, so the caller should not
  * wait). Blocks the calling task; never call it from the stream task or a
  * subscription callback.
+ *
+ * A message being written counts as pending until the write returns, so
+ * ESP_OK means every message was handed to the socket. It does not mean the
+ * server acknowledged it: on a live link the TCP stack sends within
+ * milliseconds, and a caller about to cut the radio should allow that.
  */
 esp_err_t espos_sk_flush(uint32_t timeout_ms);
 

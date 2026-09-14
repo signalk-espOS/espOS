@@ -73,6 +73,7 @@ static struct {
     size_t buffer_msgs, buffer_bytes;
     /* status */
     espos_sk_ws_status_t st;
+    bool sending;                    /* a delta message is being written; reported as pending */
     uint32_t connected_since_ms;
     uint32_t backoff_round;
     uint32_t retry_at_ms;
@@ -767,6 +768,11 @@ static void ws_task(void *arg)
         if (s.delta) {
             msg = espos_sk_delta_take(s.delta, t, true);
         }
+        /* Off the queue but not yet written. Counted nowhere, this message
+         * let espos_sk_flush() report a drained stream for up to the send
+         * timeout while its last frame was still going out -- or about to
+         * fail and be requeued after the caller had gone to sleep. */
+        s.sending = msg != NULL;
         unlock();
         if (msg) {
             int w = esp_transport_ws_send_raw(ws, WS_TRANSPORT_OPCODES_TEXT | WS_TRANSPORT_OPCODES_FIN, msg, (int)strlen(msg), 3000);
@@ -774,6 +780,7 @@ static void ws_task(void *arg)
                 ESP_LOGW(TAG, "send failed; reconnecting");
                 lock();
                 espos_sk_delta_requeue(s.delta, msg);
+                s.sending = false;
                 s.st.send_errors++;
                 s.st.connected = false;
                 unlock();
@@ -787,6 +794,7 @@ static void ws_task(void *arg)
             }
             free(msg);
             lock();
+            s.sending = false;
             s.st.sent++;
             unlock();
             continue; /* look for more right away */
@@ -984,7 +992,7 @@ esp_err_t espos_sk_ws_get_status(espos_sk_ws_status_t *out)
     if (s.delta) {
         espos_sk_delta_stats_t ds;
         espos_sk_delta_stats(s.delta, &ds);
-        out->pending = ds.pending;
+        out->pending = ds.pending + (s.sending ? 1 : 0);
         out->buffered = ds.buffered;
         out->buffered_bytes = ds.buffered_bytes;
         out->dropped = ds.dropped;

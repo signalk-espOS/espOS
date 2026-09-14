@@ -256,6 +256,12 @@ left, `ESP_ERR_TIMEOUT` if the deadline passed, `ESP_ERR_INVALID_STATE` when
 the stream is down and nothing *can* drain. Never call it from the stream task
 or a subscription callback.
 
+The message the stream task is writing at that moment counts as pending until
+the write returns, so `ESP_OK` means everything was handed to the socket. It
+does not mean the server has acknowledged it: on a live link the TCP stack
+sends within milliseconds, and code about to cut the radio should allow it
+that moment.
+
 ## The graph nodes (`espos_sk_flow`)
 
 `espos_sk_flow` is the Signal K end of the [data-flow graph](flow.md) — the
