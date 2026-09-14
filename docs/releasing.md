@@ -160,15 +160,20 @@ triggered by the tag: a tag release-please creates with the workflow's own
 token starts no other workflow. It re-checks that the tag, `version.txt` and
 every manifest agree — a registry version is immutable, and that check is
 worth repeating rather than assuming the release PR had the right numbers —
-then uploads each component with `compote component upload`, taking the
-registry token from the `IDF_COMPONENT_API_TOKEN` repository secret. (The
-component manager reads it from the environment under that exact name; there
-is no `--token` flag.)
+then uploads the components with `espressif/upload-components-ci-action`.
 
-The `signalk-espos` namespace is registered on
-[components.espressif.com](https://components.espressif.com); the token has to
-belong to an account that owns it. Without the secret even a dry run fails on
-the first component.
+**No registry secret exists.** The action authenticates with GitHub OIDC: with
+no `api_token` given it exchanges the job's `id-token` for a registry token,
+which is why the job asks for `id-token: write`. What may use that token is
+decided on the registry side, under the `signalk-espos` namespace's *trusted
+uploaders*: the repository (`signalk-espOS/espOS`), the publishing workflow and
+the branch. Because `publish.yml` is *called* by `release-please.yml`, and
+GitHub names the calling workflow and the reusable one in different OIDC
+claims, both files are registered as trusted uploaders.
+
+The action is used rather than a `compote` loop of our own only because it is
+the one path that speaks OIDC; it runs the same `compote component upload` per
+component, one at a time, in the order it is given.
 
 Upload order is computed, not written down: the registry resolves a
 component's dependencies when it accepts the upload, so a component must not
@@ -179,9 +184,11 @@ rolled back. This paragraph used to carry a hand-written list of eleven
 components while the tree had nineteen; every component added after it was
 written was missing from it.
 
-A registry version is immutable; `compote component upload --dry-run` (needs
-the token) validates without creating one, and is the right rehearsal for a
-first publish or a manifest change. A published version that turns out wrong
+A registry version is immutable; a dry run validates without creating one, and
+is the right rehearsal for a first publish or a manifest change. Run it from
+the Actions tab (`publish` → *Run workflow*, `dry_run` on) or with
+`gh workflow run publish.yml -f dry_run=true`. A dry run needs no credential at
+all: the action skips authentication entirely for it. A published version that turns out wrong
 is yanked with a message, never deleted, and fixed by the next patch release.
 
 What the registry ships is the packed archive: the component directory
