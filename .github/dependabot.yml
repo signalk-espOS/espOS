@@ -1,7 +1,7 @@
 # Weekly dependency PRs. Subjects follow the Conventional Commit types the
-# repo uses (CONTRIBUTING.md), so they sort into the release notes
-# (.github/release.yml, category "Dependencies" via Dependabot's default
-# `dependencies` label) without anyone touching them.
+# repo uses (CONTRIBUTING.md), so the PR title check passes them and
+# release-please files them under its hidden "Internal" section (ci and build
+# types) without anyone touching them.
 version: 2
 updates:
   - package-ecosystem: github-actions

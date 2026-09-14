@@ -4,7 +4,7 @@
 MkDocs hook: render Markdown files from the repository root as site pages.
 
 CHANGELOG.md lives at the root, where GitHub, Keep-a-Changelog tooling and
-scripts/release.sh expect it, and the site wants it at /changelog/. A copy
+release-please expect it, and the site wants it at /changelog/. A copy
 under docs/ would be two files to keep in step; a symlink or a snippet
 include would carry the file's links over as written, and CHANGELOG.md's
 `docs/releasing.md`, resolved from docs/changelog.md, names

@@ -1,0 +1,49 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "simple",
+  "include-component-in-tag": false,
+  "bump-minor-pre-major": true,
+  "changelog-path": "CHANGELOG.md",
+  "pull-request-title-pattern": "chore: release ${version}",
+  "last-release-sha": "17327aaf010b2c38683ee28862169a97ed20f939",
+  "changelog-sections": [
+    { "type": "feat", "section": "Added" },
+    { "type": "fix", "section": "Fixed" },
+    { "type": "perf", "section": "Changed" },
+    { "type": "refactor", "section": "Changed" },
+    { "type": "revert", "section": "Fixed" },
+    { "type": "docs", "section": "Documentation", "hidden": true },
+    { "type": "build", "section": "Internal", "hidden": true },
+    { "type": "ci", "section": "Internal", "hidden": true },
+    { "type": "test", "section": "Internal", "hidden": true },
+    { "type": "chore", "section": "Internal", "hidden": true }
+  ],
+  "packages": {
+    ".": {
+      "extra-files": [
+        { "type": "generic", "path": "components/espos_audio/idf_component.yml" },
+        { "type": "generic", "path": "components/espos_ble/idf_component.yml" },
+        { "type": "generic", "path": "components/espos_config/idf_component.yml" },
+        { "type": "generic", "path": "components/espos_core/idf_component.yml" },
+        { "type": "generic", "path": "components/espos_devices/idf_component.yml" },
+        { "type": "generic", "path": "components/espos_eth/idf_component.yml" },
+        { "type": "generic", "path": "components/espos_event/idf_component.yml" },
+        { "type": "generic", "path": "components/espos_flow/idf_component.yml" },
+        { "type": "generic", "path": "components/espos_formulas/idf_component.yml" },
+        { "type": "generic", "path": "components/espos_health/idf_component.yml" },
+        { "type": "generic", "path": "components/espos_httpd/idf_component.yml" },
+        { "type": "generic", "path": "components/espos_log/idf_component.yml" },
+        { "type": "generic", "path": "components/espos_n2k/idf_component.yml" },
+        { "type": "generic", "path": "components/espos_net/idf_component.yml" },
+        { "type": "generic", "path": "components/espos_ota/idf_component.yml" },
+        { "type": "generic", "path": "components/espos_prov/idf_component.yml" },
+        { "type": "generic", "path": "components/espos_sensors/idf_component.yml" },
+        { "type": "generic", "path": "components/espos_sk/idf_component.yml" },
+        { "type": "generic", "path": "components/espos_sk_flow/idf_component.yml" },
+        { "type": "generic", "path": "components/espos_time/idf_component.yml" },
+        { "type": "generic", "path": "components/espos_voice/idf_component.yml" },
+        { "type": "generic", "path": "components/espos_wifi/idf_component.yml" }
+      ]
+    }
+  }
+}

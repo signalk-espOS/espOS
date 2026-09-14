@@ -74,7 +74,8 @@ macro(espos_project_version)
                 if(_espos_ver_base AND NOT CMAKE_MATCH_1 STREQUAL _espos_ver_base)
                     message(WARNING
                         "espOS: version.txt says ${_espos_ver_base} but the nearest tag is "
-                        "v${CMAKE_MATCH_1}. Bump one of them (scripts/release.sh does both).")
+                        "v${CMAKE_MATCH_1}. Bump one of them (release-please's release PR does both; "
+                        "docs/releasing.md).")
                 endif()
             else()
                 message(STATUS

@@ -1,7 +1,10 @@
 <!--
 Title as a Conventional Commit: `fix(wifi): ...`, `feat(sk): ...`, `docs: ...`
-(types and scopes in CONTRIBUTING.md). Add the type as a label too -- the
-release notes are sorted by label (.github/release.yml).
+(types and scopes in CONTRIBUTING.md). The title IS the CHANGELOG.md entry:
+pull requests are squash-merged and release-please builds the release notes
+from the titles, so write it for someone reading those notes. A change a
+consumer has to react to puts `!` after the type (`feat(sk)!: ...`) and a
+`BREAKING CHANGE: <what to change>` line at the end of this description.
 -->
 
 ## What and why
@@ -23,5 +26,5 @@ release notes are sorted by label (.github/release.yml).
 ## Docs
 
 - [ ] `docs/` updated where behaviour changed (`docs/rest-api.md` is a contract)
-- [ ] `CHANGELOG.md` has an entry under Unreleased (user-visible changes only)
+- [ ] the title reads as its CHANGELOG.md line (it becomes one; do not edit CHANGELOG.md)
 - [ ] new files carry the SPDX header (`reuse lint`), commits are signed off (`git commit -s`)
