@@ -3,7 +3,7 @@
 **Essential.** From the minimal example to a live reading in the Signal K
 Data Browser, with the boot narration and the approval step explained on the
 way. The reading is a voltage on an analog pin, the structure of
-`components/espos_sk/examples/analog_input`, so a jumper wire is the only sensor. You need ESP-IDF v6.0.2
+`components/espos_sk/examples/analog_input`, so a jumper wire is the only sensor. You need ESP-IDF v6.0.3
 exported ([getting-started.md](../getting-started.md)), a devkit on USB, and a signalk-server on the LAN with mDNS on, plus its admin login.
 
 ## 1. A project of your own

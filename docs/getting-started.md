@@ -7,10 +7,10 @@ part is a handful of commands and two clicks in the server's UI.
 ## Prerequisites
 
 * **ESP-IDF 6.0.x.** espOS is tested on the release named in `.idf-version`
-  (v6.0.2); any other 6.0.x builds with one warning, and anything outside
+  (v6.0.3); any other 6.0.x builds with one warning, and anything outside
   6.0 is refused ([Troubleshooting](troubleshooting.md#build)). Install it
   with the [Espressif Installation Manager](https://docs.espressif.com/projects/idf-im-ui/en/latest/)
-  or the [classic guide](https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32c6/get-started/index.html),
+  or the [classic guide](https://docs.espressif.com/projects/esp-idf/en/v6.0.3/esp32c6/get-started/index.html),
   then export it in every shell you build from — the installer prints the
   exact line, which is a form of
 

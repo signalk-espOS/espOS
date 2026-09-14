@@ -12,7 +12,7 @@ whose `reset_reason` and `last_reset` say why the device last restarted.
 
 **`IDF_PATH is ESP-IDF vX.Y.Z; espOS builds with v6.0.0 up to (not including) v6.1.0`**
 : The IDF version policy (`cmake/espos_version.cmake`). espOS is tested on
-  the release in `.idf-version` (v6.0.2); any 6.0.x builds with one warning
+  the release in `.idf-version` (v6.0.3); any 6.0.x builds with one warning
   naming the tested one; another minor is refused, because it moves
   component APIs (esp_hosted, TWAI, the linux target) under the code. Fix:
   install a 6.0.x release and source its `export.sh`. To try anyway,

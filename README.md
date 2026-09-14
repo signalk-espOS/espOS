@@ -30,7 +30,7 @@ is in [docs/roadmap.md](docs/roadmap.md); the decisions taken so far are in
 ## Quick start
 
 ```sh
-. $IDF_PATH/export.sh                # ESP-IDF v6.0.2, see .idf-version
+. $IDF_PATH/export.sh                # ESP-IDF v6.0.3, see .idf-version
 idf.py set-target esp32c6            # or esp32 / esp32s3 / esp32c3 / esp32p4
 idf.py build flash monitor           # on a shared or small host: scripts/build.sh build
 # the monitor says what to do next: join the "espOS-xxxx" access point and open
