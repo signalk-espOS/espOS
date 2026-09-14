@@ -86,6 +86,10 @@ static struct {
     bool probed_tls;
     uint16_t probed_use_port; /* a redirect may name a different port */
     bool probed_valid;
+    /* The chosen server's scheme is a guess (plain), not a probe's answer:
+     * there was no network at selection, or nothing answered. Asked again
+     * when the network comes up and after every leg; see resolve_scheme(). */
+    bool scheme_provisional;
     bool have_server;
     espos_sk_server_t server;
     char server_source[12];          /* "manual" | "discovered" | "pinned" | "" */
@@ -359,8 +363,24 @@ static bool resolve_scheme(espos_sk_server_t *srv, int advertised)
         srv->port = s.probed_use_port;
         return s.probed_tls;
     }
+    /* Plain for now, provisional, whenever there is no answer to go on: with
+     * no network the probe cannot reach anything, and a host that does not
+     * respond says nothing about its scheme. Both used to be cached as "plain
+     * http" for (host, port), so a manual https server was never found by a
+     * device that boots before its network is up -- every device -- or before
+     * the server does, which on a boat is the usual order. The network coming
+     * up and every leg that runs on the guess ask again. */
+    if (!espos_net_is_up()) {
+        s.scheme_provisional = true;
+        return false;
+    }
     uint16_t use = srv->port;
-    bool tls = espos_sk_http_probe_https(srv->host, srv->port, &use);
+    espos_sk_probe_t probe = espos_sk_http_probe_https(srv->host, srv->port, &use);
+    if (probe == ESPOS_SK_PROBE_NO_ANSWER) {
+        s.scheme_provisional = true;
+        return false;
+    }
+    bool tls = probe == ESPOS_SK_PROBE_TLS;
     snprintf(s.probed_host, sizeof(s.probed_host), "%s", srv->host);
     s.probed_port = srv->port;
     s.probed_use_port = use;
@@ -455,6 +475,7 @@ static void select_server(void)
         }
         unlock();
     }
+    s.scheme_provisional = false; /* resolve_scheme() says so when it had to guess */
     chosen.tls = have && resolve_scheme(&chosen, discovered_tls);
     bool changed = have != s.have_server || (have && (strcmp(chosen.host, s.server.host) != 0 ||
                                                       chosen.port != s.server.port || chosen.tls != s.server.tls ||
@@ -728,6 +749,13 @@ static void run_action(void)
         break;
     }
     free(r);
+    /* The scheme is a guess because the probe went unanswered: every leg that
+     * runs on it is the cadence to ask again at, so a server that came up
+     * after the device is reached over the scheme it speaks. Cheap when it
+     * answers; paced by the machine's own backoff when it does not. */
+    if (s.scheme_provisional && espos_net_is_up()) {
+        select_server();
+    }
     maybe_rotate_unreachable();
 }
 
@@ -745,15 +773,30 @@ static void sk_task(void *arg)
     free(store);
     espos_sk_tok_event(&s.sm, ESPOS_SK_EV_START, NULL);
     s.discover_due_ms = at(2000); /* first pass shortly; re-triggered when the network comes up */
-    select_server();
+    /* Only with a network. Without one a manual host is handed to the machine
+     * unreachable, and its first failed leg costs the full error backoff after
+     * the network does come up -- ten seconds of a device on the cable doing
+     * nothing. Discovered servers need no such care: there are none until
+     * then. The up edge below selects. */
+    s.net_was_up = espos_net_is_up();
+    if (s.net_was_up) {
+        select_server();
+    }
     p_status_changed(NULL);
 
     for (;;) {
-        /* 0. network came up: discover right away (mDNS is useless before) */
+        /* 0. network came up: discover right away (mDNS is useless before),
+         * and select a manual host that could not be selected, or probed,
+         * without it */
         {
             bool up = espos_net_is_up();
-            if (up && !s.net_was_up && discovery_wanted()) {
-                s.discover_due_ms = at(0);
+            if (up && !s.net_was_up) {
+                if (discovery_wanted()) {
+                    s.discover_due_ms = at(0);
+                }
+                if (s.cfg_host[0] && (!s.have_server || s.scheme_provisional)) {
+                    select_server();
+                }
             }
             s.net_was_up = up;
         }

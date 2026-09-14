@@ -447,7 +447,14 @@ what every boat server has.
   been established as our server yet, and handing the credential to whatever
   answers is exactly what must not happen.
 
-The answer is a field on the chosen server (`espos_sk_server_t::tls`), cached
+  No answer on either scheme is not an answer. The host may be down, still
+  booting, or not reachable yet, and on a boat the server usually comes up
+  after its devices. The device uses plain http as a guess, does not remember
+  it, and asks again when the network comes up and after every attempt that
+  runs on the guess. For the same reason a manual host is not selected, or
+  probed, before there is a network at all.
+
+An answer is a field on the chosen server (`espos_sk_server_t::tls`), cached
 per `(host, port)` and re-decided only when the selection changes. It is *not*
 `restart_required` any more: `sk_ws.c` destroys and rebuilds its transport pair
 when the scheme changes, so a server that gains or loses TLS is followed live.

@@ -416,6 +416,17 @@ Entries name the component the way commit scopes do (`wifi`, `sk`, `ble`,
 
 ### Fixed
 
+- sk: with `sk.scheme` `auto` and a manually configured server, a scheme probe
+  that reached nothing was remembered as plain http for that address. A device
+  probes before its network is up, so a manual https server, or one that
+  redirects to https, was never found; and a server that booted after the
+  device, the usual order on a boat, was talked to over plain http from then
+  on. The probe now tells "no answer" from "plain", only an answer is cached,
+  and a guess is asked again when the network comes up and after every
+  attempt. A manual host is also selected only once there is a network, which
+  removes the ten-second error backoff every cold boot used to sit out before
+  reaching its server.
+
 - n2k: `esp_driver_gpio` is a PUBLIC requirement, not a private one.
   `twai_receiver.h` is a public header and `TwaiReceiverConfig` exposes
   `gpio_num_t`, so every consumer needs `driver/gpio.h` on its include path —
