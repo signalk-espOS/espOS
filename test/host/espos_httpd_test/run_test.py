@@ -767,7 +767,9 @@ class MockSignalK:
         self.push({"context": context or ("vessels." + self.self_urn), "updates": [upd]})
 
     def __init__(self, self_urn="urn:mrn:signalk:uuid:0e6d1a1a-1111-4111-8111-000000000099",
-                 redirect_to=None, unauth_once=False):
+                 redirect_to=None, unauth_once=False, port=0):
+        # port: 0 for an ephemeral one; a fixed port lets a test bring a
+        #   server up at an address the device was already failing to reach.
         # redirect_to: answer every request with 302 to this URL — the shape
         #   signalk-server takes when ssl is on and something still knocks on
         #   the plain port, which is what sk.scheme = auto probes for.
@@ -1026,7 +1028,7 @@ class MockSignalK:
                                             "href": "/signalk/v1/requests/" + rid})
                 return self._send(404, {"error": "nope"})
 
-        self.httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+        self.httpd = http.server.ThreadingHTTPServer(("127.0.0.1", port), H)
         self.port = self.httpd.server_address[1]
         self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
         self.thread.start()
@@ -2365,6 +2367,70 @@ class SkSchemeRedirectTests(unittest.TestCase):
         probes = [e for e in self.plain.ctl("log")[1] if e[0] == "GET"]
         self.assertTrue(probes, "the plain port was never probed")
         self.assertTrue(all(e[2] is None for e in probes), probes)
+
+
+class SkSchemeProbeTimingTests(unittest.TestCase):
+    """When the scheme probe runs, and what it may remember. A device boots
+    before its network is up and, on a boat, usually before its server: a
+    probe that reached nothing is not an answer."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.mock = MockSignalK()
+        cls.late = None
+        # No WiFi credentials: the simulated network stays down until test_01
+        # provides them.
+        cls.h = Harness(fresh=True, extra_env={"ESPOS_SIM_SK_SERVERS": ""})
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.h.stop()
+        cls.mock.stop()
+        if cls.late:
+            cls.late.stop()
+
+    @staticmethod
+    def probes(mock):
+        return [e for e in mock.ctl("log")[1] if e[0] == "GET" and e[1] == "/signalk"]
+
+    def test_01_a_manual_host_is_not_probed_before_the_network_is_up(self):
+        if sk_tls() is None:
+            self.skipTest("built without CONFIG_ESPOS_SK_TLS")
+        st, _, _, net = req("GET", "/api/v1/net/status")
+        self.assertFalse(net["up"], net)   # the premise: no network yet
+        req("PUT", "/api/v1/config", {"sk": {"server_host": "127.0.0.1",
+                                             "server_port": self.mock.port, "scheme": "auto"}})
+        # Loopback reaches the mock whatever the simulated network says, so a
+        # probe sent now would be in its log. Before this was fixed, it was,
+        # and its answer was remembered for the address from then on.
+        time.sleep(3)
+        self.assertEqual(self.probes(self.mock), [])
+        req("PUT", "/api/v1/config", {"wifi": {"ssid0": "Boat", "psk0": "secret12"}})
+        self.assertTrue(wait_for(lambda: self.probes(self.mock) or None, timeout=20),
+                        "the manual host was never probed once the network came up")
+        js = wait_sk(lambda j: j["server"].get("source") == "manual"
+                     and j["server"].get("scheme") == "http", timeout=20)
+        self.assertIsNotNone(js, sk_status())
+
+    def test_02_a_probe_nothing_answered_is_asked_again_not_remembered(self):
+        if sk_tls() is None:
+            self.skipTest("built without CONFIG_ESPOS_SK_TLS")
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            port = s.getsockname()[1]
+        # Nothing listens there yet: the server is down, or still booting.
+        req("PUT", "/api/v1/config", {"sk": {"server_host": "127.0.0.1",
+                                             "server_port": port, "scheme": "auto"}})
+        js = wait_sk(lambda j: j["server"].get("source") == "manual"
+                     and j["server"].get("port") == port, timeout=20)
+        self.assertIsNotNone(js, sk_status())
+        self.assertEqual(js["server"]["scheme"], "http")   # a guess, for now
+        # Then it comes up, and it is an https server. The device finds out on
+        # its next attempt instead of talking plain http to it for ever.
+        type(self).late = MockSignalK(redirect_to="https://127.0.0.1:44300", port=port)
+        js = wait_sk(lambda j: j["server"].get("scheme") == "https", timeout=45)
+        self.assertIsNotNone(js, sk_status())
+        self.assertEqual(js["server"]["port"], 44300)
 
 
 class SkPlaintextUnauthTests(unittest.TestCase):

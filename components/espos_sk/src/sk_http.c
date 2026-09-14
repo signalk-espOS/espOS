@@ -465,15 +465,20 @@ void espos_sk_http_verify(const espos_sk_server_t *srv, const char *token, espos
  *                               shape.
  *   anything else               plain http works; use it.
  *
+ * And a fourth that is not an answer: nothing responds on either scheme.
+ * That is a host that is down, still booting or not reachable yet, and it
+ * says nothing about what the server speaks -- so it is reported as
+ * NO_ANSWER, never as plain.
+ *
  * Without a token, deliberately (SensESP #1057): a probe is aimed at a host
  * that has not been established as our server yet, and the token must not be
  * handed to whatever answered — the whole point of the exercise is that we do
  * not know what that is.
  *
- * Runs once per server selection, not per request; the answer is cached in the
+ * Runs once per server selection, not per request; an answer is cached in the
  * server entry.
  */
-bool espos_sk_http_probe_https(const char *host, uint16_t port, uint16_t *out_port)
+espos_sk_probe_t espos_sk_http_probe_https(const char *host, uint16_t port, uint16_t *out_port)
 {
     espos_sk_server_t plain = { .port = port, .tls = false };
     snprintf(plain.host, sizeof(plain.host), "%s", host);
@@ -509,29 +514,30 @@ bool espos_sk_http_probe_https(const char *host, uint16_t port, uint16_t *out_po
             }
         }
         ESP_LOGI(TAG, "%s:%u redirects to https (%s)", host, (unsigned)port, loc);
-        return true;
+        return ESPOS_SK_PROBE_TLS;
     }
-    if (err != ESP_OK && status == 0) {
-        /* Nothing answered on the plain port. A TLS-only server is the other
-         * thing that looks like this, so ask once before concluding the host
-         * is simply down -- and let the trust store judge the certificate,
-         * which is what tells the two apart. */
-        espos_sk_server_t secure = plain;
-        secure.tls = true;
-        espos_sk_http_req_t rq2 = rq;
-        rq2.srv = &secure;
-        rq2.capture_location = NULL;
-        rq2.capture_location_size = 0;
-        espos_sk_http_resp_t r2;
-        esp_err_t e2 = espos_sk_http_perform(&rq2, &r2);
-        int st2 = r2.status;
-        espos_sk_http_resp_free(&r2);
-        if (e2 == ESP_OK && st2 > 0) {
-            ESP_LOGI(TAG, "%s:%u answers only over https", host, (unsigned)port);
-            return true;
-        }
+    if (err == ESP_OK || status > 0) {
+        return ESPOS_SK_PROBE_PLAIN;
     }
-    return false;
+    /* Nothing answered on the plain port. A TLS-only server is the other
+     * thing that looks like this, so ask once before concluding the host
+     * is simply down -- and let the trust store judge the certificate,
+     * which is what tells the two apart. */
+    espos_sk_server_t secure = plain;
+    secure.tls = true;
+    espos_sk_http_req_t rq2 = rq;
+    rq2.srv = &secure;
+    rq2.capture_location = NULL;
+    rq2.capture_location_size = 0;
+    espos_sk_http_resp_t r2;
+    esp_err_t e2 = espos_sk_http_perform(&rq2, &r2);
+    int st2 = r2.status;
+    espos_sk_http_resp_free(&r2);
+    if (e2 == ESP_OK && st2 > 0) {
+        ESP_LOGI(TAG, "%s:%u answers only over https", host, (unsigned)port);
+        return ESPOS_SK_PROBE_TLS;
+    }
+    return ESPOS_SK_PROBE_NO_ANSWER;
 }
 
 /* -------------------------------------------------------------- meta */

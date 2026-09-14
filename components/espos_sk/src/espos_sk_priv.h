@@ -52,6 +52,16 @@ typedef struct {
 } espos_sk_http_req_t;
 
 esp_err_t espos_sk_http_perform(const espos_sk_http_req_t *rq, espos_sk_http_resp_t *r);
+/* What the scheme probe learned. NO_ANSWER is not "plain http": nothing
+ * answered on either scheme -- no network yet, the host down or still
+ * booting, a certificate the trust store refused -- so it is not an answer to
+ * remember. */
+typedef enum {
+    ESPOS_SK_PROBE_NO_ANSWER = 0,
+    ESPOS_SK_PROBE_PLAIN = 1,
+    ESPOS_SK_PROBE_TLS = 2,
+} espos_sk_probe_t;
+
 /**
  * sk.scheme = auto, for a manually configured host: does this server want
  * https? One unauthenticated probe (SensESP #1057 -- never hand the token to
@@ -59,7 +69,7 @@ esp_err_t espos_sk_http_perform(const espos_sk_http_req_t *rq, espos_sk_http_res
  * server selection. *out_port receives the port to use, which a redirect may
  * change. Blocking, several seconds; SK task only.
  */
-bool espos_sk_http_probe_https(const char *host, uint16_t port, uint16_t *out_port);
+espos_sk_probe_t espos_sk_http_probe_https(const char *host, uint16_t port, uint16_t *out_port);
 
 /* "<scheme>://host:port/path"; ESP_ERR_INVALID_SIZE when it does not fit. */
 esp_err_t espos_sk_http_build_url(const espos_sk_server_t *srv, const char *scheme, const char *path, char *out, size_t n);
