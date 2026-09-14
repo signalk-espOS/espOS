@@ -33,10 +33,9 @@ and the tag remains the deliverable; the release is a readable front page
 for it.
 
 The `[Unreleased]` block further down `CHANGELOG.md` is the hand-written
-changelog from before the switch. `last-release-sha` in
-`release-please-config.json` keeps the first generated section from repeating
-it; when the 0.8.0 release PR opens, fold that block into its section by hand
-and remove `last-release-sha`.
+changelog from before the switch. Its entries belong to the next feature
+release: when that release PR opens, fold the block into its section by hand.
+Nothing generates it, and nothing removes it.
 
 ## What a device reports
 
