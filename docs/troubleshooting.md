@@ -55,9 +55,12 @@ whose `reset_reason` and `last_reset` say why the device last restarted.
   you ship: see [OTA](#ota) below.
 
 **The build stops fitting** (`size report`, `ota_0` over 90 %)
-: The app slot is 1600 KB on the default 4 MB table. Bluedroid alone is
-  about 2 MB on a native-radio target — move to `partitions/8mb.csv`
-  ([Hardware](hardware.md#flash-size-and-partition-tables)).
+: The app slot is 1728 KB on the default 4 MB table. A Bluedroid firmware is
+  larger than that on a native-radio target — the BLE gateway measures
+  2.13 MB on an ESP32-C6 — so move to `partitions/8mb.csv`
+  ([Hardware](hardware.md#flash-size-and-partition-tables)). Two such slots
+  plus storage do not fit a 4 MB chip at all, so a 4 MB board can carry that
+  firmware only without OTA, in a single `factory` slot.
 
 ## WiFi
 
