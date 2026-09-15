@@ -6,8 +6,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "sdkconfig.h"
+
 #include "esp_app_desc.h"
+#if CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
 #include "esp_crt_bundle.h"
+#endif
 #include "esp_http_client.h"
 #include "esp_https_ota.h"
 #include "esp_log.h"
@@ -77,13 +81,45 @@ static void http_cfg(esp_http_client_config_t *c, const char *url, bool allow_in
         c->skip_cert_common_name_check = true;
         c->crt_bundle_attach = NULL;
     } else {
+#if CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
         c->crt_bundle_attach = esp_crt_bundle_attach;
+#else
+        /* No bundle in this build, so there is no trust anchor to verify an
+         * https manifest or image against. Leaving this NULL would let esp-tls
+         * connect with no verification at all, which is the one outcome an
+         * update path must not have -- so the attach stays NULL and the caller
+         * refuses the URL below rather than fetching it unverified. An http
+         * URL still works, and so does https with ota.allow_insecure set,
+         * which is an explicit choice someone made. */
+        c->crt_bundle_attach = NULL;
+#endif
     }
+}
+
+/* https without a way to verify the peer. Only reachable in a build with
+ * MBEDTLS_CERTIFICATE_BUNDLE off, which is not the default: espos_sk's
+ * ESPOS_SK_TLS selects it, and turning that off is what leaves espos_ota
+ * without one. */
+static bool unverifiable_https(const char *url, bool allow_insecure)
+{
+#if CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
+    (void)url;
+    (void)allow_insecure;
+    return false;
+#else
+    return !allow_insecure && url && strncmp(url, "https://", 8) == 0;
+#endif
 }
 
 esp_err_t espos_ota_port_install(const char *url, bool allow_insecure, const char *expect_project,
                                  espos_ota_progress_cb_t cb, void *arg, char *err_text, size_t err_size)
 {
+    if (unverifiable_https(url, allow_insecure)) {
+        snprintf(err_text, err_size,
+                 "https needs a certificate bundle this firmware was built without "
+                 "(MBEDTLS_CERTIFICATE_BUNDLE); use http, or set ota.allow_insecure");
+        return ESP_ERR_INVALID_STATE;
+    }
     esp_http_client_config_t hc;
     http_cfg(&hc, url, allow_insecure);
     esp_https_ota_config_t oc = {
@@ -148,6 +184,14 @@ esp_err_t espos_ota_port_install(const char *url, bool allow_insecure, const cha
 
 esp_err_t espos_ota_port_fetch(const char *url, bool allow_insecure, size_t max, char **out, size_t *len, int *status)
 {
+    if (unverifiable_https(url, allow_insecure)) {
+        /* No err_text here, unlike install(): the caller gets a status code and
+         * this line. Same rule though -- an unverifiable https fetch does not
+         * happen. */
+        ESP_LOGE(TAG, "https needs a certificate bundle this firmware was built without "
+                      "(MBEDTLS_CERTIFICATE_BUNDLE); use http, or set ota.allow_insecure");
+        return ESP_ERR_INVALID_STATE;
+    }
     esp_http_client_config_t hc;
     http_cfg(&hc, url, allow_insecure);
     hc.keep_alive_enable = false;
