@@ -14,7 +14,7 @@
 ## Build & flash the example app
 
 ```sh
-. $IDF_PATH/export.sh                                    # ESP-IDF 6.0.x, the release in .idf-version
+. $IDF_PATH/export.sh                                    # ESP-IDF 6.0.x, see .idf-version
 scripts/build.sh -DIDF_TARGET=esp32c6                    # any of: esp32 esp32s3 esp32c3 esp32c6 esp32p4
 scripts/build.sh flash monitor
 ```
