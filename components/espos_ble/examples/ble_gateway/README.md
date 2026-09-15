@@ -95,5 +95,33 @@ if you fork this: a device keeps the partition table it was flashed with,
 because an OTA replaces app slots and never the table, so changing tables
 turns the next update into a USB reflash.
 
-Built for esp32c6 and esp32p4, zero warnings. The folded example has not been
-run on hardware; the standalone firmware it came from was.
+Built for esp32c6 and esp32p4, zero warnings. Run on the PoE gateway
+(ESP32-P4 + C6) on 2026-09-15, in a build that also enabled `espos_prov` --
+which is how the incompatibility in [provisioning.md](../../../../docs/provisioning.md)
+was found.
+
+### Updating a gateway that already exists
+
+The first build here generated a signing key in this directory, and it is
+not the key your gateway was flashed with — the standalone repository had
+its own. An OTA built here is therefore **refused** by that device:
+
+```
+E (21719384) esp_image: Secure boot signature verification failed
+E (21719547) espos_ota: install failed: image rejected: bad signature or corrupt
+```
+
+Nothing is harmed — the device rejects the image before writing anything and
+carries on — but the update does not install. Build with the key that device
+trusts:
+
+```cmake
+espos_project_prologue(NAME "ble-gateway"
+                       SIGNING_KEY "/path/to/the/gateways/key.pem"
+                       ...)
+```
+
+`espos_ota` reports only "signature bad", never which key it wanted, so the
+way to identify the mismatch is to compare the RSA modulus in the signature
+block of the running image against the key you signed with.
+[ota.md](../../../../docs/ota.md) has the commands.
