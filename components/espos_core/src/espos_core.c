@@ -301,7 +301,25 @@ esp_err_t espos_start_network(void)
         espos_ble_portal_hold(true);
     }
 #endif
-    STAGE(espos_ble_start());
+    /* Not fatal, for the same reason provisioning and the duty cycle below are
+     * not: a device that cannot bring up its radio is still a device, and one
+     * that serves its web UI is more useful than one that reboot-loops.
+     *
+     * Seen on an ESP32-C5 (2026-09-16): with the station up and the setup
+     * portal running, Bluedroid could not be initialised -- 166 KiB of heap on
+     * a single-core part, with WiFi holding most of it -- and espos_ble_start()
+     * returned ESP_ERR_NO_MEM. Everything else had already started: config, the
+     * health watchdog, httpd, mDNS, the portal. STAGE() returned that error up
+     * to the application, whose ESP_ERROR_CHECK(espos_start(NULL)) aborted, and
+     * the device boot-looped rather than letting anyone reach the page that
+     * would have told them what was wrong.
+     *
+     * espos_ble_start() returns ESP_OK when the config disables it, so an error
+     * here is a real failure and worth a warning rather than silence. */
+    esp_err_t ble_err = espos_ble_start();
+    if (ble_err != ESP_OK) {
+        ESP_LOGW(TAG, "BLE unavailable: %s", esp_err_to_name(ble_err));
+    }
 #endif
 #if START_PROV
     /* Only when nothing is configured to join. A device already on a network
