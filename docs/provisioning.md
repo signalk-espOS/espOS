@@ -73,10 +73,13 @@ Until this is fixed, use `espos_prov` **only in a firmware without
 `espos_ble`**. A device that needs both has to provision over the SoftAP
 portal ([wifi.md](wifi.md)).
 
-Fixing it means one of: teaching protocomm to skip initialisation when the
-stack is up (an upstream change), or giving `espos_prov` its own transport
-that does not go through `simple_ble`. Neither is a small change, and
-neither has been made.
+Fixing it means teaching protocomm to skip initialisation when the stack is
+already up. **That patch is now submitted upstream**:
+[espressif/esp-idf#19086](https://github.com/espressif/esp-idf/pull/19086),
+verified on an ESP32-C5 -- provisioning declines with
+`ESP_ERR_INVALID_STATE` before it and starts after it, same board, same
+firmware. Until it lands in a release espOS pins, the constraint above
+stands: use `espos_prov` only in a firmware without `espos_ble`.
 
 **Do not call `espos_prov_start()` inside `ESP_ERROR_CHECK()`.** It returns
 errors a device can survive, and on a board with no serial console an abort
@@ -128,9 +131,25 @@ CONFIG_BT_BLE_50_FEATURES_SUPPORTED=n
 
 The two are mutually exclusive. This is **not** a hardware limitation -- the
 ESP32-C5 declares `SOC_BLE_50_SUPPORTED` and its radio is BLE 5.0 -- it is
-Espressif's provisioning code not having been updated for extended
-advertising. A firmware that needs extended advertising for something else
-cannot also use `espos_prov` until that changes upstream.
+protocomm's advertising code, and **upstream has already fixed it**:
+`16f9e082dd feat(protocomm): Add support for BLE 5 for bluedroid` (2026-07-28)
+adds an extended-advertising path chosen automatically, with no new option to
+set:
+
+```c
+#if CONFIG_BT_BLE_42_ADV_EN
+#define SIMPLE_BLE_LEGACY_ADV 1
+#elif CONFIG_BT_BLE_50_EXTEND_ADV_EN
+#define SIMPLE_BLE_EXT_ADV 1
+#endif
+```
+
+That commit is on `master` only. `release/v6.0`, `release/v5.5` and
+`release/v5.4` do not carry it, so espOS -- which pins
+`idf: ">=6.0.0,<6.1.0"` -- still needs the 4.2 setting above. The constraint
+is on the releases espOS builds against, not on protocomm as such, and it
+lifts by itself once a release containing that commit lands and espOS moves
+to it.
 
 ### The portal does the same job without any of this
 

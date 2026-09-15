@@ -97,7 +97,13 @@ was retired.
   SRP6a and the JSON endpoint while dropping only `simple_ble`. That fixes
   both constraints and costs a few hundred lines we would own. Not built:
   every espOS device today provisions through the SoftAP portal, which needs
-  none of this. An upstream fix for the double-init is worth proposing
-  separately -- it is ~30 lines and helps everyone -- but it would land in a
-  later IDF than the `[6.0.0, 6.1.0)` espOS pins, so it is not a plan for
-  this year.
+  none of this. The upstream fix for the double-init was written and
+  submitted: [espressif/esp-idf#19086](https://github.com/espressif/esp-idf/pull/19086),
+  guarding both the controller and Bluedroid init on their status getters and
+  unwinding only what `simple_ble_start()` itself brought up. Verified on an
+  ESP32-C5: provisioning declines with `ESP_ERR_INVALID_STATE` on stock
+  v6.0.3 and starts on the patched tree, same board and firmware. The BLE 4.2
+  constraint turned out to be fixed upstream already (`16f9e082dd`, master
+  only). Both land for espOS whenever a release carrying them appears and the
+  `[6.0.0, 6.1.0)` pin moves -- so the custom GATT server stays the option
+  that would fix things sooner, and stays unbuilt.
