@@ -3,7 +3,7 @@
 ## espos_time component manifest: registry metadata for signalk-espos/espos_time.
 ## The version is espOS's (version.txt) and moves with it, see docs/releasing.md.
 # x-release-please-start-version
-version: "0.7.1"
+version: "0.8.0"
 # x-release-please-end
 description: "The device's wall clock: SNTP, SignalK and RTC sources behind one ranked API"
 url: "https://github.com/signalk-espOS/espOS/tree/main/components/espos_time"
