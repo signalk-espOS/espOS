@@ -49,7 +49,7 @@ and send it; then 200 to switch off again.
 ## Build and flash
 
 ```sh
-. $IDF_PATH/export.sh                   # ESP-IDF v6.0.3, see .idf-version
+. $IDF_PATH/export.sh                   # ESP-IDF 6.0.x, the release in .idf-version
 cd components/espos_sk/examples/listener_relay
 idf.py set-target esp32c6               # or esp32p4
 idf.py build flash monitor              # shared or small host: ../../../../scripts/build.sh build
