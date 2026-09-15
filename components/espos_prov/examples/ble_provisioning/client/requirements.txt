@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: 2026 Dirk Wahrheit
+# SPDX-License-Identifier: Apache-2.0
+#
+# The client's dependencies, at the versions it was verified with on an
+# ESP32-C5 (docs/provisioning.md). Newer ones are very likely fine; these are
+# recorded because a BLE stack and a protobuf runtime are both places where
+# "it worked last month" is not evidence.
+#
+# protobuf is the RUNTIME only. The generated modules are not shipped -- see
+# the README: they are built from the .proto files in your own ESP-IDF
+# checkout, so the schema always matches the IDF the device was built with.
+bleak==3.0.2
+cryptography==43.0.0
+protobuf==7.36.1
+# protoc itself, for the generate step in the README. Only needed once.
+grpcio-tools

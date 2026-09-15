@@ -26,6 +26,7 @@ threading, boot order, the server's REST tree, TLS.
 | `n2k_candump` | Advanced | an NMEA 2000→Signal K gateway: CAN frames out as candump ASCII over TCP, decoded by canboatjs on the server | — (SensESP has no equivalent) | `components/espos_n2k/examples/n2k_candump` |
 | `ethernet` | Newbie | an espOS device on a cable: the whole firmware is `espos_start()`, WiFi off, the route on wired Ethernet | — (SensESP's `p4_ethernet`) | `components/espos_eth/examples/ethernet` |
 | `duty_cycle` | Advanced | a device on a battery: wake, publish, flush, deep-sleep, again — and how it stays reachable | — (SensESP has no equivalent) | `components/espos_power/examples/duty_cycle` |
+| `ble_provisioning` | Advanced | WiFi credentials handed over BLE instead of the setup portal, with the Python client that speaks it | — (SensESP has no equivalent) | `components/espos_prov/examples/ble_provisioning` |
 
 The three below are the same ideas as a **data-flow graph**, in C++. Nothing
 needs them — a firmware is free to stay with the C examples above, which is
