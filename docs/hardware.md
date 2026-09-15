@@ -7,7 +7,7 @@ it builds for and a radio.
 
 ## Chips
 
-CI builds the reference application for five targets on every change
+CI builds the reference application for six targets on every change
 (`.github/workflows/ci.yml`); every example builds for `esp32c6` and the ones
 with peripherals for `esp32p4` too.
 
@@ -18,7 +18,8 @@ with peripherals for `esp32p4` too.
 | `esp32c3` | in CI | RISC-V, single core, the smallest. Native radio. |
 | `esp32c6` | in CI | RISC-V, WiFi 6, native radio. The target the getting-started guide and the examples use. |
 | `esp32p4` | in CI, in daily use | **No radio of its own.** WiFi and BLE come from an ESP32-C6 co-processor over SDIO (below). PSRAM; internal RAM is the scarce pool ([health](health.md)). Rev 1.x silicon allowed. |
-| `esp32c5`, `esp32c61` | later | Same shape as the C6; waiting for hardware on the bench and a CI slot. |
+| `esp32c5` | in CI | RISC-V, native radio, same shape as the C6. The target [BLE provisioning](provisioning.md) was verified on end to end, which is also why it has a BLE 5.0 radio worth knowing about: protocomm still advertises with the 4.2 API, so a build with `espos_prov` asks for `BT_BLE_42_FEATURES_SUPPORTED`. |
+| `esp32c61` | later | Same shape as the C6; waiting for hardware on the bench and a CI slot. |
 | `esp32h2`, `esp32h4` | not planned as such | No WiFi radio (BLE + 802.15.4 only). The runtime no longer assumes WiFi -- [`espos_net`](net.md) is the seam and a headless esp32h2 build is a CI gate -- so what these still need is a transport (Thread, or Ethernet on a board that has it). |
 
 The toolchain is one ESP-IDF for all of them: 6.0.x, tested on the release in
@@ -132,7 +133,7 @@ nothing special to configure:
 
 ## Before you buy
 
-Any development board with one of the five chips works for the core:
+Any development board with one of the six chips works for the core:
 a bare ESP32-C6 module on a breakout is the cheapest way to try espOS, and a
 Waveshare P4 panel is the reference for anything with a display or voice.
 For a co-processor board other than Waveshare's, budget a session for the

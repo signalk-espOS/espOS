@@ -1,0 +1,36 @@
+# SPDX-FileCopyrightText: 2026 Dirk Wahrheit
+# SPDX-License-Identifier: Apache-2.0
+#
+# Only what differs from espOS. cmake/espos_project.cmake puts
+# sdkconfig.d/espos.defaults (+ .<target>) on SDKCONFIG_DEFAULTS ahead of this
+# file, so flash/OTA/signing, logging, the HTTP server and the task stacks are
+# inherited and a line here is an override, never a mirror. Defaults reach a
+# FRESH sdkconfig only: delete build*/sdkconfig after changing anything here
+# or in espOS's fragments.
+
+# --- Bluetooth ---------------------------------------------------------
+# espos_prov is built on protocomm, which is Bluedroid-only. On a chip with a
+# native radio this is the whole of it; the ESP32-P4 would additionally need
+# the C6 co-processor's HCI route, which is why that board runs the gateway
+# example instead of this one.
+CONFIG_BT_ENABLED=y
+CONFIG_BT_BLUEDROID_ENABLED=y
+CONFIG_BT_GATTS_ENABLE=y
+
+# BLE 4.2 advertising, and this is protocomm's limit rather than the chip's.
+# simple_ble advertises only through the 4.2 legacy API, which Bluedroid
+# compiles under BLE_42_ADV_EN; a radio configured for 5.0 extended
+# advertising does not build those symbols and the link fails with undefined
+# references to esp_ble_gap_start_advertising and esp_ble_gap_config_adv_data.
+# The two are mutually exclusive. The ESP32-C5 this was verified on declares
+# SOC_BLE_50_SUPPORTED -- the radio is 5.0 and is being asked to speak 4.2.
+# Upstream has since added BLE 5 support to protocomm; when that reaches a
+# released IDF these two lines go away (docs/provisioning.md).
+CONFIG_BT_BLE_42_FEATURES_SUPPORTED=y
+CONFIG_BT_BLE_50_FEATURES_SUPPORTED=n
+
+# --- Provisioning ------------------------------------------------------
+# Off by default in Kconfig, because it costs about 23 KB of flash and takes
+# the radio from the BLE scanner while it runs. This example exists to turn it
+# on.
+CONFIG_ESPOS_PROV=y

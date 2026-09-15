@@ -243,7 +243,7 @@ the UI; the calibration is edited on the Config page (or `PUT /api/v1/config
   on internal RAM, watched tasks, a strike-counting watchdog that never restarts on
   a lost network, a reset record the next boot can read ([health.md](health.md)).
 * **Host tests**: state machines, parsers and the REST server run on the linux target under Unity and a Python harness ([development.md](development.md)).
-* **Five targets from one tree**: ESP32, S3, C3, C6 and P4 (WiFi over an
+* **Six targets from one tree**: ESP32, S3, C3, C6, C5 and P4 (WiFi over an
   ESP32-C6 co-processor), same code, same `sdkconfig.d/` defaults.
 * Smaller things you will miss going back: the log ring and core dump over
   REST ([tutorial](tutorials/logs-and-core-dumps.md)), SSE instead of polling,

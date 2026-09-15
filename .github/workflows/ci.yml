@@ -215,7 +215,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [esp32, esp32s3, esp32c3, esp32c6, esp32p4]
+        target: [esp32, esp32s3, esp32c3, esp32c6, esp32c5, esp32p4]
     steps:
       # Full history and tags: the version compiled into the image comes from
       # `git describe`, and a shallow clone has nothing to describe — the
@@ -307,6 +307,7 @@ jobs:
           - { example: components/espos_eth/examples/ethernet, target: esp32p4 }
           - { example: components/espos_power/examples/duty_cycle, target: esp32c6 }
           - { example: components/espos_power/examples/duty_cycle, target: esp32p4 }
+          - { example: components/espos_prov/examples/ble_provisioning, target: esp32c6 }
     steps:
       - uses: actions/checkout@v7
         with:
