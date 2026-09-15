@@ -46,7 +46,7 @@ environment exported (`. $IDF_PATH/export.sh` — the release named in
 
 ```sh
 cd components/espos_core/examples/minimal
-idf.py set-target esp32c6                 # esp32 / esp32s3 / esp32c3 / esp32c6 / esp32p4
+idf.py set-target esp32c6                 # esp32 / esp32s3 / esp32c3 / esp32c6 / esp32c5 / esp32p4
 idf.py build flash monitor
 ```
 

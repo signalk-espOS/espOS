@@ -19,7 +19,7 @@ the table below is the same list with the page it pairs with on this site.
 
 ```sh
 cd components/espos_sk/examples/analog_input     # or any other example directory
-idf.py set-target esp32c6                        # esp32 / esp32s3 / esp32c3 / esp32c6 / esp32p4
+idf.py set-target esp32c6                        # esp32 / esp32s3 / esp32c3 / esp32c6 / esp32c5 / esp32p4
 idf.py build flash monitor
 ```
 
