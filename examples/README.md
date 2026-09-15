@@ -59,6 +59,25 @@ cd components/espos_core/examples/minimal
 ../../../../scripts/build.sh flash monitor
 ```
 
+### An example signs with its own key
+
+Each example is a project in its own right, so the first build in it
+generates a signing key there (`secure_boot_signing_key.pem`, git-ignored)
+and signs with that. The key is unique to that directory: an image built
+here is **refused by a device that was flashed from anywhere else**, with
+`esp_ota_ops: New image failed verification`.
+
+That matters only when updating a device over the air. Flashing over USB
+accepts any image, and the device then trusts whichever key that build
+carried. To build an update a *particular* device will take, name its key:
+
+```cmake
+espos_project_prologue(... SIGNING_KEY "/path/to/that/devices/key.pem")
+```
+
+[ota.md](../docs/ota.md) has the whole story, including how to tell which key
+an image carries.
+
 One build directory per target, with its own sdkconfig — what CI and the
 multi-target recipe in docs/development.md do:
 

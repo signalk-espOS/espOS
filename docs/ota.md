@@ -42,6 +42,33 @@ missing the root `CMakeLists.txt` generates a *development* key
 warning, so a fresh checkout builds — but a device flashed with a
 dev-key build only accepts updates signed with that same dev key.
 
+**Every project directory gets its own key**, because the key lives beside
+the project and is generated when it is missing. espOS's own tree is one
+project; so is each example under `components/*/examples/`; so is every
+firmware built on espOS. Build the same application from two directories
+and you get two keys, and an image from one is refused by a device flashed
+from the other:
+
+```
+E (21719384) esp_image: Secure boot signature verification failed
+W (21719545) esp_image: image valid, signature bad
+E (21719546) esp_ota_ops: New image failed verification
+E (21719547) espos_ota: install failed: image rejected: bad signature or
+                        corrupt (ESP_ERR_OTA_VALIDATE_FAILED)
+```
+
+That is the device working correctly — the whole point of signing is that it
+refuses an image it was not told to trust — but "signature bad" says nothing
+about *which* key it wanted. To find out, compare the public key inside the
+running image with the one you signed with:
+
+```sh
+espsecure verify-signature --version 2 --keyfile <key>.pem <image>.bin
+```
+
+The fix is to name the key rather than let a directory invent one, which is
+what `SIGNING_KEY` below is for.
+
 For anything you ship:
 
 ```sh
