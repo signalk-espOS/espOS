@@ -80,3 +80,24 @@ was retired.
   would mean reworking or retiring espOS's WiFi state machine, not swapping a
   component; reaffirmed by the owner 2026-09-15 (no phone app needed).
   [provisioning.md](provisioning.md).
+- 2026-09-15: **`espos_prov` keeps protocomm's BLE transport for now, and the
+  way out is our own GATT server rather than NimBLE.** Provisioning was run
+  end to end on an ESP32-C5 ([provisioning.md](provisioning.md)) and works,
+  with two constraints that both come from `simple_ble`, protocomm's GATT
+  boilerplate: it initialises Bluedroid unconditionally (so it cannot share a
+  firmware with `espos_ble`), and it advertises only through the BLE 4.2
+  legacy API (so a BLE 5.0 radio has to be configured down to 4.2). The
+  obvious alternative, `protocomm_nimble`, fixes neither -- it also
+  advertises with the legacy API, also calls `nimble_port_init()` itself, and
+  `BT_HOST` is a Kconfig *choice*, so a NimBLE `espos_prov` would be
+  build-incompatible with the Bluedroid-based `espos_ble` rather than merely
+  clashing at runtime. What does work is that `protocomm_req_handle()` is
+  public API: `espos_prov` can run its own GATT server on
+  `esp_ble_gap_ext_adv_*` and hand writes to protocomm, keeping Security 2,
+  SRP6a and the JSON endpoint while dropping only `simple_ble`. That fixes
+  both constraints and costs a few hundred lines we would own. Not built:
+  every espOS device today provisions through the SoftAP portal, which needs
+  none of this. An upstream fix for the double-init is worth proposing
+  separately -- it is ~30 lines and helps everyone -- but it would land in a
+  later IDF than the `[6.0.0, 6.1.0)` espOS pins, so it is not a plan for
+  this year.

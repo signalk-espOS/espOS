@@ -83,12 +83,68 @@ errors a device can survive, and on a board with no serial console an abort
 becomes an OTA rollback with the reason lost -- which is how this was found.
 Log it and carry on.
 
-## Not yet run end to end
+## Verified end to end on an ESP32-C5
 
-The handshake and the configuration write have **never completed against a
-device**: the hardware attempt above got as far as proving the two components
-cannot coexist, and stopped there. What is verified is the component's
-failure path, not its success path.
+2026-09-15, on an ESP32-C5 (rev v1.0, native BLE radio, no `espos_ble` in the
+build). A Python client on the same LAN ran the whole flow:
+
+```
+handshake: Cmd0 ->  Resp0 416 bytes
+handshake: Cmd1 ->  Resp1 89 bytes
+SESSION ESTABLISHED -- device proof verified, AES-256-GCM keyed
+writing credentials for 'ProvTestNet' ...
+  device replied: {"ok":true}
+```
+
+and the device acted on them, which is the part that matters:
+
+```
+I (297535) espos_wifi: connecting to 'ProvTestNet'
+I (300595) espos_prov: provisioning stopped
+```
+
+Credentials reached the `wifi` namespace, the state machine picked them up
+through its config-change callback, and the window closed itself about three
+seconds after the write -- each as documented above.
+
+### It needs BLE 4.2 advertising, which is protocomm's limit, not the chip's
+
+protocomm's `simple_ble` advertises only through the BLE **4.2 legacy** API
+(`esp_ble_gap_start_advertising`, `esp_ble_gap_config_adv_data`), which
+Bluedroid compiles under `BLE_42_ADV_EN`. A radio configured for BLE 5.0
+extended advertising does not build those symbols, and the link fails:
+
+```
+undefined reference to `esp_ble_gap_start_advertising'
+undefined reference to `esp_ble_gap_config_adv_data'
+```
+
+So a build with `espos_prov` needs
+
+```
+CONFIG_BT_BLE_42_FEATURES_SUPPORTED=y
+CONFIG_BT_BLE_50_FEATURES_SUPPORTED=n
+```
+
+The two are mutually exclusive. This is **not** a hardware limitation -- the
+ESP32-C5 declares `SOC_BLE_50_SUPPORTED` and its radio is BLE 5.0 -- it is
+Espressif's provisioning code not having been updated for extended
+advertising. A firmware that needs extended advertising for something else
+cannot also use `espos_prov` until that changes upstream.
+
+### The portal does the same job without any of this
+
+`espos_wifi` already brings up a SoftAP portal when no network is configured,
+and it writes the same `wifi` keys:
+
+```
+I (1435) espos_wifi: no network configured: join "espOS-9174" and open http://192.168.4.1
+```
+
+BLE provisioning is an alternative to that, not a prerequisite: it is worth
+having when joining a temporary access point is awkward -- a phone app, a
+sealed enclosure, a fleet being set up in one pass -- and worth skipping
+otherwise.
 
 ## The scanner stops while this runs
 
