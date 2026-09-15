@@ -44,6 +44,52 @@ The alternative was to adopt the manager and give it the station, which
 would mean reworking or retiring espOS's WiFi state machine rather than
 swapping a component. Recorded in [decisions.md](decisions.md).
 
+## It cannot share a firmware with `espos_ble`
+
+**Verified on hardware, 2026-09-15: a build containing both `espos_prov` and
+`espos_ble` starts the gateway and then fails to start provisioning.**
+
+protocomm's BLE transport brings the Bluetooth stack up itself --
+`simple_ble_start()` calls `esp_bt_controller_init()` and
+`esp_bluedroid_init_with_cfg()` unconditionally, with no check for a stack
+that is already running. `espos_ble` has already initialised Bluedroid for
+the gateway by then, so the second initialisation is refused:
+
+```
+I (4543) espos_ble: scanning suspended (BLE provisioning)
+E (4544) BT_LOG: Bluedroid already initialised
+E (4544) simple_ble: simple_ble_start init bluetooth failed 259
+E (4547) protocomm_ble: simple_ble_start failed w/ error code 0x103
+E (4553) espos_prov: protocomm_ble_start: ESP_ERR_INVALID_STATE
+I (4558) espos_ble: scanning resumed
+```
+
+`espos_prov_start()` returns `ESP_ERR_INVALID_STATE`. It unwinds correctly --
+the scanner is resumed and nothing leaks -- so the gateway keeps working and
+only provisioning is missing. `GET /api/v1/prov` is absent too, because the
+endpoint is registered at the end of a successful start.
+
+Until this is fixed, use `espos_prov` **only in a firmware without
+`espos_ble`**. A device that needs both has to provision over the SoftAP
+portal ([wifi.md](wifi.md)).
+
+Fixing it means one of: teaching protocomm to skip initialisation when the
+stack is up (an upstream change), or giving `espos_prov` its own transport
+that does not go through `simple_ble`. Neither is a small change, and
+neither has been made.
+
+**Do not call `espos_prov_start()` inside `ESP_ERROR_CHECK()`.** It returns
+errors a device can survive, and on a board with no serial console an abort
+becomes an OTA rollback with the reason lost -- which is how this was found.
+Log it and carry on.
+
+## Not yet run end to end
+
+The handshake and the configuration write have **never completed against a
+device**: the hardware attempt above got as far as proving the two components
+cannot coexist, and stopped there. What is verified is the component's
+failure path, not its success path.
+
 ## The scanner stops while this runs
 
 Bluedroid keeps exactly one GAP callback — `esp_ble_gap_register_callback()`
