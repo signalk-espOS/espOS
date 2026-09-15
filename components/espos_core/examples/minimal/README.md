@@ -9,7 +9,7 @@ ESP32-S3, ESP32-C3, ESP32-C6, ESP32-P4).
 ## The ten-minute path
 
 ```sh
-. $IDF_PATH/export.sh                 # ESP-IDF v6.0.3, see .idf-version at the repo root
+. $IDF_PATH/export.sh                 # ESP-IDF 6.0.x, the release in .idf-version at the repo root
 cd components/espos_core/examples/minimal
 idf.py set-target esp32c6             # or esp32 / esp32s3 / esp32c3 / esp32p4
 idf.py build flash monitor            # small or shared host: ../../../../scripts/build.sh build, then idf.py flash monitor

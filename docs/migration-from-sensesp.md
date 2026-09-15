@@ -13,7 +13,7 @@ onto; the tutorials start with [first-sensor](tutorials/first-sensor.md).
 ### 1. Toolchain: PlatformIO and Arduino → ESP-IDF 6 and `idf.py`
 
 SensESP builds with PlatformIO on the Arduino-ESP32 core. espOS is native
-ESP-IDF 6.0.x (`.idf-version`, currently v6.0.3) with no Arduino layer: CMake
+ESP-IDF 6.0.x (the release named in `.idf-version`) with no Arduino layer: CMake
 projects, Kconfig, `idf.py` (or `scripts/build.sh`, which wraps it) and the
 IDF drivers — `esp_adc` instead of `analogReadMilliVolts()`, `esp_driver_gpio`
 instead of `digitalRead()`, `i2c_master` instead of `Wire`, `esp_driver_pcnt`

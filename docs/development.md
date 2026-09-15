@@ -2,10 +2,10 @@
 
 ## Prerequisites
 
-* ESP-IDF 6.0.x installed and exported (`. $IDF_PATH/export.sh`). v6.0.3
-  (`.idf-version`) is the release CI tests; any other 6.0.x builds with one
-  warning, versions outside `[6.0.0, 6.1.0)` are refused unless
-  `-DESPOS_ALLOW_IDF_MISMATCH=1`.
+* ESP-IDF 6.0.x installed and exported (`. $IDF_PATH/export.sh`). The
+  release named in `.idf-version` is the one CI tests; any other 6.0.x
+  builds with one warning, versions outside `[6.0.0, 6.1.0)` are refused
+  unless `-DESPOS_ALLOW_IDF_MISMATCH=1`.
 * For host tests: `libbsd-dev` (Debian/Ubuntu) — required by IDF's linux
   target.
 * Python ≥ 3.10 (IDF's own venv is used at build time; the generator needs
@@ -14,7 +14,7 @@
 ## Build & flash the example app
 
 ```sh
-. $IDF_PATH/export.sh                                    # ESP-IDF v6.0.3, see .idf-version
+. $IDF_PATH/export.sh                                    # ESP-IDF 6.0.x, the release in .idf-version
 scripts/build.sh -DIDF_TARGET=esp32c6                    # any of: esp32 esp32s3 esp32c3 esp32c6 esp32p4
 scripts/build.sh flash monitor
 ```
@@ -98,7 +98,7 @@ espos_project_ui_partition()
 `espos_project_prologue()`:
 
 * enforces the IDF version policy (`cmake/espos_version.cmake`):
-  `.idf-version` (v6.0.3) is what CI tests; another release in
+  the release named in `.idf-version` is what CI tests; another release in
   `[6.0.0, 6.1.0)` builds with one warning naming the tested one; anything
   else is refused with the install link unless `-DESPOS_ALLOW_IDF_MISMATCH=1`.
   A project that keeps its own `.idf-version` must keep it equal to espOS's
