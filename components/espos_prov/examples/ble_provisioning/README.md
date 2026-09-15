@@ -1,10 +1,20 @@
 # ble_provisioning
 
-A device that gets its WiFi credentials from a phone or a laptop over BLE, with
-no access point and no captive portal. The whole firmware is `espos_start()`:
-when no network is configured it advertises, credentials arrive over GATT and
-land in the `wifi` config namespace, and espOS's own WiFi state machine picks
-them up and connects. Details: [docs/provisioning.md](../../../../docs/provisioning.md).
+A device that gets its WiFi credentials from a phone or a laptop over BLE,
+without having to join a setup access point. The whole firmware is
+`espos_start()`: when no network is configured it advertises, credentials
+arrive over GATT and land in the `wifi` config namespace, and espOS's own WiFi
+state machine picks them up and connects. Details:
+[docs/provisioning.md](../../../../docs/provisioning.md).
+
+**The setup portal still comes up beside it.** `espos_wifi` raises its SoftAP
+whenever no network is configured (`wifi.portal_enabled`, on by default), so on
+a board with a WiFi radio an unprovisioned device offers *both* routes at once,
+and both write the same `wifi` keys — provisioning even writes network slot 0,
+the slot the portal writes, so the two cannot disagree about what to try first.
+BLE provisioning is an alternative to the portal, not a replacement for it. Set
+`wifi.portal_enabled` to false (a runtime config key, not a build option) if
+this device should offer BLE only.
 
 ## Espressif's phone app will not talk to this device
 
@@ -88,8 +98,11 @@ python3 -m venv venv && ./venv/bin/pip install -r requirements.txt
     "$IDF_PATH"/components/protocomm/proto/sec2.proto \
     "$IDF_PATH"/components/protocomm/proto/constants.proto
 
-./venv/bin/python provision.py --name ESPOS_ca6a --pop 7K4M9QRT2WXY \
-    --ssid MyBoat --psk hunter2
+# The PoP and the WiFi password are asked for rather than typed on the command
+# line, where they would sit in the shell history and in `ps` for every user on
+# the machine. For automation pass --pop/--psk, or set ESPOS_PROV_POP and
+# ESPOS_PROV_PSK in the environment.
+./venv/bin/python provision.py --name ESPOS_ca6a --ssid MyBoat
 ```
 
 A successful run looks like this, and the last line is the part that matters —

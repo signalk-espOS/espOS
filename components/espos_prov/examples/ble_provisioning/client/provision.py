@@ -3,7 +3,11 @@
 """Provision an espOS device over BLE -- the client half of espos_prov.
 
 Usage:
-  provision.py --pop <PoP> --name <service name> [--ssid S --psk P] [--probe]
+  provision.py --name <service name> [--ssid S] [--probe]
+
+The PoP and the WiFi password are prompted for, or read from ESPOS_PROV_POP
+and ESPOS_PROV_PSK; --pop and --psk still take them directly for automation,
+at the cost of putting a secret in the shell history and in `ps`.
 
 The service name doubles as the SRP username (espos_prov.c passes it to
 esp_srp_gen_salt_verifier), so it must match what the device advertises.
@@ -15,10 +19,14 @@ service UUID with bytes 12-13 replaced by the endpoint's 16-bit id
 (protocomm_ble.c:831-833). espos_prov's service UUID is kServiceUuid,
 stored little-endian, so on the air it reads back reversed.
 """
-import argparse, asyncio, json, sys
+import argparse, asyncio, getpass, json, os, sys
 
 from bleak import BleakScanner, BleakClient
 import session as sess
+
+# Where a secret is read from when its flag is left off.
+POP_ENV = "ESPOS_PROV_POP"
+PSK_ENV = "ESPOS_PROV_PSK"
 
 SVC_LE = [0x1c,0x4b,0x8f,0x2a,0x6d,0x11,0x47,0x9e,
           0xa3,0x5c,0x70,0xe8,0x92,0x0d,0x53,0xb6]
@@ -110,15 +118,31 @@ async def run(args) -> int:
         return 0 if b'"ok":true' in answer else 2
 
 
+def _secret(value: str | None, env: str, prompt: str) -> str:
+    """A secret passed as a command-line value is in the shell history and in
+    `ps` output for every user on the machine. So the flags stay -- automation
+    needs them -- but leaving one off reads it from the environment, or asks."""
+    if value is not None:
+        return value
+    from_env = os.environ.get(env)
+    if from_env is not None:
+        return from_env
+    return getpass.getpass(prompt)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--pop", required=True)
+    ap.add_argument("--pop", help=f"proof of possession; omitted reads ${POP_ENV} or prompts")
     ap.add_argument("--name", required=True, help="advertised name = SRP username")
     ap.add_argument("--ssid")
-    ap.add_argument("--psk")
+    ap.add_argument("--psk", help=f"WiFi password; omitted reads ${PSK_ENV} or prompts")
     ap.add_argument("--probe", action="store_true", help="scan only, do not connect")
     ap.add_argument("--scan-timeout", type=float, default=20.0)
     args = ap.parse_args()
+    if not args.probe:
+        args.pop = _secret(args.pop, POP_ENV, "proof of possession: ")
+        if args.ssid:
+            args.psk = _secret(args.psk, PSK_ENV, f"password for {args.ssid!r} (empty = open): ")
     try:
         return asyncio.run(run(args))
     except Exception as e:

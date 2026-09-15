@@ -7,7 +7,7 @@ it builds for and a radio.
 
 ## Chips
 
-CI builds the reference application for five targets on every change
+CI builds the reference application for six targets on every change
 (`.github/workflows/ci.yml`); every example builds for `esp32c6` and the ones
 with peripherals for `esp32p4` too.
 
@@ -133,7 +133,7 @@ nothing special to configure:
 
 ## Before you buy
 
-Any development board with one of the five chips works for the core:
+Any development board with one of the six chips works for the core:
 a bare ESP32-C6 module on a breakout is the cheapest way to try espOS, and a
 Waveshare P4 panel is the reference for anything with a display or voice.
 For a co-processor board other than Waveshare's, budget a session for the

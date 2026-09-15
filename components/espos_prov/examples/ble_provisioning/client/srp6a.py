@@ -7,11 +7,14 @@ Verified against the implementation, not guessed:
   * hash:  SHA-512 throughout (SHA512_HASH_SZ everywhere in esp_srp.c)
   * k, u:  calculate_padded_hash() zero-LEFT-PADS the shorter operand to
            len(N) -- k = H(PAD(N) | PAD(g)), u = H(PAD(A) | PAD(B))
-  * x:     H(salt | I | P)            (esp_srp.h "x = H(s | I | P)")
+  * x:     H(salt | H(I | ":" | P))   -- TWO stages, with a literal colon.
+           esp_srp.h's prose says "x = H(s | I | P)", which is NOT what
+           calculate_x() computes; its prose also says SHA1 where the code
+           uses SHA-512. The code is the specification here.
   * K:     SHA512(S) over the RAW big-endian bytes of S -- esp_mpi_to_bin(),
            NOT padded to len(N). This differs from k/u and is the single
            easiest thing to get wrong.
-  * M1:    H[H(N) XOR H(g) | H(I) | S | A | B | K]
+  * M1:    H[H(N) XOR H(g) | H(I) | salt | A | B | K]   -- the SALT, not S.
   * M2:    H(A | M1 | K)
 """
 import hashlib, os
