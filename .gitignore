@@ -28,9 +28,10 @@ provisioning/
 secrets/
 *.secret
 
-# UI dependencies and Vite's intermediate output. ui/dist-gz/ (the gzipped
-# bundle the firmware flashes) is COMMITTED: `npm run build` in ui/ regenerates
-# it, and CI fails when a UI change forgot to commit the result.
+# UI dependencies and Vite's intermediate output. The gzipped bundle the
+# firmware flashes is COMMITTED, and lives in components/espos_httpd/ui-dist/
+# so it ships with the component to registry consumers: `npm run build` in ui/
+# regenerates it there, and CI fails when a UI change forgot to commit it.
 ui/node_modules/
 ui/dist/
 

@@ -429,44 +429,11 @@ function(_espos_signing_key name key explicit)
 endfunction()
 
 #
-# espos_project_ui_partition([PARTITION <name>] [DIR <dir>] [NAME <label>])
+# espos_project_ui_partition() is NOT defined here. It lives in
+# components/espos_httpd/project_include.cmake, which the IDF build system
+# includes for every project that has espos_httpd in its component list --
+# submodule builds and registry builds alike. espos_httpd owns both ends of
+# the web UI (it serves what the function packs, and ships the bundle in
+# ui-dist/), and defining it there is what makes it reachable to a firmware
+# that consumes espOS from the registry and so never sees this file.
 #
-# Pack the espOS web UI into a LittleFS image flashed with `idf.py flash`.
-# Call AFTER project() — littlefs_create_partition_image comes from the
-# managed component. Default DIR is espOS's own ui/dist-gz: the COMMITTED
-# bundle, so a firmware build never needs Node; `npm run build` in <espos>/ui
-# regenerates it when the UI changes, and CI fails if the commit forgot to.
-#
-function(espos_project_ui_partition)
-    cmake_parse_arguments(_UI "" "PARTITION;DIR;NAME" "" ${ARGN})
-    if(NOT _UI_PARTITION)
-        set(_UI_PARTITION storage)
-    endif()
-    set(_UI_DEFAULT_DIR "${ESPOS_DIR}/ui/dist-gz")
-    if(NOT _UI_DIR)
-        set(_UI_DIR "${_UI_DEFAULT_DIR}")
-    endif()
-    if(NOT _UI_NAME)
-        get_filename_component(_UI_NAME "${CMAKE_SOURCE_DIR}" NAME)
-    endif()
-
-    if(EXISTS "${_UI_DIR}/index.html.gz")
-        littlefs_create_partition_image(${_UI_PARTITION} "${_UI_DIR}" FLASH_IN_PROJECT)
-        message(STATUS "${_UI_NAME}: UI bundle from ${_UI_DIR} will be flashed to '${_UI_PARTITION}'")
-    elseif(_UI_DIR STREQUAL _UI_DEFAULT_DIR)
-        # The default bundle is part of the repository; its absence is a
-        # damaged checkout, not a skipped build step, and a firmware that
-        # ships the placeholder page instead of the config UI must not come
-        # out of it.
-        message(FATAL_ERROR "${_UI_NAME}: ${_UI_DIR}/index.html.gz — the committed espOS UI bundle is "
-                            "missing. Restore ui/dist-gz from git, or rebuild it with "
-                            "`npm ci && npm run build` in ${ESPOS_DIR}/ui.")
-    else()
-        # WARNING, not STATUS: a STATUS line disappears into cmake's output and
-        # the device then silently serves the placeholder page instead of the
-        # real config UI, which looks like a firmware bug rather than a missing
-        # build step.
-        message(WARNING "${_UI_NAME}: ${_UI_DIR} missing — the device will serve the placeholder page, "
-                        "not the espOS web UI. Build it, or drop DIR to use espOS's committed bundle.")
-    endif()
-endfunction()

@@ -68,8 +68,8 @@ regenerates the config schema from the real descriptors via
 docs together.
 
 `npm run build` type-checks (strict, `noUncheckedIndexedAccess`), bundles
-(~18 KiB gzipped in total) and writes `dist-gz/` — every file gzipped as
-`<name>.gz`, nothing else. The root `CMakeLists.txt` turns `ui/dist-gz`
+(~18 KiB gzipped in total) and writes `components/espos_httpd/ui-dist/` — every file gzipped as
+`<name>.gz`, nothing else. The root `CMakeLists.txt` turns `components/espos_httpd/ui-dist`
 into `build/storage.bin` (`littlefs_create_partition_image`,
 `FLASH_IN_PROJECT`), so `idf.py flash` writes it. Without a UI build the
 firmware still builds and serves the embedded placeholder page (`GET
@@ -144,7 +144,7 @@ mount();
 `order` places the tab (core pages sit on 10–70); registering an existing
 path replaces that page, which is how a firmware puts its own Status screen
 in front. Build it the same way espOS builds its own — `npm run build` to
-`dist-gz/`, then point `espos_project_ui_partition(DIR ...)` at it.
+its own `dist-gz/`, then point `espos_project_ui_partition(DIR ...)` at it.
 
 ### Pages that are not always there
 

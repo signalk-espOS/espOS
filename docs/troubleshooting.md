@@ -32,7 +32,7 @@ whose `reset_reason` and `last_reset` say why the device last restarted.
   called `espos_project_ui_partition()` after `project()`, or a custom `DIR`
   was given and is missing (that is a CMake *warning*, not an error), or the
   image was written with `idf.py app-flash`, which skips `storage.bin` —
-  `idf.py flash` writes it. A missing *default* bundle (`espos/ui/dist-gz`)
+  `idf.py flash` writes it. A missing *default* bundle (`espos_httpd/ui-dist`)
   is a hard configure error: restore it from git. [Web UI](ui.md).
 
 **`partitions.csv` not found after bumping espOS** (or the OTA slots vanished)

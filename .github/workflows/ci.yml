@@ -202,11 +202,10 @@ jobs:
       # The bundle is committed so firmware builds need no Node; a UI change
       # that forgets to rebuild it would ship the old page silently.
       - name: committed UI bundle is fresh
-        working-directory: ui
         run: |
-          git add -N dist-gz
-          git diff --exit-code --stat dist-gz || {
-            echo "::error::ui/dist-gz is stale — run 'npm ci && npm run build' in ui/ and commit ui/dist-gz with the UI change"; exit 1; }
+          git add -N components/espos_httpd/ui-dist
+          git diff --exit-code --stat components/espos_httpd/ui-dist || {
+            echo "::error::components/espos_httpd/ui-dist is stale — run 'npm ci && npm run build' in ui/ and commit the bundle with the UI change"; exit 1; }
 
   firmware:
     name: build ${{ matrix.target }}
