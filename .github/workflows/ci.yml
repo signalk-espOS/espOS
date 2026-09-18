@@ -75,6 +75,10 @@ jobs:
         with:
           python-version: "3.12"
       - run: python3 tools/check_public_headers.py
+      # A submodule build resolves siblings by name off EXTRA_COMPONENT_DIRS
+      # whether the manifest declares them or not, so only this catches a
+      # component that cannot be installed from the registry.
+      - run: python3 tools/check_component_deps.py
 
   format:
     name: clang-format (changed C/C++ files)

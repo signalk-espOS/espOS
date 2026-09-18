@@ -30,6 +30,11 @@ files:
     - "dependencies.lock"
 dependencies:
   idf: ">=6.0.0,<6.1.0"
+  signalk-espos/espos_flow:
+    # x-release-please-start-version
+    version: "^0.7.1"
+    # x-release-please-end
+    override_path: "../espos_flow"
 ## The DS18B20 driver is NOT a dependency here on purpose. The component
 ## manager resolves manifests before Kconfig exists, so a dependency listed
 ## above is downloaded by every firmware that uses espos_sensors, including

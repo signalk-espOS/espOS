@@ -19,6 +19,9 @@ test/host/*/managed_components/
 test/host/*/dependencies.lock
 ui/node_modules/
 ui/dist/
+
+# `compote component pack` writes the archive it would upload here.
+components/*/dist/
 .vscode/
 *.log
 # Factory-provisioning inputs and images (contain WiFi passwords / tokens)
