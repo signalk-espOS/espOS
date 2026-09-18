@@ -12,7 +12,7 @@ path = [
   "**/*.lock", "**/*.html", "**/*.svg", "**/*.png", "**/*.ico",
   "**/Kconfig", "**/Kconfig.projbuild", "**/sdkconfig.defaults*", "**/sdkconfig*",
   ".idf-version", ".editorconfig", ".gitignore", ".gitmodules", "version.txt",
-  ".github/**", "ui/index.html", "ui/public/**", "ui/tsconfig*.json", "ui/src/vite-env.d.ts", "ui/dist-gz/**",
+  ".github/**", "ui/index.html", "ui/public/**", "ui/tsconfig*.json", "ui/src/vite-env.d.ts", "components/espos_httpd/ui-dist/**",
   "components/**/www/**", "components/**/config/**", "main/config/**",
   "test/host/**/config/**", "test/host/**/*.txt", "docs/**", "partitions*.csv", "REUSE.toml", "NOTICE",
   # Fuzzer corpus: raw bytes fed to a parser. A comment header would change
