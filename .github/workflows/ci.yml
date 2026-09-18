@@ -79,6 +79,10 @@ jobs:
       # whether the manifest declares them or not, so only this catches a
       # component that cannot be installed from the registry.
       - run: python3 tools/check_component_deps.py
+      # The defaults file provides these to a prologue consumer; the lint
+      # demands them from a registry consumer. A setting in one and not the
+      # other is invisible to exactly the people who cannot see the defaults.
+      - run: python3 tools/check_sdkconfig_lint.py
 
   format:
     name: clang-format (changed C/C++ files)
