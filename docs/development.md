@@ -40,14 +40,14 @@ already set.
 
 ## Web UI
 
-`ui/dist-gz/` — the gzipped Vite bundle the firmware packs into the LittleFS
+`components/espos_httpd/ui-dist/` — the gzipped Vite bundle the firmware packs into the LittleFS
 `storage` image (`build/storage.bin`, flashed by `idf.py flash`) — is
 committed. Building a firmware therefore needs no Node. The bundle is absent
 only in a damaged checkout, and the configure stops with an error then rather
 than ship the placeholder page.
 
 Node is needed to *change* the UI: `npm ci && npm run build` in `ui/`
-regenerates `dist-gz/`, and the result is committed together with the source
+regenerates `components/espos_httpd/ui-dist/`, and the result is committed with the source
 change. CI rebuilds the bundle and fails when the committed one differs, so a
 UI change without its `npm run build` does not merge. `npm run dev` runs the
 UI against an API mock; see [ui.md](ui.md).
@@ -129,7 +129,7 @@ espos_project_ui_partition()
   and the device rejects every OTA.
 
 `espos_project_ui_partition()` (after `project()`) packs the committed
-`espos/ui/dist-gz` into the LittleFS `storage` partition; `PARTITION` and
+`espos_httpd/ui-dist` into the LittleFS `storage` partition; `PARTITION` and
 `DIR` change that, and a custom `DIR` that is missing is a warning, not an
 error. Further prologue options: `IDF_VERSION_FILE`, and `SIGNING_KEY` for a
 key kept outside the project ([ota.md](ota.md), "Signing key").

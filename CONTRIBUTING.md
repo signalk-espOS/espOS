@@ -139,7 +139,7 @@ cd ui && npm ci
 npm run dev                              # Vite + ui/mock/server.mjs, no device needed
 ESPOS_API=http://<device-ip> npm run dev # against a real device or the host harness
 npm run mock                             # the API mock alone, on :8484
-npm run build                            # → dist-gz/, packed into storage.bin by the firmware build
+npm run build                            # → components/espos_httpd/ui-dist/, packed into storage.bin by the firmware build
 ```
 
 `ui/mock/server.mjs` implements `docs/rest-api.md` well enough to exercise
