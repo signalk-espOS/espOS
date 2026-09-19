@@ -15,6 +15,19 @@ pull request. The `[Unreleased]` block below was written by hand before the
 switch; its entries belong to the next feature release and are folded into
 that section when it is cut.
 
+## [0.9.0](https://github.com/signalk-espOS/espOS/compare/v0.8.1...v0.9.0) (2026-09-19)
+
+
+### Added
+
+* **core:** an example that builds espOS from the registry ([#106](https://github.com/signalk-espOS/espOS/issues/106)) ([d378931](https://github.com/signalk-espOS/espOS/commit/d37893102952e6b85f3046e64bb5d026f8333afc))
+
+
+### Fixed
+
+* **build:** name the espOS remote when it is not upstream ([#104](https://github.com/signalk-espOS/espOS/issues/104)) ([00dd2b7](https://github.com/signalk-espOS/espOS/commit/00dd2b71b2de99ef7191638886c639c211f31e54))
+* **core:** build the registry example on esp32 too, and say why it needs a line ([#107](https://github.com/signalk-espOS/espOS/issues/107)) ([c9932b6](https://github.com/signalk-espOS/espOS/commit/c9932b6196e3a9c6bf21b412c713f52604455d82))
+
 ## [0.8.1](https://github.com/signalk-espOS/espOS/compare/v0.8.0...v0.8.1) (2026-09-19)
 
 
