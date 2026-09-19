@@ -15,6 +15,20 @@ pull request. The `[Unreleased]` block below was written by hand before the
 switch; its entries belong to the next feature release and are folded into
 that section when it is cut.
 
+## [0.8.0](https://github.com/signalk-espOS/espOS/compare/v0.7.1...v0.8.0) (2026-09-19)
+
+
+### Added
+
+* **prov:** an example that provisions a device over BLE, with its client ([#93](https://github.com/signalk-espOS/espOS/issues/93)) ([384c4d7](https://github.com/signalk-espOS/espOS/commit/384c4d722ccdfc85d4f4731b3ca908dbfbba8ec4))
+
+
+### Fixed
+
+* **core:** a radio that will not start is no longer fatal ([#97](https://github.com/signalk-espOS/espOS/issues/97)) ([814b72b](https://github.com/signalk-espOS/espOS/commit/814b72b75c7d834b0b211bdfee707e88f112dd25))
+* **ota:** the certificate bundle could not be turned off ([#96](https://github.com/signalk-espOS/espOS/issues/96)) ([f13c9a4](https://github.com/signalk-espOS/espOS/commit/f13c9a40d0814a4d5abe79c536f72f4a477995c2))
+* **registry:** make espOS installable from the component registry ([#99](https://github.com/signalk-espOS/espOS/issues/99)) ([460e85d](https://github.com/signalk-espOS/espOS/commit/460e85d1493794b23b446ee21c1dcab788e37422))
+
 ## [0.7.1](https://github.com/signalk-espOS/espOS/compare/v0.7.0...v0.7.1) (2026-09-14)
 
 
