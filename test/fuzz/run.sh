@@ -75,6 +75,8 @@ common=(
     -I"$root/components/espos_sk/include"
     -I"$root/components/espos_ota/include"
     -I"$root/components/espos_n2k/include"
+    -I"$root/components/espos_config/include"
+    -I"$root/components/espos_config/src"
     -I"$here/shim"
 )
 
@@ -114,11 +116,14 @@ declare -A SOURCES=(
     [sk_frame]="$here/fuzz_sk_frame.c $root/components/espos_sk/src/sk_parse.c $cjson"
     [ota_manifest]="$here/fuzz_ota_manifest.c $root/components/espos_ota/src/manifest.c $cjson"
     [candump]="$here/fuzz_candump.cpp $root/components/espos_n2k/src/candump_format.cpp"
+    # No cJSON: b64.c includes only espos_config_priv.h, which reaches no
+    # further than esp_err.h. The JSON layer above it is not IDF-free.
+    [b64]="$here/fuzz_b64.c $root/components/espos_config/src/b64.c"
 )
 
 targets=("$@")
 if [ ${#targets[@]} -eq 0 ]; then
-    targets=(sk_frame ota_manifest candump)
+    targets=(sk_frame ota_manifest candump b64)
 fi
 
 fail=0
