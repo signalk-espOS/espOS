@@ -181,11 +181,72 @@ function(_espos_report_base_version label dir)
         set(tag "${CMAKE_MATCH_1}")
     endif()
 
+    # Which espOS, not just which version of it. A tag says nothing about the
+    # repository it came from: `v0.8.0` in a fork and `v0.8.0` upstream print
+    # identically while the code behind them can differ completely, and pointing
+    # a submodule at a fork is a normal thing to do mid-change. So name the
+    # remote whenever it is not the canonical one, and stay quiet when it is --
+    # a line that appears on every build is a line nobody reads.
+    #
+    # The expected URL is read from espos_core's manifest rather than written
+    # here: that file is the same tracked copy that gets published, so a fork
+    # that legitimately becomes upstream carries its own answer instead of
+    # tripping a check on someone else's constant.
+    set(_origin_note "")
+    if(GIT_FOUND)
+        execute_process(
+            COMMAND "${GIT_EXECUTABLE}" remote get-url origin
+            WORKING_DIRECTORY "${dir}"
+            OUTPUT_VARIABLE _origin
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
+            RESULT_VARIABLE _origin_rc)
+        if(NOT _origin_rc EQUAL 0)
+            set(_origin "")
+        endif()
+        set(_manifest "${dir}/components/espos_core/idf_component.yml")
+        set(_expect "")
+        if(EXISTS "${_manifest}")
+            file(STRINGS "${_manifest}" _repo_lines REGEX "^repository:")
+            if(_repo_lines)
+                list(GET _repo_lines 0 _expect)
+                string(REGEX REPLACE "^repository:[ \t]*\"?([^\"]*)\"?[ \t]*$" "\\1" _expect "${_expect}")
+            endif()
+        endif()
+        if(_origin AND _expect)
+            # Compare on host + path, so https, scp-style ssh, ssh:// and a
+            # trailing .git for the SAME repository all read as one place --
+            # while a different host does not. Keeping the host matters: a
+            # path alone makes gitlab.com/signalk-espOS/espOS indistinguishable
+            # from github.com/signalk-espOS/espOS, which is a different
+            # repository that merely borrowed the name. (Caught by testing;
+            # an earlier version of this stripped the host and said upstream.)
+            foreach(_v _origin _expect)
+                set(_n "${${_v}}")
+                string(REGEX REPLACE "\\.git$" "" _n "${_n}")
+                string(REGEX REPLACE "/$" "" _n "${_n}")
+                # scp-style `git@host:owner/repo` -> `host/owner/repo`
+                string(REGEX REPLACE "^[^@/]+@([^:]+):" "\\1/" _n "${_n}")
+                # `scheme://[user@]host/path` -> `host/path`
+                string(REGEX REPLACE "^[a-z+]+://([^@/]+@)?" "" _n "${_n}")
+                string(TOLOWER "${_n}" ${_v}_norm)
+            endforeach()
+            if(NOT _origin_norm STREQUAL _expect_norm)
+                set(_origin_note " from ${_origin}")
+            endif()
+        elseif(NOT _origin)
+            # No origin at all: a local clone with the remote removed, or a
+            # plain directory. Worth saying, because nothing can be fetched
+            # into it and its tags will never move.
+            set(_origin_note " (no git remote)")
+        endif()
+    endif()
+
     if(NOT tag)
         # No usable tag is the ordinary state of a submodule, not a fault.
-        message(STATUS "espos: base ${base} (pin ${described}, no release tag fetched)")
+        message(STATUS "espos: base ${base}${_origin_note} (pin ${described}, no release tag fetched)")
     elseif(tag VERSION_EQUAL base)
-        message(STATUS "espos: base ${base} (pin ${described})")
+        message(STATUS "espos: base ${base}${_origin_note} (pin ${described})")
     elseif(tag VERSION_LESS base)
         # The common shape: the pin is past a tag the checkout HAS, on the way
         # to a release it has not fetched. version.txt is ahead because
@@ -193,7 +254,7 @@ function(_espos_report_base_version label dir)
         # the describe string is misleading, so do not print it without saying
         # so.
         message(STATUS
-            "espos: base ${base} from version.txt; `git describe` here says ${described}, which "
+            "espos: base ${base}${_origin_note} from version.txt; `git describe` here says ${described}, which "
             "names an older tag because this checkout has not fetched the newer ones "
             "(`git -C ${dir} fetch --tags`). Trust version.txt.")
     else()
@@ -201,7 +262,7 @@ function(_espos_report_base_version label dir)
         # tags -- a tag reachable from HEAD is a tag this checkout has -- so
         # one of the two was genuinely forgotten.
         message(WARNING
-            "${label}: the espOS pin is at tag v${tag} but its version.txt says ${base}. One of "
+            "${label}: the espOS pin${_origin_note} is at tag v${tag} but its version.txt says ${base}. One of "
             "them was not bumped; a device would report whichever this build preferred. "
             "Check the pinned commit in ${dir} (docs/releasing.md).")
     endif()
