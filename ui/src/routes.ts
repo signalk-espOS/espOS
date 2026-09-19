@@ -24,6 +24,7 @@ import { BlePage } from "./pages/ble";
 import { ConfigPage } from "./pages/config";
 import { LogsPage } from "./pages/logs";
 import { OtaPage } from "./pages/ota";
+import { FlowPage } from "./pages/flow";
 
 export interface Route {
   path: string;
@@ -52,6 +53,10 @@ const CORE_ROUTES: Route[] = [
   { path: "/", title: "Status", page: StatusPage, order: 10 },
   { path: "/wifi", title: "WiFi", page: WifiPage, order: 20 },
   { path: "/signalk", title: "SignalK", page: SignalKPage, order: 30 },
+  // Only on a firmware that builds espos_flow, which neither of espOS's own
+  // consumers does -- the endpoint answering is the test, so no firmware has
+  // to declare anything.
+  { path: "/flow", title: "Flow", page: FlowPage, order: 35, available: () => endpointExists("/flow") },
   { path: "/ble", title: "BLE", page: BlePage, order: 40, available: () => endpointExists("/ble/status") },
   { path: "/config", title: "Config", page: ConfigPage, order: 50 },
   { path: "/logs", title: "Logs", page: LogsPage, order: 60 },

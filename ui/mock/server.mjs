@@ -420,6 +420,22 @@ export function startMock(port = 8484) {
       }
       const scanDoc = () => ({ ...scan, age_s: scanAt ? Math.round((Date.now() - scanAt) / 1000) : null });
       if (r === "/wifi/scan" && m === "GET") return json(res, 200, scanDoc());
+      // ---- flow
+      // A graph that is doing something slightly wrong, because a page that
+      // has only ever been seen in its happy state is a page whose warnings
+      // have never been read: the edge pool is deliberately near full and a
+      // few posts have been dropped.
+      if (r === "/flow" && m === "GET") return json(res, 200, {
+        running: true,
+        loop: { posts: 18240, dropped: 3, timers_fired: 9120, timers_live: 4,
+                queue_peak: 11, edges_used: 78, edges_max: 96 },
+        nodes: [
+          { id: "light", title: "Analog(GPIO4)" },
+          { id: "cal", title: "Linear(1.7007, -0.165)" },
+          { id: "avg", title: "MovingAverage(10)" },
+          { id: "out", title: "sk::Output<float>(environment.inside.illuminance)" },
+        ],
+      });
       // ---- signalk
       if (r === "/sk/status" && m === "GET") return json(res, 200, skStatus());
       if (r === "/sk/servers" && m === "GET") return json(res, 200, serversDoc());
