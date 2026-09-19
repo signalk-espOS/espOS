@@ -52,7 +52,7 @@ the `signalk-espos` namespace, so a firmware can use espOS without cloning
 it:
 
 ```sh
-idf.py add-dependency "signalk-espos/espos_sk^0.7"
+idf.py add-dependency "signalk-espos/espos_sk^0.8.1"
 ```
 
 `espos_sk` names the rest of the core as its own dependencies, so that one
@@ -61,6 +61,44 @@ pre-1.0, where a minor bump does the work a major will do later, so an
 unpinned dependency would take the next one unannounced. The components are
 released in lockstep — one version of any of them works with the same
 version of every other.
+
+That line is the dependency; a firmware needs three more things, because a
+registry consumer has no `espos_project_prologue()` to set them (the prologue
+must run *before* `project()`, and a component's `project_include.cmake` runs
+after, so it cannot ship as a component):
+
+1. **A root `CMakeLists.txt`** — plain IDF, plus the web UI partition:
+
+   ```cmake
+   cmake_minimum_required(VERSION 3.22)
+   include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+   project(my_firmware)
+   espos_project_ui_partition()          # after project(), always
+   ```
+
+2. **A partition table** with two OTA slots and a `storage` partition, which
+   IDF's single-app default has neither of. Copy one of the bundled tables
+   rather than pointing into `managed_components/`, which is a build artefact:
+
+   ```sh
+   cp managed_components/signalk-espos__espos_core/partitions/4mb.csv partitions.csv
+   ```
+
+3. **`sdkconfig.defaults`** — the task stacks, core dump, OTA rollback, image
+   signing, that partition table and a matching `CONFIG_ESPTOOLPY_FLASHSIZE_*`.
+   You do not have to guess: `espos_core` checks at configure time and prints
+   every missing line with the reason it matters.
+
+Then generate the app-signing key once — it is deliberately **not** created for
+you, because a key invented by a build step is a key nobody kept, and a device
+accepts an OTA only from the key it was flashed with ([docs/ota.md](docs/ota.md)):
+
+```sh
+espsecure generate-signing-key --version 2 --scheme rsa3072 secure_boot_signing_key.pem
+```
+
+[`components/espos_core/examples/from_registry`](components/espos_core/examples/from_registry)
+is all of the above as a working project, built by CI on every change.
 
 The whole of an application on espOS is one call; everything else is yours
 ([docs/concepts.md](docs/concepts.md) has the order and the threading rules):

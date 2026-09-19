@@ -12,6 +12,7 @@ threading, boot order, the server's REST tree, TLS.
 | Example | Level | What it shows | Replaces (SensESP) | Path |
 |---|---|---|---|---|
 | `minimal` | Essential | `espos_start(NULL)` and one published value per second | `minimal_app`, `constant_sensor` | `components/espos_core/examples/minimal` |
+| `from_registry` | Essential | The same application **without the prologue** — espOS installed from the component registry, as a project outside this repo does it | — | `components/espos_core/examples/from_registry` |
 | `analog_input` | Essential | an ADC reading on a Signal K path | `analog_input` | `components/espos_sk/examples/analog_input` |
 | `custom_settings` | Newbie | settings from a JSON descriptor, applied live, one migration | `ConfigItem` | `components/espos_config/examples/custom_settings` |
 | `health_and_led` | Newbie | a status LED from the health table; a fatal condition and the watchdog policy | `SystemStatusLed` | `components/espos_health/examples/health_and_led` |
@@ -64,7 +65,10 @@ cd components/espos_core/examples/minimal
 
 Each example is a project in its own right, so the first build in it
 generates a signing key there (`secure_boot_signing_key.pem`, git-ignored)
-and signs with that. The key is unique to that directory: an image built
+and signs with that — except `from_registry`, which has no prologue to
+generate one and tells you to run
+`espsecure generate-signing-key --version 2 --scheme rsa3072 secure_boot_signing_key.pem`
+before the first configure instead. The key is unique to that directory: an image built
 here is **refused by a device that was flashed from anywhere else**, with
 `esp_ota_ops: New image failed verification`.
 

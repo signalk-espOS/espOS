@@ -31,11 +31,20 @@ a small or shared machine use the locked wrapper instead of a bare build:
 *development* signing key with a warning; that is expected
 ([OTA → Signing key](ota.md#signing-key)).
 
+`from_registry` is the exception, deliberately: it has no prologue, so nothing
+generates a key for it and the build stops until you run
+`espsecure generate-signing-key --version 2 --scheme rsa3072 secure_boot_signing_key.pem`
+once, BEFORE the first configure. A key
+invented by a build step is a key nobody kept, and a registry consumer's
+project is not espOS's to put one in — see
+[its README](https://github.com/signalk-espOS/espOS/tree/main/components/espos_core/examples/from_registry).
+
 ## The examples
 
 | Example | Component | What it shows | Read with |
 |---|---|---|---|
 | [`minimal`](https://github.com/signalk-espOS/espOS/tree/main/components/espos_core/examples/minimal) | `espos_core` | **Essential.** The whole of an espOS application: `espos_start(NULL)`, then `environment.inside.temperature` once a second, a constant (293.65 K) standing in for the sensor. No wiring. Replaces SensESP's `minimal_app` and `constant_sensor`. The [getting started](getting-started.md) target. | [Concepts](concepts.md) |
+| [`from_registry`](https://github.com/signalk-espOS/espOS/tree/main/components/espos_core/examples/from_registry) | `espos_core` | **Essential.** The same application as `minimal`, built the way a project outside this repository builds it: espOS from the component registry, a plain IDF root `CMakeLists.txt`, its own partition table and sdkconfig. Start your own firmware from this one. | [Releasing](releasing.md) |
 | [`two_phase_boot`](https://github.com/signalk-espOS/espOS/tree/main/components/espos_core/examples/two_phase_boot) | `espos_core` | **Advanced.** `espos_init()` and `espos_start_network()` instead of one call, with the application's own work between them, and the pattern for a blocking espOS call — a worker task fed through a queue. Replaces `freertos_tasks`. | [Concepts → espos_start()](concepts.md#espos_start-the-order-and-why), [Threading contracts](concepts.md#threading-contracts) |
 | [`custom_settings`](https://github.com/signalk-espOS/espOS/tree/main/components/espos_config/examples/custom_settings) | `espos_config` | **Newbie.** An application's own settings: declared once in `main/config/app.json`, used through generated key constants, applied live from the web UI, carried across a renamed key by a migration. Replaces SensESP's `ConfigItem`. | [Configuration store](config.md), [Add a setting](tutorials/add-a-setting.md) |
 | [`app_endpoint_and_page`](https://github.com/signalk-espOS/espOS/tree/main/components/espos_httpd/examples/app_endpoint_and_page) | `espos_httpd` | **Advanced.** A firmware's own REST endpoints on the espOS server, a live value on the SSE stream the web UI already listens to, and a page of your own in that UI. Replaces SensESP's frontend plugins. | [REST API](rest-api.md), [Web UI](ui.md), [An app endpoint and a UI tab](tutorials/app-endpoint-and-ui-tab.md) |

@@ -47,6 +47,10 @@ secure_boot_signing_key.pem
 site/
 components/*/examples/*/dependencies.lock
 components/*/examples/*/build/
+# idf.py drops log/ in the PROJECT root, not build/, when a build fails
+# before the build directory is usable -- so a failed example build leaves
+# stray idf_py_std*_output files that `git add -A` would otherwise sweep in.
+components/*/examples/*/log/
 components/*/examples/*/managed_components/
 components/*/examples/*/sdkconfig
 components/*/examples/*/sdkconfig.old

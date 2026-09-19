@@ -1,0 +1,42 @@
+# What espos_project_prologue() would have supplied. A registry consumer has no
+# prologue, so these are stated here -- and espos_core's project_include.cmake
+# checks for them at configure time, naming each one and why it matters, so this
+# list is not guesswork: delete it and the build prints exactly what to add.
+
+# espOS runs its WiFi/SignalK state machines, JSON building and SSE sends on
+# these tasks. Below 4096 they overflow on the first busy event, not at boot.
+CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096
+CONFIG_FREERTOS_TIMER_TASK_STACK_DEPTH=4096
+
+# espos_httpd serves the stored core dump at /api/v1/system/coredump and
+# includes esp_core_dump.h, which IDF only provides when this is on.
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+
+# espos_ota marks an image valid only after it has run. Without rollback a bad
+# update is permanent and the device needs a USB flash.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# espOS signs every image, so a device accepts an OTA only from the key it was
+# flashed with. With signing off the firmware installs over USB and then
+# rejects every update -- on the device, long after the build went green.
+# The key is NOT generated for you here (docs/ota.md):
+#   espsecure generate-signing-key --version 2 --scheme rsa3072 \
+#       secure_boot_signing_key.pem
+# (espsecure, not `idf.py secure-generate-signing-key`: idf.py configures the
+#  project to run a subcommand, which pins the target before set-target does.)
+CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT=y
+CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT=y
+CONFIG_SECURE_SIGNED_APPS_RSA_SCHEME=y
+CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES=y
+
+# Two OTA slots and a 'storage' partition for the web UI, which IDF's
+# single-app default has neither of. partitions.csv is copied from
+# espos_core's bundled tables (see the README) rather than referenced inside
+# managed_components/, which is a build artefact a clean checkout will not have.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# Must match the table: a 4 MB table on a 2 MB default runs off the end of the
+# chip and the flash fails partway through. espos_core's lint sums the table
+# and says so.
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
