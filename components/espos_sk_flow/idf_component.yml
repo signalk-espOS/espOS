@@ -28,3 +28,23 @@ files:
     - "dependencies.lock"
 dependencies:
   idf: ">=6.0.0,<6.1.0"
+  signalk-espos/espos_flow:
+    # x-release-please-start-version
+    version: "^0.7.1"
+    # x-release-please-end
+    override_path: "../espos_flow"
+  signalk-espos/espos_health:
+    # x-release-please-start-version
+    version: "^0.7.1"
+    # x-release-please-end
+    override_path: "../espos_health"
+  signalk-espos/espos_net:
+    # x-release-please-start-version
+    version: "^0.7.1"
+    # x-release-please-end
+    override_path: "../espos_net"
+  signalk-espos/espos_sk:
+    # x-release-please-start-version
+    version: "^0.7.1"
+    # x-release-please-end
+    override_path: "../espos_sk"

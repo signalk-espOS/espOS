@@ -57,3 +57,13 @@ dependencies:
     version: "==1.22.3"
     rules:
       - if: "target != linux"
+  signalk-espos/espos_event:
+    # x-release-please-start-version
+    version: "^0.7.1"
+    # x-release-please-end
+    override_path: "../espos_event"
+  signalk-espos/espos_health:
+    # x-release-please-start-version
+    version: "^0.7.1"
+    # x-release-please-end
+    override_path: "../espos_health"

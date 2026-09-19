@@ -57,3 +57,8 @@ dependencies:
     override_path: "../espos_net"
   # cJSON, exact-pinned like every other registry dependency here.
   espressif/cjson: "==1.7.19~2"
+  signalk-espos/espos_event:
+    # x-release-please-start-version
+    version: "^0.7.1"
+    # x-release-please-end
+    override_path: "../espos_event"

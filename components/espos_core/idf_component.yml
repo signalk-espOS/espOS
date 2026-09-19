@@ -81,3 +81,8 @@ dependencies:
     version: "^0.7.1"
     # x-release-please-end
     override_path: "../espos_event"
+  signalk-espos/espos_time:
+    # x-release-please-start-version
+    version: "^0.7.1"
+    # x-release-please-end
+    override_path: "../espos_time"
