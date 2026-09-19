@@ -27,6 +27,19 @@ whose `reset_reason` and `last_reset` say why the device last restarted.
 : The submodule directory is empty. `git submodule update --init` in the
   firmware project.
 
+**`git describe here says v0.7.0-66-… which names an older tag`**
+: Not a fault, and the build is fine — the line says which espOS you have
+  (`base` is read from the submodule's `version.txt`, which is tracked and
+  therefore always right). `git submodule update` never fetches new tags, so
+  the submodule's idea of the newest release is as old as its last `--init`.
+  `git -C espos fetch --tags` silences it. [Releasing](releasing.md#consumers).
+
+**`the espOS pin is at tag vX but its version.txt says Y`**
+: This one *is* a fault, and the two cannot be reconciled by fetching: a tag
+  reachable from `HEAD` is a tag the checkout already has, so the pinned commit
+  genuinely carries a `version.txt` that was never bumped to match its tag.
+  A device would report whichever the build preferred. Check the pinned commit.
+
 **The device serves a placeholder page instead of the web UI** (`ui_storage: false` in `/system/info`; boot log `ui storage … has no index.html: serving the embedded page`)
 : The LittleFS `storage` partition has no bundle. Either the project never
   called `espos_project_ui_partition()` after `project()`, or a custom `DIR`
