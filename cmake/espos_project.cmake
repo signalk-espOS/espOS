@@ -314,7 +314,7 @@ function(_espos_sdkconfig_defaults name profile partitions)
     # whatever its own defaults (or espos.defaults' 4 MB) chose.
     get_filename_component(table_dir "${partitions}" DIRECTORY)
     get_filename_component(table_name "${partitions}" NAME)
-    if(table_dir STREQUAL "${ESPOS_DIR}/partitions" AND table_name MATCHES "^([0-9]+)mb\\.csv$")
+    if(table_dir STREQUAL "${ESPOS_PARTITIONS_DIR}" AND table_name MATCHES "^([0-9]+)mb\\.csv$")
         list(APPEND fragment "CONFIG_ESPTOOLPY_FLASHSIZE_${CMAKE_MATCH_1}MB=y\n")
     endif()
     string(CONCAT fragment ${fragment})
