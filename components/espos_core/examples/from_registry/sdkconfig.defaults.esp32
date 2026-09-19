@@ -1,0 +1,14 @@
+# ESP32 (original) only. IDF appends sdkconfig.defaults.${IDF_TARGET} to
+# whatever sdkconfig.defaults it was given (tools/cmake/kconfig.cmake), so this
+# file is picked up for esp32 and ignored everywhere else.
+#
+# RSA app signing is the Secure Boot V2 scheme, and on the original ESP32 that
+# scheme only exists for chip revision >= 3.0. Without this line Kconfig cannot
+# offer it, silently resolves CONFIG_SECURE_SIGNED_APPS_RSA_SCHEME=y down to the
+# V1 ECDSA scheme, and espos_core's lint then rejects the build -- the setting
+# looks present in sdkconfig.defaults and absent in the generated sdkconfig.
+# Every ESP32 module sold since 2020 (WROOM-32E/UE, WROVER-E) is revision 3 or
+# later. espOS's own sdkconfig.d/espos.defaults.esp32 carries the same line for
+# the same reason, which is why the prologue examples build on esp32 and this
+# one did not until it was added.
+CONFIG_ESP32_REV_MIN_3=y
