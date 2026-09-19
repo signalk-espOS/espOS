@@ -10,7 +10,7 @@ Needs `clang` for the real thing. With only `gcc` the harnesses still build
 and replay the corpus under ASan and UBSan, which is a useful regression check
 after a parser change but discovers nothing new.
 
-## Why these three
+## Why these four
 
 espOS is C, and the [language decision](../../docs/decisions.md) that settled
 on C rather than Rust is only defensible if the code a hostile input reaches is
@@ -23,11 +23,20 @@ reaches:
 | `sk_frame` | `espos_sk_frame_parse()` | every text frame the Signal K server sends, on a socket the device opened itself |
 | `ota_manifest` | `espos_ota_manifest_pick()`, `espos_ota_resolve_url()` | the JSON that decides which firmware to install next |
 | `candump` | `candump_decode()`, `candump_resync_offset()` | any TCP peer that connects to the NMEA 2000 gateway |
+| `b64` | `espos_b64_decode()`, `espos_b64_encode()` | a BLOB key in the body of `PUT /api/v1/config` |
 
-All three are pure C or C++ with no ESP-IDF dependency beyond `esp_err.h` —
+All four are pure C or C++ with no ESP-IDF dependency beyond `esp_err.h` —
 which is *why* they were written that way — so the harnesses build them
 directly with the host compiler. There is no IDF project here, no component
 manager and no `sdkconfig`.
+
+`espos_config_import_json()` is deliberately **not** here, though it is the
+function that reads the request body. It calls `espos_config_lock()`,
+`espos_config_read_effective()` and `espos_config_apply_plan()`, so fuzzing it
+would mean an IDF project with `nvs_flash`, `esp_partition` and generated
+descriptors — and would spend its time in the storage layer. What a hostile
+body actually reaches, byte for byte, is the base64 decoder underneath it, and
+that is 90 lines with one include.
 
 ## What the harnesses check beyond "did it crash"
 
@@ -44,6 +53,15 @@ failures that matter on a boat are quieter than a crash:
 - **`candump`** checks a decoded frame's length is in range, that re-encoding
   it round-trips, and that `resync_offset` never rewinds, never runs past the
   end, and never resumes mid-line — at every possible cut of the buffer.
+- **`b64`** decodes with the *caller's own* capacity arithmetic —
+  `(strlen/4 + 1) * 3`, copied out of `decode_value()` rather than referenced,
+  so the harness notices if the two ever drift apart — into a heap block of
+  exactly that size. An `ESP_ERR_INVALID_SIZE` from that call is treated as a
+  failure, because with the formula that decides the `malloc` it must never be
+  too small. It also re-encodes and decodes again (a decoder lenient one way
+  and strict the other shows up here), and repeats the decode into a buffer one
+  byte short of what the input needs — the case that catches an off-by-one on
+  the bounds check.
 
 ## Two bugs this found
 
