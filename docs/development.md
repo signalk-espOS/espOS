@@ -89,7 +89,7 @@ copied `sdkconfig.defaults`, no copied partition table:
 cmake_minimum_required(VERSION 3.22)
 include("${CMAKE_CURRENT_LIST_DIR}/espos/cmake/espos_project.cmake")
 espos_project_prologue(NAME "my-firmware"
-                       PARTITIONS "${ESPOS_DIR}/partitions/16mb.csv"
+                       PARTITIONS "${ESPOS_PARTITIONS_DIR}/16mb.csv"
                        COMPONENTS espos_ble)      # the optional espOS parts this firmware uses
 project(my_firmware)
 espos_project_ui_partition()
@@ -114,7 +114,7 @@ espos_project_ui_partition()
   `-DSDKCONFIG_DEFAULTS=a;b` replaces the assembled list (only the partition
   fragment is still appended, so the OTA slots cannot silently vanish).
 * selects the partition table with `PARTITIONS` (absolute, or relative to the
-  project). Bundled: `espos/partitions/4mb.csv` (the default), `8mb.csv`,
+  project). Bundled: `espos/components/espos_core/partitions/4mb.csv` (the default), `8mb.csv`,
   `16mb.csv` — same layout, bigger app slots and storage, and each sets the
   matching flash size. A project's own CSV sets `CONFIG_ESPTOOLPY_FLASHSIZE_*`
   in its own defaults.

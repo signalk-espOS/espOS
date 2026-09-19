@@ -13,7 +13,7 @@
 cmake_minimum_required(VERSION 3.22)
 include("${CMAKE_CURRENT_LIST_DIR}/../../../../cmake/espos_project.cmake")
 espos_project_prologue(NAME "ble-gateway"
-                       PARTITIONS "${CMAKE_CURRENT_LIST_DIR}/../../../../partitions/16mb.csv"
+                       PARTITIONS "${CMAKE_CURRENT_LIST_DIR}/../../../../components/espos_core/partitions/16mb.csv"
                        COMPONENTS espos_ble)
 project(ble_gateway)
 espos_project_ui_partition()

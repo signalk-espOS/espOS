@@ -166,7 +166,7 @@ that moves on every register and unregister).
 
 ### NVS capacity
 
-The `nvs` partition is 48K in every `partitions/*.csv` — twelve 4096-byte
+The `nvs` partition is 48K in every `components/espos_core/partitions/*.csv` — twelve 4096-byte
 pages, 126 entries of 32 bytes each. A realistic graph of **8 nodes with 3 parameters
 each plus one 250-point curve table** costs, measured by
 `test/host/espos_config_test` ("a realistic graph's NVS footprint is

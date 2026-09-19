@@ -138,7 +138,7 @@ The API key, WiFi passwords and the SignalK token live in NVS, marked
 production builds enable flash encryption; IDF then defaults
 `CONFIG_NVS_ENCRYPTION=y` and encrypts the `nvs` partition transparently
 using keys in the `nvs_keys` partition (present in every bundled
-`partitions/*.csv`, flagged `encrypted`), or the HMAC peripheral on chips
+`components/espos_core/partitions/*.csv`, flagged `encrypted`), or the HMAC peripheral on chips
 that have one.
 
 The release overlay is `sdkconfig.d/release.defaults`, selected with

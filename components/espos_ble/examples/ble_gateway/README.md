@@ -89,7 +89,7 @@ idf.py build flash monitor
 Needs ESP-IDF 6.0.x and nothing else — the espOS web UI is a committed bundle,
 so there is no Node step.
 
-This example uses `partitions/16mb.csv` from espOS rather than a table of its
+This example uses `components/espos_core/partitions/16mb.csv` from espOS rather than a table of its
 own. The standalone repository carried one, and its comment is worth repeating
 if you fork this: a device keeps the partition table it was flashed with,
 because an OTA replaces app slots and never the table, so changing tables

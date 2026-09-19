@@ -13,7 +13,7 @@ cmake_minimum_required(VERSION 3.22)
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/espos_project.cmake")
 # PARTITIONS is the default, spelled out: the example app's table is the one
 # CI's size budget and the flashing docs assume.
-espos_project_prologue(NAME "espOS" PARTITIONS "${CMAKE_CURRENT_LIST_DIR}/partitions/4mb.csv")
+espos_project_prologue(NAME "espOS" PARTITIONS "${ESPOS_PARTITIONS_DIR}/4mb.csv")
 
 project(espos)
 

@@ -29,13 +29,13 @@ The toolchain is one ESP-IDF for all of them: 6.0.x, tested on the release in
 
 The bundled tables have the same layout and differ in the app slots and the
 storage partition; the prologue's `PARTITIONS` argument picks one and sets
-the flash size with it (`espos_project_prologue(PARTITIONS "${ESPOS_DIR}/partitions/8mb.csv")`).
+the flash size with it (`espos_project_prologue(PARTITIONS "${ESPOS_PARTITIONS_DIR}/8mb.csv")`).
 
 | Table | Flash | App slots (`ota_0`, `ota_1`) | `storage` (LittleFS: web UI + your files) | Fits |
 |---|---|---|---|---|
-| `partitions/4mb.csv` (default) | 4 MB | 2 × 1728 KB | 384 KB | the core, Signal K, OTA — the getting-started device |
-| `partitions/8mb.csv` | 8 MB | 2 × 3 MB | 1792 KB | a native-radio target with Bluedroid: the BLE gateway measures 2.13 MB on an ESP32-C6, which does **not** fit a 1728 KB slot |
-| `partitions/16mb.csv` | 16 MB | 2 × 6656 KB | 1792 KB | LVGL + esp-sr + hosted WiFi/BLE on the P4 panels; 1 MB left for the esp-sr model partition (commented out in the CSV) |
+| `components/espos_core/partitions/4mb.csv` (default) | 4 MB | 2 × 1728 KB | 384 KB | the core, Signal K, OTA — the getting-started device |
+| `components/espos_core/partitions/8mb.csv` | 8 MB | 2 × 3 MB | 1792 KB | a native-radio target with Bluedroid: the BLE gateway measures 2.13 MB on an ESP32-C6, which does **not** fit a 1728 KB slot |
+| `components/espos_core/partitions/16mb.csv` | 16 MB | 2 × 6656 KB | 1792 KB | LVGL + esp-sr + hosted WiFi/BLE on the P4 panels; 1 MB left for the esp-sr model partition (commented out in the CSV) |
 
 All three carry `nvs` (48 KB — configuration, WiFi credentials, the Signal K
 token), `otadata`, `phy_init`, `nvs_keys` (for NVS encryption in a release
