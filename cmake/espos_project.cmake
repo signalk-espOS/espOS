@@ -95,6 +95,12 @@ macro(espos_project_prologue)
     # alone cannot say.
     espos_project_version()
 
+    # ...and separately, which espOS it is building against. A consumer's own
+    # version says nothing about the base underneath it, and 11 of 60 cockpit
+    # commits have been `chore: bump espos to <sha>` -- a number nobody can
+    # read back off a build.
+    _espos_report_base_version("${_ESPOS_NAME}" "${ESPOS_DIR}")
+
     # In espOS's own tree components/ is already the project's component dir;
     # naming it again would register every component twice.
     if(NOT "${ESPOS_DIR}" STREQUAL "${CMAKE_SOURCE_DIR}")

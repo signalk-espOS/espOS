@@ -68,11 +68,26 @@ git -C espos checkout v0.7.0
 git commit -am "chore: bump espos to v0.7.0"
 ```
 
+The `fetch --tags` is not optional, and it is the step that gets skipped.
+`git submodule update` fetches the pinned commit but **no new tags**, so a
+submodule initialised before a release never learns that release exists. It
+does not fail — it answers with the newest tag it happens to have, which is
+worse. Measured on this repo's two consumers: both held `v0.6.0` and `v0.7.0`
+only, so a pin whose real name is `v0.7.1-13-g814b72b` described itself as
+`v0.7.0-66-g814b72b`, and drifted further with every release. CI is shallower
+still: `actions/checkout` clones submodules at `--depth=1`, so `git describe`
+there has no tags at all and yields a bare hash.
+
+So do not read the version off `git describe` inside a submodule. The
+prologue reports it from the submodule's tracked `version.txt` and uses
+`describe` only to contradict that file — which is why a pin at a genuinely
+un-bumped release is a build warning, while a merely un-fetched tag is a
+`STATUS` line telling you to fetch.
+
 The submodule still records a SHA — that is how submodules work — but the
-commit message makes the release readable in `git log`, and
-`git -C espos describe --tags` on any checkout then answers which espOS is
-in it. A bump commit that says `bump espos to c6fd455` answers nothing
-without a second repository to hand.
+commit message makes the release readable in `git log`. A bump commit that
+says `bump espos to c6fd455` answers nothing without a second repository to
+hand.
 
 Consumers version themselves independently; espOS's version is not theirs.
 
