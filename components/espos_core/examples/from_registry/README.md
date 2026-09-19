@@ -88,8 +88,8 @@ put back:
    ```yaml
    dependencies:
      idf: ">=6.0.0,<6.1.0"
-     signalk-espos/espos_core: "^0.8.1"
-     signalk-espos/espos_sk: "^0.8.1"
+     signalk-espos/espos_core: "^0.9.0"
+     signalk-espos/espos_sk: "^0.9.0"
    ```
 
    Keep the `^`: espOS is pre-1.0, where a minor bump does the work a major

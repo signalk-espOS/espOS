@@ -24,6 +24,7 @@
         { "type": "generic", "path": "components/espos_ble/idf_component.yml" },
         { "type": "generic", "path": "components/espos_config/idf_component.yml" },
         { "type": "generic", "path": "components/espos_core/idf_component.yml" },
+        { "type": "generic", "path": "components/espos_core/examples/from_registry/main/idf_component.yml" },
         { "type": "generic", "path": "components/espos_devices/idf_component.yml" },
         { "type": "generic", "path": "components/espos_eth/idf_component.yml" },
         { "type": "generic", "path": "components/espos_event/idf_component.yml" },

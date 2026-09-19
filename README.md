@@ -52,7 +52,7 @@ the `signalk-espos` namespace, so a firmware can use espOS without cloning
 it:
 
 ```sh
-idf.py add-dependency "signalk-espos/espos_sk^0.8.1"
+idf.py add-dependency "signalk-espos/espos_sk^0.9.0"
 ```
 
 `espos_sk` names the rest of the core as its own dependencies, so that one
