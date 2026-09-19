@@ -21,7 +21,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/../../../../cmake/espos_project.cmake")
 # example passes this. A device keeps the table it was flashed with, so a
 # board with less than 16 MB of flash needs partitions/8mb.csv here instead.
 espos_project_prologue(NAME "ble_provisioning"
-                       PARTITIONS "${CMAKE_CURRENT_LIST_DIR}/../../../../partitions/16mb.csv"
+                       PARTITIONS "${CMAKE_CURRENT_LIST_DIR}/../../../../components/espos_core/partitions/16mb.csv"
                        COMPONENTS espos_prov)
 project(ble_provisioning)
 # The committed web UI bundle -> LittleFS "storage" image.

@@ -36,7 +36,7 @@ whose `reset_reason` and `last_reset` say why the device last restarted.
   is a hard configure error: restore it from git. [Web UI](ui.md).
 
 **`partitions.csv` not found after bumping espOS** (or the OTA slots vanished)
-: The partition table moved to `partitions/4mb.csv` and is now selected by
+: The partition table moved to `components/espos_core/partitions/4mb.csv` and is now selected by
   the prologue's `PARTITIONS` argument. IDF applies defaults only to options
   a `sdkconfig` does not already set, so a stale `build/sdkconfig` still
   names the old path. Delete `build/sdkconfig` (or the build directory) once
@@ -57,7 +57,7 @@ whose `reset_reason` and `last_reset` say why the device last restarted.
 **The build stops fitting** (`size report`, `ota_0` over 90 %)
 : The app slot is 1728 KB on the default 4 MB table. A Bluedroid firmware is
   larger than that on a native-radio target — the BLE gateway measures
-  2.13 MB on an ESP32-C6 — so move to `partitions/8mb.csv`
+  2.13 MB on an ESP32-C6 — so move to `components/espos_core/partitions/8mb.csv`
   ([Hardware](hardware.md#flash-size-and-partition-tables)). Two such slots
   plus storage do not fit a 4 MB chip at all, so a 4 MB board can carry that
   firmware only without OTA, in a single `factory` slot.

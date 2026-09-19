@@ -253,7 +253,7 @@ jobs:
           set -o pipefail
           python3 tools/espos_size_diff.py \
             --head build/size-${{ matrix.target }}.json --label ${{ matrix.target }} \
-            --bin build/espos.bin --partitions partitions/4mb.csv --max-percent 90 \
+            --bin build/espos.bin --partitions components/espos_core/partitions/4mb.csv --max-percent 90 \
             | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v7
         with:

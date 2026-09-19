@@ -65,8 +65,8 @@ lines go away when that reaches a released IDF.
 
 Bluedroid is large: this firmware links to about 2.2 MB, which does not fit the
 default 4 MB table's 1728K app slots, so `CMakeLists.txt` passes
-`partitions/16mb.csv`. An 8 MB board works too — swap that for
-`partitions/8mb.csv`, whose 3 MB slots are still ample. A device keeps the
+`components/espos_core/partitions/16mb.csv`. An 8 MB board works too — swap that for
+`components/espos_core/partitions/8mb.csv`, whose 3 MB slots are still ample. A device keeps the
 table it was flashed with, so changing this later turns the next update into a
 USB reflash rather than an OTA.
 

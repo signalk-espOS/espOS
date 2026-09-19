@@ -34,6 +34,11 @@ string(CONCAT _espos_lint_fix ${_espos_lint_fix})
 # Findings accumulate and are reported together at the end. Failing on the
 # first one makes a consumer without the prologue fix a setting, reconfigure,
 # and be told about the next -- three or four rounds before the build starts.
+# Captured at include time: inside a function or later in the file
+# CMAKE_CURRENT_LIST_DIR is whatever is being processed then, not this file.
+set(ESPOS_CORE_PARTITIONS "${CMAKE_CURRENT_LIST_DIR}/partitions" CACHE INTERNAL
+    "espOS's bundled partition tables, shipped inside espos_core")
+
 set(_espos_lint_problems "")
 set(_espos_lint_lines "")
 macro(_espos_lint_report why line)
@@ -125,9 +130,80 @@ endforeach()
 # The UI, the config store and OTA all need somewhere to live. A table without
 # them builds and then fails at runtime or at the first update, so say it here.
 if(CONFIG_PARTITION_TABLE_SINGLE_APP OR CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE)
+    # Name the table's real path. It ships inside this component, so the same
+    # message works from a checkout and from managed_components/ -- telling a
+    # registry consumer to look in "partitions/" was advice for a directory
+    # they do not have, and they met a bare ninja error instead.
+    #
+    # The consumer has to name it themselves: CONFIG_PARTITION_TABLE_CUSTOM_FILENAME
+    # is read while sdkconfig is generated, which is before any component CMake
+    # runs, so this file can point at a table but cannot select one.
     _espos_lint_report(
-        "the partition table is IDF's single-app default: one app slot and no 'storage'. espOS needs two OTA slots (an update stages into the passive one) and a storage partition for the web UI. Point CONFIG_PARTITION_TABLE_CUSTOM_FILENAME at a table with both -- espOS ships 4mb/8mb/16mb tables in partitions/."
-        "CONFIG_PARTITION_TABLE_CUSTOM=y")
+        "the partition table is IDF's single-app default: one app slot and no 'storage'. espOS needs two OTA slots (an update stages into the passive one) and a storage partition for the web UI. Copy a bundled table next to your CMakeLists.txt -- ${ESPOS_CORE_PARTITIONS}/{4,8,16}mb.csv -- and name it below. Match CONFIG_ESPTOOLPY_FLASHSIZE_* to the table you pick, or the image will not fit the chip."
+        "CONFIG_PARTITION_TABLE_CUSTOM=y\n    CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions.csv\"")
+endif()
+
+# A table and a flash size that disagree produce an image the chip cannot
+# hold, and the flash fails partway through writing it. IDF catches it later
+# and says nothing about espOS's tables, so say it here where the table was
+# just chosen.
+#
+# espOS's tables leave offsets blank (gen_esp32part assigns them) and size in
+# K/M, so sum the sizes rather than reading an end offset -- an earlier
+# version of this check looked for hex offsets, matched nothing, and silently
+# never fired.
+if(CONFIG_PARTITION_TABLE_CUSTOM AND CONFIG_PARTITION_TABLE_CUSTOM_FILENAME AND CONFIG_ESPTOOLPY_FLASHSIZE)
+    get_filename_component(_espos_table "${CONFIG_PARTITION_TABLE_CUSTOM_FILENAME}"
+                           ABSOLUTE BASE_DIR "${CMAKE_SOURCE_DIR}")
+    if(EXISTS "${_espos_table}")
+        file(STRINGS "${_espos_table}" _espos_rows REGEX "^[^#]+,")
+        set(_espos_total 0)
+        foreach(_espos_row IN LISTS _espos_rows)
+            string(REPLACE " " "" _espos_row "${_espos_row}")
+            # Match the 5th field directly. Splitting on "," and counting does
+            # NOT work: list(LENGTH) drops empty elements (CMP0007), and these
+            # tables leave the offset column blank, so every row looked like it
+            # had four fields and the check silently never fired.
+            if(_espos_row MATCHES "^[^,]*,[^,]*,[^,]*,[^,]*,([^,]+)")
+                set(_espos_size "${CMAKE_MATCH_1}")
+                set(_espos_bytes 0)
+                if(_espos_size MATCHES "^([0-9]+)K$")
+                    math(EXPR _espos_bytes "${CMAKE_MATCH_1} * 1024")
+                elseif(_espos_size MATCHES "^([0-9]+)M$")
+                    math(EXPR _espos_bytes "${CMAKE_MATCH_1} * 1048576")
+                elseif(_espos_size MATCHES "^0x[0-9a-fA-F]+$")
+                    math(EXPR _espos_bytes "${_espos_size}")
+                elseif(_espos_size MATCHES "^[0-9]+$")
+                    set(_espos_bytes ${_espos_size})
+                endif()
+                math(EXPR _espos_total "${_espos_total} + ${_espos_bytes}")
+            endif()
+        endforeach()
+        # The table itself starts at CONFIG_PARTITION_TABLE_OFFSET (0x8000 by
+        # default): bootloader and table sit below the first partition.
+        set(_espos_base 32768)
+        if(CONFIG_PARTITION_TABLE_OFFSET)
+            set(_espos_base ${CONFIG_PARTITION_TABLE_OFFSET})
+        endif()
+        math(EXPR _espos_end "${_espos_total} + ${_espos_base} + 4096")
+        string(REGEX REPLACE "MB$" "" _espos_mb "${CONFIG_ESPTOOLPY_FLASHSIZE}")
+        if(_espos_total GREATER 0 AND _espos_mb MATCHES "^[0-9]+$")
+            math(EXPR _espos_cap "${_espos_mb} * 1024 * 1024")
+            if(_espos_end GREATER _espos_cap)
+                math(EXPR _espos_need "(${_espos_end} + 1048575) / 1048576")
+                # Round up to a flash size that exists.
+                set(_espos_pick 0)
+                foreach(_espos_try 2 4 8 16 32)
+                    if(_espos_pick EQUAL 0 AND NOT _espos_try LESS _espos_need)
+                        set(_espos_pick ${_espos_try})
+                    endif()
+                endforeach()
+                _espos_lint_report(
+                    "${CONFIG_PARTITION_TABLE_CUSTOM_FILENAME} needs about ${_espos_need} MB but CONFIG_ESPTOOLPY_FLASHSIZE is ${CONFIG_ESPTOOLPY_FLASHSIZE}, so the table runs past the end of the chip and the flash fails partway through writing it."
+                    "CONFIG_ESPTOOLPY_FLASHSIZE_${_espos_pick}MB=y")
+            endif()
+        endif()
+    endif()
 endif()
 
 if(_espos_lint_problems)
@@ -144,3 +220,7 @@ unset(_espos_lint_problems)
 unset(_espos_lint_lines)
 unset(_espos_need)
 unset(_espos_stack)
+unset(_espos_table)
+unset(_espos_rows)
+unset(_espos_cols)
+unset(_espos_end)
