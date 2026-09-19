@@ -68,14 +68,36 @@ macro(espos_project_version)
             if(_espos_ver_git MATCHES "^([0-9]+\\.[0-9]+\\.[0-9]+)")
                 set(PROJECT_VER "${_espos_ver_git}")
 
-                # A tag that disagrees with version.txt means one of them was
-                # forgotten, and the device would report whichever this file
-                # happened to prefer. Say so at build time instead.
-                if(_espos_ver_base AND NOT CMAKE_MATCH_1 STREQUAL _espos_ver_base)
+                # A tag NEWER than version.txt means one of them was forgotten,
+                # and the device would report whichever this file happened to
+                # prefer. Say so at build time instead.
+                #
+                # Only that direction. version.txt AHEAD of the nearest tag is
+                # the ordinary state of a release commit -- release-please
+                # bumps the file in the PR and the tag appears when it merges
+                # -- so warning in both directions fired on the release PR
+                # itself and blamed release-please for not doing what it had
+                # just done. Worse, describe's older number won: a build of
+                # the PR that bumps to 0.8.1 reported 0.8.0. When the file is
+                # ahead it is the deliberate answer, so take it and say which
+                # commit it was built from.
+                if(_espos_ver_base AND CMAKE_MATCH_1 VERSION_GREATER _espos_ver_base)
                     message(WARNING
                         "espOS: version.txt says ${_espos_ver_base} but the nearest tag is "
-                        "v${CMAKE_MATCH_1}. Bump one of them (release-please's release PR does both; "
-                        "docs/releasing.md).")
+                        "v${CMAKE_MATCH_1}, which is newer. Bump version.txt (release-please's "
+                        "release PR does it; docs/releasing.md).")
+                elseif(_espos_ver_base VERSION_GREATER CMAKE_MATCH_1)
+                    # Save the tag first: the REGEX REPLACE below resets
+                    # CMAKE_MATCH_1, so using it in the message afterwards
+                    # printed a bare "(v)".
+                    set(_espos_ver_tag "${CMAKE_MATCH_1}")
+                    # Keep the git suffix so builds within the window stay
+                    # distinguishable, but on the version being released.
+                    string(REGEX REPLACE "^[0-9]+\\.[0-9]+\\.[0-9]+" "${_espos_ver_base}"
+                           PROJECT_VER "${_espos_ver_git}")
+                    message(STATUS
+                        "espOS: version.txt (${_espos_ver_base}) is ahead of the nearest tag "
+                        "(v${_espos_ver_tag}) — a release in progress; reporting ${PROJECT_VER}.")
                 endif()
             else()
                 message(STATUS
