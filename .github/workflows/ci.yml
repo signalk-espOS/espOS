@@ -297,6 +297,9 @@ jobs:
           # looks like, so if it stops building, the documented path is
           # broken even though every other example still passes.
           - { example: components/espos_core/examples/from_registry, target: esp32c6 }
+          # ...and on esp32, which needs its own sdkconfig.defaults.esp32 for the
+          # Secure Boot V2 RSA scheme. That is the case a second target proves.
+          - { example: components/espos_core/examples/from_registry, target: esp32 }
           - { example: components/espos_core/examples/minimal, target: esp32 }
           - { example: components/espos_core/examples/minimal, target: esp32s3 }
           - { example: components/espos_core/examples/minimal, target: esp32c3 }

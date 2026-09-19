@@ -33,17 +33,24 @@ would have set is written out where you can read it.
 ```sh
 . $IDF_PATH/export.sh                 # ESP-IDF 6.0.x
 espsecure generate-signing-key --version 2 --scheme rsa3072 secure_boot_signing_key.pem
-idf.py set-target esp32c6             # CI builds this example for esp32c6
+idf.py set-target esp32c6             # or esp32; CI builds both
 idf.py build flash monitor
 ```
 
-Other targets need one more line than this example carries. On a chip that
-supports both secure boot v1 and v2 -- the original ESP32 -- Kconfig resolves
-`CONFIG_SECURE_SIGNED_APPS_RSA_SCHEME=y` down to the v1 ECDSA scheme unless v2
-is preferred, and espos_core's lint then (correctly) rejects the result. The
-prologue examples build on all five targets; this one is verified on esp32c6,
-which is what CI builds it for. Adding a target means adding whatever that
-chip's signing scheme needs and checking the lint passes, not assuming it.
+A target can need settings of its own, and the original ESP32 is the example:
+RSA app signing is the Secure Boot **V2** scheme, which on that chip exists only
+for revision >= 3.0. Without `CONFIG_ESP32_REV_MIN_3=y` Kconfig cannot offer it
+and silently resolves `CONFIG_SECURE_SIGNED_APPS_RSA_SCHEME=y` down to the V1
+ECDSA scheme -- so the setting reads as present in `sdkconfig.defaults` and
+absent in the generated `sdkconfig`, and espos_core's lint rejects the build
+naming a line that is already there. That one line lives in
+`sdkconfig.defaults.esp32`, which IDF appends automatically for that target and
+ignores for every other; espOS's own `sdkconfig.d/espos.defaults.esp32` carries
+it for the same reason.
+
+CI builds this example for **esp32c6 and esp32**. The other three targets the
+prologue examples support are untested here -- adding one means finding what
+that chip's signing scheme needs and checking the lint passes, not assuming it.
 
 The key has to exist **before** the first configure, and it has to be made with
 `espsecure` rather than `idf.py secure-generate-signing-key`. Both of those are
