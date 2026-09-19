@@ -31,7 +31,12 @@ files:
     - "examples/*/build-*/**/*"
     - "examples/*/managed_components/**/*"
     - "examples/*/dependencies.lock"
-    - "examples/*/sdkconfig*"
+    # The GENERATED sdkconfig only. Not "sdkconfig*": that glob also matched
+    # the tracked sdkconfig.defaults[.<target>] files, which for an example
+    # without the prologue ARE the example -- a downloaded from_registry was
+    # missing the nine settings espos_core then refused to build without.
+    - "examples/*/sdkconfig"
+    - "examples/*/sdkconfig.old"
     - "examples/*/*.pem"
 dependencies:
   idf: ">=6.0.0,<6.1.0"
