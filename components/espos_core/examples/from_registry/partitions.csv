@@ -1,0 +1,19 @@
+# espOS partition table, 4 MB flash -- COPIED from espos_core/partitions/4mb.csv.
+#
+# A registry consumer copies a table rather than pointing at the one inside
+# managed_components/: that directory is a build artefact, absent from a fresh
+# checkout and rewritten by the component manager, so a project whose
+# CONFIG_PARTITION_TABLE_CUSTOM_FILENAME reaches into it does not build until
+# after a successful install. Re-copy it when espOS changes the layout; the
+# CHANGELOG says when that happens (it last did in 0.8.0, nvs 24K -> 48K).
+#
+# Two OTA slots so an update stages into the passive one, plus 'storage' for
+# the web UI. 8mb.csv and 16mb.csv are the same layout with bigger slots.
+nvs,        data, nvs,      ,        48K,
+otadata,    data, ota,      ,        8K,
+phy_init,   data, phy,      ,        4K,
+nvs_keys,   data, nvs_keys, ,        4K,    encrypted
+coredump,   data, coredump, ,        64K,
+ota_0,      app,  ota_0,    ,        1728K,
+ota_1,      app,  ota_1,    ,        1728K,
+storage,    data, littlefs, ,        384K,

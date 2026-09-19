@@ -1,0 +1,36 @@
+## Dependencies of the example's main component.
+##
+## Unlike every other espOS example, espOS itself is named here as a registry
+## dependency rather than found on EXTRA_COMPONENT_DIRS: this example has no
+## prologue and no checkout to reach into. override_path makes an in-tree build
+## (and espOS's own CI) compile the components next to this file instead of
+## downloading them, so the example is built from the tree it ships in while
+## staying a valid standalone project outside it.
+##
+## espos_sk pulls the rest of the core in as its own dependencies; espos_core
+## is named because main calls espos_start().
+dependencies:
+  idf: ">=6.0.0,<6.1.0"
+  signalk-espos/espos_core:
+    # x-release-please-start-version
+    version: "^0.8.1"
+    # x-release-please-end
+    override_path: "../../.."
+  signalk-espos/espos_sk:
+    # x-release-please-start-version
+    version: "^0.8.1"
+    # x-release-please-end
+    override_path: "../../../../espos_sk"
+
+  ## The ESP32-P4 has no radio: WiFi is an ESP32-C6 co-processor over SDIO
+  ## (esp_hosted) behind the esp_wifi_remote shim, which gives it the same
+  ## esp_wifi_* API. esp_hosted does not declare the shim itself, so a P4
+  ## build needs both lines; the rules keep them out of every other target.
+  espressif/esp_wifi_remote:
+    version: "*"
+    rules:
+      - if: "target == esp32p4"
+  espressif/esp_hosted:
+    version: "^2.12.0"
+    rules:
+      - if: "target == esp32p4"
