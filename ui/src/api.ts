@@ -110,6 +110,16 @@ export interface BleStatus {
   post_success: number; post_fail: number; ws_connected: boolean;
   gatt_sessions: number; gatt_max: number;
 }
+export interface FlowNode { id: string; title?: string }
+export interface FlowStatus {
+  running: boolean;
+  loop: { posts: number; dropped: number; timers_fired: number; timers_live: number;
+    queue_peak: number; edges_used: number; edges_max: number };
+  /** null when the firmware drives the loop from C and never built a Graph --
+   *  which is different from an empty array, and the C side sends null on
+   *  purpose so a client can tell them apart. */
+  nodes: FlowNode[] | null;
+}
 export interface SkStatus {
   token: { state: string; has_token: boolean; busy: boolean; approved_s?: number; pending_s?: number; pending_href?: string;
     next_action_s?: number; last_check_s?: number; last_http_status: number; last_error: string;
