@@ -291,6 +291,12 @@ jobs:
           - components/espos_sk/examples/json_and_meta
           - components/espos_sk/examples/tls_server
         include:
+          # The one example without the prologue: espOS named as a registry
+          # dependency, plain IDF root CMakeLists, its own sdkconfig and
+          # partition table. It is what a project outside this repository
+          # looks like, so if it stops building, the documented path is
+          # broken even though every other example still passes.
+          - { example: components/espos_core/examples/from_registry, target: esp32c6 }
           - { example: components/espos_core/examples/minimal, target: esp32 }
           - { example: components/espos_core/examples/minimal, target: esp32s3 }
           - { example: components/espos_core/examples/minimal, target: esp32c3 }
