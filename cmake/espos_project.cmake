@@ -366,6 +366,13 @@ function(_espos_signing_key name key explicit)
     #
     # Fingerprint the key (the file's hash — never its contents, which would
     # reach the build directory) and force a re-link whenever it differs.
+    # Re-run configure when the key file changes, or this whole check is dead
+    # on the path that matters: `idf.py build` after swapping a key changes no
+    # CMake input, ninja skips configure, and the image silently keeps the old
+    # signature.
+    set_property(DIRECTORY "${CMAKE_SOURCE_DIR}"
+                 APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${key}")
+
     file(SHA256 "${key}" hash)
     set(stamp "${CMAKE_BINARY_DIR}/espos_signing_key.stamp")
     set(old "")
