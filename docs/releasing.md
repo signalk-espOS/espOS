@@ -91,6 +91,63 @@ hand.
 
 Consumers version themselves independently; espOS's version is not theirs.
 
+### Choosing which espOS to build against
+
+A contributor working across both repositories needs to move a firmware
+between a release, `main`, and a local branch. That is the submodule itself —
+there is no espOS setting for it, and there cannot be one: a project reaches
+espOS through `include("espos/cmake/espos_project.cmake")`, a path *inside*
+the submodule, so the submodule is already checked out before any espOS code
+runs. Selecting it is a `git` operation by construction.
+
+None of these touch a tracked file. `git status` shows `M espos` — a moved
+submodule pointer, which is exactly what it is — and nothing is committed
+until you mean to.
+
+```sh
+# the release the firmware ships against (the committed pin)
+git submodule update --init espos
+
+# a specific release
+git -C espos fetch --tags && git -C espos checkout v0.8.0
+
+# espOS main, to check a consumer still builds against unreleased work
+git -C espos fetch origin main --tags && git -C espos checkout origin/main
+
+# a local branch, mid-change across both repositories. The refspec is not
+# optional: `fetch <path>` with no refspec fetches only HEAD into FETCH_HEAD,
+# so there is no local `your-branch` to check out afterwards.
+git -C espos fetch --tags /path/to/your/espOS your-branch:your-branch
+git -C espos checkout your-branch
+```
+
+The build says which one it got, on every configure, so a checkout left on
+`main` or on a branch cannot be mistaken for the pinned release:
+
+```
+espos: base 0.8.0 (pin v0.8.0)                            # a release
+espos: base 0.8.0 (pin v0.8.0-3-g27ac6d6)                 # 3 commits past it
+espos: base 0.8.0 (pin v0.8.0-3-g27ac6d6-dirty)           # ...with local edits
+espos: base 0.8.0 from https://github.com/you/espOS.git (pin v0.8.0)  # a fork
+```
+
+The remote is named only when it is **not** the canonical repository, because
+a tag says nothing about where it came from: `v0.8.0` in a fork and `v0.8.0`
+upstream print identically while the code behind them can differ completely.
+The expected URL is `repository:` in `espos_core/idf_component.yml`, so a fork
+that legitimately becomes upstream carries its own answer.
+
+When the work is done, the two repositories are separate pull requests: espOS
+first, then a `chore: bump espos to vX.Y.Z` in the consumer once the espOS
+side has merged and been tagged. Never merge a consumer PR whose behaviour
+depends on unmerged espOS work — the pinned commit is what CI and every other
+checkout actually build.
+
+Installing espOS from the component registry instead of vendoring it is a
+different shape again: there is no submodule and no prologue (`cmake/` ships
+in no component archive), so the version range in `idf_component.yml` is the
+selector and `dependencies.lock` records what it resolved to. See the README.
+
 ## Versioning
 
 Semantic-ish, judged against what a *consumer firmware* sees:
