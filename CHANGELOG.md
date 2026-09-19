@@ -15,6 +15,13 @@ pull request. The `[Unreleased]` block below was written by hand before the
 switch; its entries belong to the next feature release and are folded into
 that section when it is cut.
 
+## [0.9.1](https://github.com/signalk-espOS/espOS/compare/v0.9.0...v0.9.1) (2026-09-19)
+
+
+### Fixed
+
+* **registry:** stop excluding the example sdkconfig that IS the example ([#108](https://github.com/signalk-espOS/espOS/issues/108)) ([a1941bb](https://github.com/signalk-espOS/espOS/commit/a1941bbf7383ab1eb40a476d1256fdb49d00c04c))
+
 ## [0.9.0](https://github.com/signalk-espOS/espOS/compare/v0.8.1...v0.9.0) (2026-09-19)
 
 
