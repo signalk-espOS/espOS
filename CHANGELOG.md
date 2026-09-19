@@ -15,6 +15,15 @@ pull request. The `[Unreleased]` block below was written by hand before the
 switch; its entries belong to the next feature release and are folded into
 that section when it is cut.
 
+## [0.8.1](https://github.com/signalk-espOS/espOS/compare/v0.8.0...v0.8.1) (2026-09-19)
+
+
+### Fixed
+
+* **build:** say which espOS a firmware was built against, honestly ([#103](https://github.com/signalk-espOS/espOS/issues/103)) ([27ac6d6](https://github.com/signalk-espOS/espOS/commit/27ac6d6d93560ab2e512a2848b0fe649bd756849))
+* **ota:** watch the signing key on the registry path, and make the watch work ([#100](https://github.com/signalk-espOS/espOS/issues/100)) ([219496a](https://github.com/signalk-espOS/espOS/commit/219496a8c48f13ea29098b0d1a832b47813594dc))
+* **registry:** ship the partition tables, and catch a table the chip cannot hold ([#102](https://github.com/signalk-espOS/espOS/issues/102)) ([e688643](https://github.com/signalk-espOS/espOS/commit/e688643abe7565d05f560c404a7dfd93674ca937))
+
 ## [0.8.0](https://github.com/signalk-espOS/espOS/compare/v0.7.1...v0.8.0) (2026-09-19)
 
 
