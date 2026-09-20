@@ -86,10 +86,50 @@ export function StatusPage() {
           )}
         </section>
 
+        <HardwareCard i={i} />
         <AccessCard />
         <CoredumpCard />
       </div>
     </>
+  );
+}
+
+// Which board is this? — the question with a drawer of dev boards, and until
+// now a curl away. Everything here is measured (esp_chip_info's feature bits,
+// which were already being fetched and thrown away, plus one call each for
+// flash and the RAM totals) except `board`, which only the firmware can know
+// and therefore only shows when it said.
+//
+// Absent on a device that predates the field, so the card hides rather than
+// rendering a row of dashes.
+function HardwareCard({ i }: { i: SystemInfo | undefined }) {
+  const hw = i?.hardware;
+  if (!hw) return null;
+  const psram = hw.ram_psram_bytes ?? 0;
+  return (
+    <section class="card">
+      <h2>Hardware</h2>
+      {hw.board && <Row k="Board">{hw.board}</Row>}
+      {hw.mac && <Row k="MAC"><span class="mono">{hw.mac}</span></Row>}
+      {hw.cpu_mhz !== undefined && <Row k="CPU">{hw.cpu_mhz} MHz</Row>}
+      {hw.flash_bytes !== undefined && <Row k="Flash">{fmtBytes(hw.flash_bytes)}</Row>}
+      {hw.ram_internal_bytes !== undefined && (
+        <Row k="RAM">
+          {fmtBytes(hw.ram_internal_bytes)} internal
+          {/* No PSRAM at all is worth saying rather than omitting: on a P4 it
+              is the difference between a board that can hold a framebuffer and
+              one that cannot. */}
+          {psram > 0
+            ? <span class="muted"> · {fmtBytes(psram)} PSRAM</span>
+            : <span class="muted"> · no PSRAM</span>}
+        </Row>
+      )}
+      {hw.features && hw.features.length > 0 && (
+        <Row k="Radios">
+          {hw.features.filter((f) => !f.startsWith("embedded-")).join(", ") || <span class="muted">none</span>}
+        </Row>
+      )}
+    </section>
   );
 }
 

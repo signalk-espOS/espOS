@@ -123,6 +123,11 @@ static bool any_wifi_network_configured(void)
 #endif
 
 #define APP_NAME_MAX 32
+/* Long enough for a real product name -- "Waveshare
+ * ESP32-P4-WIFI6-Touch-LCD-7B" is 38 -- and bounded because it lands in a
+ * fixed struct rather than being held by pointer: espos_start()'s opts may
+ * be a compound literal that goes out of scope the moment it returns. */
+#define BOARD_MAX 63
 
 static struct {
     SemaphoreHandle_t lock; /* two tasks calling espos_start() at once run it once */
@@ -131,6 +136,7 @@ static struct {
     bool started;
     bool health_watchdog; /* arm espos_health's policy in espos_init() */
     char app_name[APP_NAME_MAX + 1];
+    char board[BOARD_MAX + 1];
 } s = { .health_watchdog = true }; /* the default when espos_init() is called without espos_start() */
 
 /* netDown is a warning and never fatal, by construction. A router reboot, an
@@ -178,6 +184,26 @@ int espos_abi_version(void)
 const char *espos_app_name(void)
 {
     return s.app_name[0] ? s.app_name : ESPOS_PROJECT_NAME;
+}
+
+const char *espos_board(void)
+{
+    /* NULL, not "", so a caller can tell "not declared" from "declared empty"
+     * -- api_system.c omits the field entirely rather than showing a blank. */
+    return s.board[0] ? s.board : NULL;
+}
+
+/* The strong half of the hook espos_httpd declares weak, so /system/info can
+ * report the board without espos_httpd depending on espos_core -- espos_core
+ * starts espos_httpd, so the dependency can only go this way.
+ *
+ * This file needs no WHOLE_ARCHIVE to be pulled in, unlike espos_time's
+ * log_wallclock.c (#49): app_main calls espos_start(), which is here, so the
+ * object is always in the link. Verified with nm rather than assumed -- that
+ * is precisely the check #49 went without. */
+const char *espos_httpd_board_hook(void)
+{
+    return espos_board();
 }
 
 esp_err_t espos_init(void)
@@ -369,6 +395,9 @@ esp_err_t espos_start(const espos_start_opts_t *opts)
     }
     if (opts->app_name && opts->app_name[0]) {
         snprintf(s.app_name, sizeof(s.app_name), "%s", opts->app_name);
+    }
+    if (opts->board && opts->board[0]) {
+        snprintf(s.board, sizeof(s.board), "%s", opts->board);
     }
 #if CONFIG_ESPOS_CORE_HEALTH_WATCHDOG
     s.health_watchdog = opts->health_watchdog;
