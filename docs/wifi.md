@@ -109,6 +109,20 @@ on the setup page. The setup page scans, lets you pick a network and PUTs
 `wifi.ssid0/psk0` through the normal API. Once connected the portal drops
 (the phone loses the AP — expected).
 
+Two log lines say how far a client got, and they need opposite fixes:
+
+```
+portal up: join "espOS-2be9" (open) and open http://192.168.4.1/
+portal: lease 192.168.4.2 to ce:ee:ba:0d:3f:35
+```
+
+The lease line is the DHCP server answering. A client that associates
+without one means the association worked and the address did not; no lease
+line *and* a client that believes it is connected is the case to
+investigate. Both together mean the network is fine and whatever is wrong is
+above it — most often the setup page never opened, which on a display board
+can simply be a blank screen.
+
 ## Provisioning without the portal
 
 The store is plain NVS, so a factory image works: put the credentials in a
