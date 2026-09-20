@@ -148,6 +148,16 @@ static void on_ip_event(void *arg, esp_event_base_t base, int32_t id, void *data
     } else if (id == IP_EVENT_STA_LOST_IP) {
         ESP_LOGW(TAG, "lost ip");
         espos_wifi_dispatch(ESPOS_WIFI_EV_LOST_IP, NULL);
+    } else if (id == IP_EVENT_ASSIGNED_IP_TO_CLIENT) {
+        /* The portal's DHCP server handing out a lease. Without this the log
+         * shows a client associating and then nothing, which reads as "the
+         * DHCP server is down" whatever the cause actually was -- the two
+         * states that need opposite fixes (the radio associated but the lease
+         * never happened, versus both worked and the browser never opened the
+         * page) are indistinguishable. */
+        const ip_event_assigned_ip_to_client_t *e = data;
+        ESP_LOGI(TAG, "portal: lease " IPSTR " to %02x:%02x:%02x:%02x:%02x:%02x", IP2STR(&e->ip),
+                 e->mac[0], e->mac[1], e->mac[2], e->mac[3], e->mac[4], e->mac[5]);
     }
 }
 
@@ -437,6 +447,7 @@ static esp_err_t d_init(void)
         ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, on_wifi_event, NULL));
         ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_ip_event, NULL));
         ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_LOST_IP, on_ip_event, NULL));
+        ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_ASSIGNED_IP_TO_CLIENT, on_ip_event, NULL));
         handlers_registered = true;
     }
     if (!s_timer) {
