@@ -326,12 +326,23 @@ this build. Merging without it would still yield a bootable image -- which
 is exactly why this is an error rather than a warning.
 ```
 
-## The template repository
+## Starting a new firmware
 
-[signalk-espOS/espos-template](https://github.com/signalk-espOS/espos-template)
-is generated, never edited by hand: `scripts/sync_template.sh <checkout> <tag>`
-copies `components/espos_core/examples/minimal` into a checkout of the template
-with espOS as the `espos/` submodule, and the release then bumps that
-submodule to the tag and commits ("chore: sync to espOS vX.Y.Z"). Change the
-example, not the template; CI builds the example on every target, the
-template's own CI builds the copy once it is pushed.
+There is no template repository to keep in step. A release is the starting
+point either way:
+
+```sh
+# from the registry -- no clone, no submodule
+idf.py create-project-from-example "signalk-espos/espos_core^0.10.0:from_registry"
+
+# or in the tree, if you are working on espOS itself
+git clone https://github.com/signalk-espOS/espOS.git
+cd espOS/components/espos_core/examples/minimal
+```
+
+Both are examples CI builds on every release, so neither can go stale the way
+a generated repository does. `signalk-espOS/espos-template` was exactly that
+generated repository and was deleted in favour of these: it sat five releases
+behind, pinned to a commit rather than a tag, and would have failed to build
+the moment it was synced, because the partition tables it named had moved
+inside `espos_core`. Nothing referenced it but this page.
