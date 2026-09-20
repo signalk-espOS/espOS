@@ -272,7 +272,7 @@ standard library only, no IDF environment needed).
   from `CONFIG_ESPOS_WIFI_MAX_NETWORKS`) and, in the C++-only components,
   `candump_tcp_server.h`, `twai_receiver.h` and `wyoming_satellite.h`
   (a default port or queue depth taken from Kconfig).
-* **`ESPOS_ABI_VERSION`** (`espos.h`, currently 1; `espos_abi_version()`
+* **`ESPOS_ABI_VERSION`** (`espos.h`, currently 2; `espos_abi_version()`
   returns the value the linked `espos_core` was built with) is bumped by any
   change to a public header that is not purely additive: a removal or rename;
   a changed signature; any change to a struct's members — an appended member

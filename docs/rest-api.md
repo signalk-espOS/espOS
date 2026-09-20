@@ -187,6 +187,12 @@ already advertise.
   "uptime_s": 42, "free_heap": 210000, "min_free_heap": 190000,
   "reset_reason": "software", "config_storage_reset": false,
   "schema_etag": "6acfba355e183b19", "ui_storage": true,
+  "hardware": {
+    "mac": "60:55:f9:00:1a:2b", "cpu_mhz": 160, "flash_bytes": 8388608,
+    "ram_internal_bytes": 524288, "ram_psram_bytes": 0,
+    "features": ["wifi", "ble", "802.15.4", "embedded-flash"],
+    "board": "Espressif ESP32-C6-DevKitC-1"
+  },
   "time": {"synced": true, "source": "sntp", "now": 1788775933456},
   "last_reset": {
     "reason": "software", "health_key": "skLinkStalled",
@@ -197,6 +203,42 @@ already advertise.
   }
 }
 ```
+
+`hardware` answers "which board is this", which matters once there is more than
+one on the bench. Most of it is read from the chip; `cpu_mhz` is what the build
+asked for and `board` is what the firmware declared, so neither is a live
+measurement:
+
+| field | |
+|---|---|
+| `mac` | the base MAC — the identity `espos_net` derives the short id and default hostname from |
+| `cpu_mhz` | what the build asked for (`CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ`), not a live reading |
+| `flash_bytes` | the flash chip's size |
+| `ram_internal_bytes`, `ram_psram_bytes` | **totals**, not free — `free_heap` above is the live number. `ram_psram_bytes: 0` means no PSRAM, which is what separates two boards with the same chip. |
+| `features` | `wifi`, `ble`, `bt-classic`, `802.15.4`, `embedded-flash`, `embedded-psram`, from `esp_chip_info()`'s bitmask |
+| `board` | **only if the firmware said so** (`espos_start_opts_t.board`); absent otherwise |
+
+`board` cannot be discovered: ESP-IDF knows the chip, not what it is soldered
+to, the MAC's OUI is Espressif's rather than the board vendor's, and the
+`USER_DATA` efuse a vendor could burn an identifier into is blank on every
+board seen here. The firmware is the only thing that knows, and it usually
+already does — a Kconfig `choice` selecting the board has a prompt string that
+is exactly this. Pass it to `espos_start()`:
+
+```c
+espos_start(&(espos_start_opts_t){
+    .app_name = "cockpit",
+    .board    = "Waveshare ESP32-P4-WIFI6-Touch-LCD-7B",
+});
+```
+
+Deliberately absent: display size and touch (espOS has no display concept — a
+firmware with a panel knows its own geometry), and radio *versions* like
+"BLE 5.0" or "WiFi 6" — the feature bits say whether, not which, and a version
+would be a hardcoded datasheet table espOS cannot verify.
+
+The whole object is absent on a device built before it existed, so a client
+should treat it and every member as optional.
 `ui_storage` (M5) is true when the LittleFS UI partition is mounted.
 `config_storage_reset` is true when the NVS partition had to be erased at
 boot (corrupt/incompatible) and every value is a default.
@@ -293,6 +335,7 @@ missing file with an extension is `404 {"error": "not_found"}`, as is
 anything unknown under `/api/`. When the partition has no `index.html` the
 placeholder page embedded in the firmware is served instead
 (`ui_storage: false` in `/system/info`).
+
 
 ## Network
 

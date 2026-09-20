@@ -132,6 +132,16 @@ export interface SystemInfo {
   app: string; version: string; idf_version: string; chip: string; chip_revision: number; cores: number;
   uptime_s: number; free_heap: number; min_free_heap: number; reset_reason: string; config_storage_reset: boolean;
   schema_etag: string; ui_storage?: boolean;
+  /** Absent on a device older than the field; every member optional because
+   *  each comes from a call that can fail independently. */
+  hardware?: {
+    mac?: string; cpu_mhz?: number; flash_bytes?: number;
+    ram_internal_bytes?: number; ram_psram_bytes?: number;
+    /** "wifi" | "ble" | "bt-classic" | "802.15.4" | "embedded-flash" | "embedded-psram" */
+    features?: string[];
+    /** Only when the firmware declared one (espos_start_opts_t.board). */
+    board?: string;
+  };
 }
 export interface PingDoc { app: string; version: string; auth: boolean }
 export interface AuthStatus {

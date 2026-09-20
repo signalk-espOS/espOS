@@ -362,7 +362,14 @@ export function startMock(port = 8484) {
       if (r === "/system/info" && m === "GET") {
         return json(res, 200, { app: "espos", version: "0.5.0-mock", idf_version: "v6.0.2", chip: "esp32c6", chip_revision: 1, cores: 1,
           uptime_s: Math.round((Date.now() - boot) / 1000), free_heap: 214000 + Math.round(Math.random() * 3000), min_free_heap: 190000,
-          reset_reason: "software", config_storage_reset: false, schema_etag: etag, ui_storage: true });
+          reset_reason: "software", config_storage_reset: false, schema_etag: etag, ui_storage: true,
+          // A board that declared itself, so the Board row is exercised; a C6
+          // has no PSRAM, which is the "no PSRAM" branch rather than a missing
+          // one. Both are states a happy-path mock would never show.
+          hardware: { mac: "60:55:f9:00:1a:2b", cpu_mhz: 160, flash_bytes: 8 * 1024 * 1024,
+            ram_internal_bytes: 512 * 1024, ram_psram_bytes: 0,
+            features: ["wifi", "ble", "802.15.4", "embedded-flash"],
+            board: "Espressif ESP32-C6-DevKitC-1" } });
       }
       if (r === "/system/reboot" && m === "POST") { if (!needJson(req, res)) return; logAndMark("W", "espos_httpd", "restarting"); return json(res, 202, { status: "rebooting" }); }
       if (r === "/system/factory-reset" && m === "POST") { if (!needJson(req, res)) return; for (const k of Object.keys(stored)) delete stored[k]; wifiEval(); return json(res, 202, { status: "factory_reset", rebooting: true }); }

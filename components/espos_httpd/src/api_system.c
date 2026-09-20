@@ -15,6 +15,14 @@
 #include "freertos/task.h"
 #include "esp_app_desc.h"
 #include "esp_chip_info.h"
+/* The hardware block below is device-only: the linux target has no flash chip
+ * to size, no PSRAM and no MAC, and espos_httpd builds for it (two host test
+ * projects link this file). */
+#if !CONFIG_IDF_TARGET_LINUX
+#include "esp_flash.h"
+#include "esp_heap_caps.h"
+#include "esp_mac.h"
+#endif
 #include "esp_idf_version.h"
 #include "esp_log.h"
 #include "esp_system.h"
@@ -134,6 +142,23 @@ __attribute__((weak)) bool espos_httpd_wallclock_hook(bool *synced, const char *
     return false;
 }
 
+/* The board label, for the same reason and by the same route as the wallclock
+ * hook above: only espos_core holds it (espos_start_opts_t.board), and
+ * espos_core STARTS espos_httpd, so naming it here would close a cycle. A
+ * build without espos_core -- a firmware that registers its own endpoints and
+ * never calls espos_start() -- gets the weak stub and no board row.
+ *
+ * espos_core/src/espos_core.c provides the strong definition and is built
+ * WHOLE_ARCHIVE, without which the linker keeps this stub and the field
+ * silently never appears. That is not hypothetical: it is exactly what
+ * happened to the wallclock hook (#49), where both halves compiled, both
+ * linked, and the two endpoints disagreed on a running device.
+ */
+__attribute__((weak)) const char *espos_httpd_board_hook(void)
+{
+    return NULL;
+}
+
 /* "time": what the device believes the wall clock says and where it learned
  * it. Always present, so a client never has to guess whether the firmware has
  * the component; `source: "none"` and `now: 0` is the honest answer for a
@@ -153,6 +178,108 @@ static void add_time(cJSON *root)
     cJSON_AddNumberToObject(t, "now", (double)unix_ms);
 }
 
+/* Which board is this? -- the question someone with a drawer of dev boards
+ * actually asks, answered from what the chip and the build already know.
+ *
+ * esp_chip_info() was already being called for the model and core count; its
+ * `features` bitmask was read by nothing, and it is the part that says which
+ * radios exist. The rest is one call each. None of it needed new plumbing,
+ * which is why it is here rather than in a component of its own.
+ *
+ * Deliberately absent:
+ *   - display size, touch: espOS has no display concept at all. A firmware
+ *     that has a panel knows its geometry and can add a row of its own
+ *     (docs/ui.md, registerPage); espos_httpd inventing one would be a
+ *     abstraction with exactly zero implementations in this repo.
+ *   - "BLE 5.0", "WiFi 6": the feature bits say WHETHER, not WHICH. A version
+ *     would be a hardcoded table of datasheet facts keyed on chip model --
+ *     espOS asserting something it cannot measure, wrong the first time a
+ *     revision changes.
+ *   - vendor and board model: nothing in the silicon carries it. The MAC's OUI
+ *     is Espressif's (the module maker), and the USER_DATA efuse a vendor
+ *     could burn an id into is blank on every board we have. Only the firmware
+ *     knows, so it says: espos_start_opts_t.board, reported below when given.
+ */
+static void add_hardware(cJSON *j, const esp_chip_info_t *chip)
+{
+#if CONFIG_IDF_TARGET_LINUX
+    /* Nothing here is meaningful on the host, and a "hardware" object full of
+     * zeros would be worse than its absence. */
+    (void)j;
+    (void)chip;
+#else
+    cJSON *hw = cJSON_AddObjectToObject(j, "hardware");
+    if (!hw) {
+        return;
+    }
+
+    /* The base MAC, which is the device's identity: espos_net derives the
+     * short id and the default hostname from it, and it is what a server's
+     * DHCP lease list shows. Six octets, lower case, colon-separated -- the
+     * form every other tool prints, so it can be pasted into a search. */
+    uint8_t mac[6] = { 0 };
+    if (esp_base_mac_addr_get(mac) == ESP_OK || esp_read_mac(mac, ESP_MAC_WIFI_STA) == ESP_OK) {
+        char buf[18];
+        snprintf(buf, sizeof(buf), "%02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2], mac[3], mac[4],
+                 mac[5]);
+        cJSON_AddStringToObject(hw, "mac", buf);
+    }
+
+    /* Compile-time, not esp_clk_cpu_freq(): that lives in esp_private/ and
+     * espOS's public-header rules keep private IDF headers out. This is the
+     * frequency the build asked for, which is the one a reader wants to
+     * compare against another board's -- a P4 at 360 MHz next to a C6 at 160. */
+    cJSON_AddNumberToObject(hw, "cpu_mhz", CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ);
+
+    uint32_t flash = 0;
+    if (esp_flash_get_size(NULL, &flash) == ESP_OK) {
+        cJSON_AddNumberToObject(hw, "flash_bytes", (double)flash);
+    }
+
+    /* Totals, not free -- free heap is already reported and moves every
+     * second; the totals are what distinguishes two boards with the same chip.
+     * PSRAM is the one that matters: a P4 with 32 MB and one with none run the
+     * same firmware very differently, and only this tells them apart. */
+    cJSON_AddNumberToObject(hw, "ram_internal_bytes", (double)heap_caps_get_total_size(MALLOC_CAP_INTERNAL));
+    size_t psram = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
+    cJSON_AddNumberToObject(hw, "ram_psram_bytes", (double)psram);
+
+    /* What the radios are, from the bitmask esp_chip_info() was already
+     * filling in. An array rather than booleans: a reader scanning for "ble"
+     * does not have to know which flags exist, and a chip that grows one does
+     * not need a schema change. */
+    cJSON *f = cJSON_AddArrayToObject(hw, "features");
+    if (f) {
+        if (chip->features & CHIP_FEATURE_WIFI_BGN) {
+            cJSON_AddItemToArray(f, cJSON_CreateString("wifi"));
+        }
+        if (chip->features & CHIP_FEATURE_BLE) {
+            cJSON_AddItemToArray(f, cJSON_CreateString("ble"));
+        }
+        if (chip->features & CHIP_FEATURE_BT) {
+            cJSON_AddItemToArray(f, cJSON_CreateString("bt-classic"));
+        }
+        if (chip->features & CHIP_FEATURE_IEEE802154) {
+            cJSON_AddItemToArray(f, cJSON_CreateString("802.15.4"));
+        }
+        if (chip->features & CHIP_FEATURE_EMB_FLASH) {
+            cJSON_AddItemToArray(f, cJSON_CreateString("embedded-flash"));
+        }
+        if (chip->features & CHIP_FEATURE_EMB_PSRAM) {
+            cJSON_AddItemToArray(f, cJSON_CreateString("embedded-psram"));
+        }
+    }
+
+    /* Only if the firmware said. Omitted rather than blank: a UI can then show
+     * the row or leave it out, instead of rendering an empty value that looks
+     * like a device that failed to report. */
+    const char *board = espos_httpd_board_hook();
+    if (board && board[0]) {
+        cJSON_AddStringToObject(hw, "board", board);
+    }
+#endif /* !CONFIG_IDF_TARGET_LINUX */
+}
+
 static esp_err_t info_get(httpd_req_t *req)
 {
     const esp_app_desc_t *app = esp_app_get_description();
@@ -168,6 +295,7 @@ static esp_err_t info_get(httpd_req_t *req)
     cJSON_AddStringToObject(j, "chip", chip_model_str(chip.model));
     cJSON_AddNumberToObject(j, "chip_revision", chip.revision);
     cJSON_AddNumberToObject(j, "cores", chip.cores);
+    add_hardware(j, &chip);
     cJSON_AddNumberToObject(j, "uptime_s", (double)uptime_s());
     cJSON_AddNumberToObject(j, "free_heap", esp_get_free_heap_size());
     cJSON_AddNumberToObject(j, "min_free_heap", esp_get_minimum_free_heap_size());
