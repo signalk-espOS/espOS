@@ -15,6 +15,14 @@ pull request. The `[Unreleased]` block below was written by hand before the
 switch; its entries belong to the next feature release and are folded into
 that section when it is cut.
 
+## [0.10.0](https://github.com/signalk-espOS/espOS/compare/v0.9.1...v0.10.0) (2026-09-20)
+
+
+### Added
+
+* **httpd:** say what the board is, from what can actually be known ([#113](https://github.com/signalk-espOS/espOS/issues/113)) ([a9dce2b](https://github.com/signalk-espOS/espOS/commit/a9dce2bfce520ad41569366aac064a4dfc49a3d7))
+* **ui:** a page for the flow graph, and for the two numbers that say it is in trouble ([#111](https://github.com/signalk-espOS/espOS/issues/111)) ([1d844eb](https://github.com/signalk-espOS/espOS/commit/1d844eb7e52a08949e671bf61a6d3d858498e231))
+
 ## [0.9.1](https://github.com/signalk-espOS/espOS/compare/v0.9.0...v0.9.1) (2026-09-19)
 
 
