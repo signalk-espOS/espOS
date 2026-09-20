@@ -15,6 +15,13 @@ pull request. The `[Unreleased]` block below was written by hand before the
 switch; its entries belong to the next feature release and are folded into
 that section when it is cut.
 
+## [0.10.1](https://github.com/signalk-espOS/espOS/compare/v0.10.0...v0.10.1) (2026-09-20)
+
+
+### Fixed
+
+* **wifi:** report the portal lease the DHCP server hands out ([#116](https://github.com/signalk-espOS/espOS/issues/116)) ([8b8ee32](https://github.com/signalk-espOS/espOS/commit/8b8ee32e209197b3814435b335f20f9265612967))
+
 ## [0.10.0](https://github.com/signalk-espOS/espOS/compare/v0.9.1...v0.10.0) (2026-09-20)
 
 
