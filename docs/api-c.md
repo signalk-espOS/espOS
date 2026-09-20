@@ -9,7 +9,7 @@ are as current as the branch they were built from; the prose that explains
 *why* an API is shaped the way it is stays in the header itself and in the
 component pages.
 
-`ESPOS_ABI_VERSION` (`espos.h`, currently 1) is bumped by any change to a
+`ESPOS_ABI_VERSION` (`espos.h`, currently 2) is bumped by any change to a
 header that is not purely additive; `espos_abi_version()` returns the value
 the linked `espos_core` was built with. The rules the headers follow — `esp_err.h`
 as the only IDF include (two frozen exceptions), opaque handles, fixed-width
