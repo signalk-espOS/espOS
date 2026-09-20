@@ -52,9 +52,23 @@ typedef struct {
      * true; also gated by the espOS core Kconfig option. The policy sink
      * is armed in espos_init() via espos_health_policy_start(); see docs/health.md. */
     bool health_watchdog;
+    /* The physical board, for a human reading /api/v1/system/info: "Waveshare
+     * ESP32-P4-WIFI6-Touch-LCD-7B". NOTHING can discover this -- IDF knows the
+     * chip, not what it is soldered to; the MAC's OUI is Espressif's, not the
+     * board vendor's; and the USER_DATA efuse a vendor could burn an id into is
+     * blank on every board we have seen. The firmware is the only thing that
+     * knows, and it usually already does: a Kconfig `choice` selecting the
+     * board has a prompt string that is exactly this. NULL = omit the field
+     * rather than guess.
+     *
+     * APPENDED, not inserted next to app_name where it reads better: a caller
+     * using positional initialisers would otherwise have every field after the
+     * insertion point silently shift by one. Nothing in this repo does that,
+     * but the whole point of a public ABI is the callers that are not in it. */
+    const char *board;
 } espos_start_opts_t;
 
-#define ESPOS_START_OPTS_DEFAULT { .app_name = NULL, .before_network = NULL, .arg = NULL, .health_watchdog = true }
+#define ESPOS_START_OPTS_DEFAULT { .app_name = NULL, .before_network = NULL, .arg = NULL, .health_watchdog = true, .board = NULL }
 
 /**
  * Bring everything up: log → config → [before_network] → httpd → net →
@@ -86,6 +100,10 @@ const char *espos_version(void);
  * before espos_start() (the project name) and stable afterwards. */
 const char *espos_app_name(void);
 
+/** espos_start_opts_t.board if one was given, else NULL. A label only: espOS
+ * neither validates nor interprets it. */
+const char *espos_board(void);
+
 /**
  * The public C ABI: every header under the components' include directories, taken
  * together (docs/development.md, "Public API rules"). Bumped by any change
@@ -99,7 +117,7 @@ const char *espos_app_name(void);
  * A binding generated from the headers records the value it was built
  * against and compares it with espos_abi_version() at run time.
  */
-#define ESPOS_ABI_VERSION 1
+#define ESPOS_ABI_VERSION 2
 
 /** ESPOS_ABI_VERSION of the espos_core actually linked, for code compiled
  * against another copy of the headers. Callable at any time, any task. */
