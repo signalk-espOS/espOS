@@ -160,3 +160,8 @@ anything else — a 500, a dropped connection — as no evidence either way, so 
 momentarily busy device does not lose a tab. The shell paints the ungated
 pages first and adds the rest when they answer, rather than holding a blank
 page while it decides.
+
+The Flow page does the same against `/flow`, so it appears on a firmware that
+builds `espos_flow` and nowhere else — neither of espOS's own consumers links
+it, and neither shows the tab. Two pages, two components, no firmware
+declaring anything.
