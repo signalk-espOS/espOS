@@ -18,6 +18,7 @@ idf_build_get_property(target IDF_TARGET)
 if(target STREQUAL "esp32s3" OR target STREQUAL "esp32p4")
     idf_component_register(
         SRCS src/wyoming_satellite.cpp src/wake_engine.cpp
+             src/ota_quiesce.cpp
              src/protocol/events.cpp src/protocol/framing.cpp
         INCLUDE_DIRS include
         REQUIRES espos_audio
@@ -30,7 +31,17 @@ if(target STREQUAL "esp32s3" OR target STREQUAL "esp32p4")
         # notification when a firmware has it, and a firmware without it can
         # still light an LED.
         PRIV_REQUIRES lwip espressif__cjson espressif__esp-sr espos_health
-                      esp_timer)
+                      esp_timer
+        # WHOLE_ARCHIVE, and src/ota_quiesce.cpp is the reason: it exists only
+        # to provide STRONG definitions of the two hooks espos_ota declares
+        # weak, and nothing calls into it. A linker pulls an object out of a
+        # static archive only when it resolves an undefined symbol, so without
+        # this the weak no-ops win -- the build and the link both succeed and
+        # the only symptom is an OTA that still starves the AFE and dies to the
+        # task watchdog on a device. Same trap as espos_time's log_wallclock.c.
+        # `nm` on the image is the proof: T, not W.
+        WHOLE_ARCHIVE)
 else()
     idf_component_register()
 endif()
+

@@ -197,6 +197,12 @@ class WyomingSatellite {
   // These run on whatever task serves /hello, while stop() may be tearing the
   // engine down — snapshot the atomic pointer once per call so a concurrent
   // delete-then-null can't turn a non-null check into a freed dereference.
+  // Park/unpark the wake pipeline for the duration of an OTA download; see
+  // src/ota_quiesce.cpp for why. Idempotent, and safe when no engine runs.
+  // Not for general use -- espos_ota's hooks call these.
+  void ota_quiesce();
+  void ota_resume();
+
   bool wake_enabled() const {
     return config_.on_device_wake ? wake_engine_.load() != nullptr
                                   : !config_.wake_host.empty();

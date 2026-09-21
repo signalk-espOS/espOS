@@ -181,6 +181,25 @@ static void progress_cb(size_t received, size_t total, void *arg)
  * espos_httpd, and the same trap: the strong definition only wins if the
  * linker pulls that object in, which is why espos_sk builds WHOLE_ARCHIVE.
  */
+/* Quiesce anything that cannot miss a deadline while an image downloads.
+ *
+ * Draining a multi-megabyte image saturates the core the network stack runs
+ * on. On a board that also runs a real-time consumer -- esp-sr's AFE on the
+ * P4 cockpit panel feeds WakeNet at 16 kHz from two microphones -- that
+ * consumer misses its deadline, the idle task is starved, and IDF's task
+ * watchdog aborts the firmware MID-DOWNLOAD. Measured: 100% reproducible on a
+ * 4.4 MB image, over both HTTPS and plain HTTP.
+ *
+ * Weak so espos_ota keeps no dependency on espos_voice (or on whatever else a
+ * firmware wants to park): the component that owns the real-time work provides
+ * the strong definition. A build with nothing to quiesce links these no-ops.
+ *
+ * Called from the OTA task around the download only; resume ALWAYS runs,
+ * including on a failed install, so a failure cannot leave a device deaf.
+ */
+__attribute__((weak)) void espos_ota_quiesce_hook(void) {}
+__attribute__((weak)) void espos_ota_resume_hook(void) {}
+
 __attribute__((weak)) esp_err_t espos_ota_server_url_hook(const char *path, char *out, size_t n)
 {
     (void)path;
@@ -295,7 +314,9 @@ static void do_install(const char *url)
     unlock();
     set_state(ESPOS_OTA_DOWNLOADING, NULL);
     char err_text[96] = "";
+    espos_ota_quiesce_hook();
     esp_err_t err = espos_ota_port_install(url, insecure, info.project, progress_cb, NULL, err_text, sizeof(err_text));
+    espos_ota_resume_hook();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "install failed: %s", err_text);
         set_state(ESPOS_OTA_FAILED, err_text);
