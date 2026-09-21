@@ -37,8 +37,13 @@ WyomingSatellite::WyomingSatellite(espos_audio::AudioDriver* audio,
 }
 
 WyomingSatellite::~WyomingSatellite() {
-  // Clear only if this instance is the registered one, so a replacement
-  // satellite constructed before this destructor runs keeps its registration.
+  // Unregister BEFORE stop(), and the order is load-bearing: after this no new
+  // ota_quiesce()/ota_resume() can begin, and stop() then takes lifecycle_,
+  // which blocks until any call already inside one has released it. So the OTA
+  // task is never in this object once the members below are freed.
+  //
+  // compare_exchange rather than a plain store: a replacement satellite
+  // constructed before this destructor runs must keep its own registration.
   WyomingSatellite* self = this;
   g_ota_quiesce_target.compare_exchange_strong(self, nullptr);
   stop();  // joins the server (and transitively the mic) task before freeing
@@ -1002,10 +1007,22 @@ bool WyomingSatellite::wake_session(int sock) {
 }
 
 void WyomingSatellite::ota_quiesce() {
-  // Same pattern as start_wake_pipeline(): pause() parks the feed loop and
-  // releases the mic. Without this the AFE keeps demanding 16 kHz x 2 channels
-  // while the download saturates the core, misses its deadline, and the task
-  // watchdog aborts the firmware mid-image.
+  // Called from the OTA task, so it races stop() and set_wake_network(), both
+  // of which delete the engine. Take the same lifecycle_ mutex they hold: the
+  // engine cannot be torn down underneath pause(), and a teardown already in
+  // progress simply wins -- wake_engine_ then reads null and there is nothing
+  // to park.
+  if (lifecycle_) xSemaphoreTake(lifecycle_, portMAX_DELAY);
+  struct Unlock {
+    SemaphoreHandle_t m;
+    ~Unlock() {
+      if (m) xSemaphoreGive(m);
+    }
+  } unlock{lifecycle_};
+  // pause() parks the feed loop and releases the mic, as start_wake_pipeline()
+  // does on a detection. Without it the AFE keeps demanding 16 kHz x 2
+  // channels while the download saturates the core, misses its deadline, and
+  // the task watchdog aborts the firmware mid-image.
   if (WakeEngine* e = wake_engine_.load()) {
     ESP_LOGI(kTag, "ota: parking the wake pipeline for the download");
     e->pause();
@@ -1013,6 +1030,13 @@ void WyomingSatellite::ota_quiesce() {
 }
 
 void WyomingSatellite::ota_resume() {
+  if (lifecycle_) xSemaphoreTake(lifecycle_, portMAX_DELAY);
+  struct Unlock {
+    SemaphoreHandle_t m;
+    ~Unlock() {
+      if (m) xSemaphoreGive(m);
+    }
+  } unlock{lifecycle_};
   if (WakeEngine* e = wake_engine_.load()) {
     ESP_LOGI(kTag, "ota: resuming the wake pipeline");
     e->resume();

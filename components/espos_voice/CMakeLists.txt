@@ -31,19 +31,17 @@ if(target STREQUAL "esp32s3" OR target STREQUAL "esp32p4")
         # notification when a firmware has it, and a firmware without it can
         # still light an LED.
         PRIV_REQUIRES lwip espressif__cjson espressif__esp-sr espos_health
-                      esp_timer)
+                      esp_timer
+        # WHOLE_ARCHIVE, and src/ota_quiesce.cpp is the reason: it exists only
+        # to provide STRONG definitions of the two hooks espos_ota declares
+        # weak, and nothing calls into it. A linker pulls an object out of a
+        # static archive only when it resolves an undefined symbol, so without
+        # this the weak no-ops win -- the build and the link both succeed and
+        # the only symptom is an OTA that still starves the AFE and dies to the
+        # task watchdog on a device. Same trap as espos_time's log_wallclock.c.
+        # `nm` on the image is the proof: T, not W.
+        WHOLE_ARCHIVE)
 else()
     idf_component_register()
 endif()
 
-# ota_quiesce.cpp holds the STRONG definitions of espos_ota's weak
-# espos_ota_quiesce_hook()/espos_ota_resume_hook(). Nothing in this component
-# calls into that file, so without WHOLE_ARCHIVE the linker never pulls the
-# object out of libespos_voice.a, the weak no-ops win, and an OTA silently
-# keeps starving the AFE -- a failure that builds, links and only shows up as a
-# watchdog abort on a device. Same trap as espos_time's wallclock hooks (#49).
-# Verify with `nm` (T, not W), never by reasoning.
-if(target STREQUAL "esp32s3" OR target STREQUAL "esp32p4")
-    target_link_libraries(${COMPONENT_LIB} INTERFACE
-                          "-Wl,--whole-archive" ${COMPONENT_LIB} "-Wl,--no-whole-archive")
-endif()
