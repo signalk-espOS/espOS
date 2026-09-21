@@ -16,6 +16,9 @@
 
 namespace espos_voice {
 
+// Defined in ota_quiesce.cpp; the C hooks espos_ota calls read it.
+extern std::atomic<WyomingSatellite*> g_ota_quiesce_target;
+
 namespace {
 constexpr const char* kTag = "wyoming_sat";
 }  // namespace
@@ -23,6 +26,8 @@ constexpr const char* kTag = "wyoming_sat";
 WyomingSatellite::WyomingSatellite(espos_audio::AudioDriver* audio,
                                    const WyomingSatelliteConfig& config)
     : audio_(audio), config_(config) {
+  // Let espos_ota's quiesce hooks find this satellite (ota_quiesce.cpp).
+  g_ota_quiesce_target.store(this);
   lifecycle_ = xSemaphoreCreateMutex();
   send_mutex_ = xSemaphoreCreateMutex();
   mic_done_ = xSemaphoreCreateBinary();
@@ -32,6 +37,10 @@ WyomingSatellite::WyomingSatellite(espos_audio::AudioDriver* audio,
 }
 
 WyomingSatellite::~WyomingSatellite() {
+  // Clear only if this instance is the registered one, so a replacement
+  // satellite constructed before this destructor runs keeps its registration.
+  WyomingSatellite* self = this;
+  g_ota_quiesce_target.compare_exchange_strong(self, nullptr);
   stop();  // joins the server (and transitively the mic) task before freeing
   if (send_mutex_) vSemaphoreDelete(send_mutex_);
   if (mic_done_) vSemaphoreDelete(mic_done_);
@@ -990,6 +999,24 @@ bool WyomingSatellite::wake_session(int sock) {
   close_capture();
   free(buf);
   return ok;
+}
+
+void WyomingSatellite::ota_quiesce() {
+  // Same pattern as start_wake_pipeline(): pause() parks the feed loop and
+  // releases the mic. Without this the AFE keeps demanding 16 kHz x 2 channels
+  // while the download saturates the core, misses its deadline, and the task
+  // watchdog aborts the firmware mid-image.
+  if (WakeEngine* e = wake_engine_.load()) {
+    ESP_LOGI(kTag, "ota: parking the wake pipeline for the download");
+    e->pause();
+  }
+}
+
+void WyomingSatellite::ota_resume() {
+  if (WakeEngine* e = wake_engine_.load()) {
+    ESP_LOGI(kTag, "ota: resuming the wake pipeline");
+    e->resume();
+  }
 }
 
 void WyomingSatellite::start_wake_pipeline() {

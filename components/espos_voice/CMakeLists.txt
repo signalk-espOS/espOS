@@ -18,6 +18,7 @@ idf_build_get_property(target IDF_TARGET)
 if(target STREQUAL "esp32s3" OR target STREQUAL "esp32p4")
     idf_component_register(
         SRCS src/wyoming_satellite.cpp src/wake_engine.cpp
+             src/ota_quiesce.cpp
              src/protocol/events.cpp src/protocol/framing.cpp
         INCLUDE_DIRS include
         REQUIRES espos_audio
@@ -33,4 +34,16 @@ if(target STREQUAL "esp32s3" OR target STREQUAL "esp32p4")
                       esp_timer)
 else()
     idf_component_register()
+endif()
+
+# ota_quiesce.cpp holds the STRONG definitions of espos_ota's weak
+# espos_ota_quiesce_hook()/espos_ota_resume_hook(). Nothing in this component
+# calls into that file, so without WHOLE_ARCHIVE the linker never pulls the
+# object out of libespos_voice.a, the weak no-ops win, and an OTA silently
+# keeps starving the AFE -- a failure that builds, links and only shows up as a
+# watchdog abort on a device. Same trap as espos_time's wallclock hooks (#49).
+# Verify with `nm` (T, not W), never by reasoning.
+if(target STREQUAL "esp32s3" OR target STREQUAL "esp32p4")
+    target_link_libraries(${COMPONENT_LIB} INTERFACE
+                          "-Wl,--whole-archive" ${COMPONENT_LIB} "-Wl,--no-whole-archive")
 endif()

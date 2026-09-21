@@ -18,6 +18,8 @@
 #include "esp_ota_ops.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #include "ota_port.h"
 
@@ -153,6 +155,28 @@ esp_err_t espos_ota_port_install(const char *url, bool allow_insecure, const cha
         if (cb) {
             cb((size_t)esp_https_ota_get_image_len_read(h), total > 0 ? (size_t)total : 0, arg);
         }
+        /* A scheduling point. esp_https_ota_perform() returns as soon as it
+         * has written a chunk, so this loop never blocks while the link keeps
+         * delivering, and the OTA task sits above IDLE at
+         * tskIDLE_PRIORITY + 3.
+         *
+         * What this measurably fixes is the transport below it: on an
+         * ESP32-P4 + ESP32-C6 (SDIO, esp_hosted 2.12.12) a download without
+         * this yield floods
+         *
+         *   E H_SDIO_DRV: task still writing Rx data to queue!
+         *
+         * -- the hosted Rx double buffer overrunning and DROPPING packets
+         * because its drain task is not scheduled. With the yield that message
+         * does not appear at all.
+         *
+         * It is NOT on its own enough to keep the task watchdog quiet: with
+         * only this change the same download still aborted on IDLE0, and what
+         * closed that was parking the real-time audio pipeline
+         * (espos_ota_quiesce_hook()). Both are needed; this one is cheap --
+         * one tick per chunk, ~1 ms at the default 1 kHz, against a transfer
+         * already bounded by the network. */
+        vTaskDelay(1);
     }
     if (err != ESP_OK) {
         snprintf(err_text, err_size, "download failed: %s", esp_err_to_name(err));
