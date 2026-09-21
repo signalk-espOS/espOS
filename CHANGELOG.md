@@ -15,6 +15,13 @@ pull request. The `[Unreleased]` block below was written by hand before the
 switch; its entries belong to the next feature release and are folded into
 that section when it is cut.
 
+## [0.10.2](https://github.com/signalk-espOS/espOS/compare/v0.10.1...v0.10.2) (2026-09-21)
+
+
+### Fixed
+
+* **ota:** park the real-time audio pipeline while an image downloads ([#119](https://github.com/signalk-espOS/espOS/issues/119)) ([d3abf89](https://github.com/signalk-espOS/espOS/commit/d3abf89d8cd441dce8539dc765fc40ec34c5cee0))
+
 ## [0.10.1](https://github.com/signalk-espOS/espOS/compare/v0.10.0...v0.10.1) (2026-09-20)
 
 
