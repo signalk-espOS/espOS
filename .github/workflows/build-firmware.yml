@@ -87,8 +87,14 @@ on:
         description: >-
           Artifact name. Defaults to `firmware`, which is fine for one call and
           wrong for a matrix: two legs uploading one name is an error on
-          upload-artifact v4+, so a multi-target caller passes
-          `firmware-${{ matrix.target }}`.
+          upload-artifact v4+, so a multi-target caller passes a per-target
+          name built from its own matrix value.
+
+          Do not write that example as a literal expression here. GitHub
+          evaluates ${} interpolations inside a `description:` value, and
+          `matrix` does not exist in this workflow's context -- the whole file
+          then fails to parse FOR EVERY CALLER, with the error reported against
+          the caller's line number rather than this one.
         type: string
         default: "firmware"
     secrets:
