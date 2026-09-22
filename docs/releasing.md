@@ -292,6 +292,41 @@ jobs:
       signing_key: ${{ secrets.SIGNING_KEY_PEM }}
 ```
 
+### Several targets, and release-please
+
+Two inputs exist for the case the first version of this workflow could not
+serve, which is why both consumers kept their own copy of the release job
+instead of calling it:
+
+* **`tag`** — a release created by release-please uses the workflow token, and
+  a release created that way does **not** fire the `release:` event. So
+  `github.event.release.tag_name` is empty and the caller is the only thing
+  that knows a release is being built. Without `tag` the workflow skipped
+  restoring the signing key, staged nothing and uploaded nothing.
+* **`artifact`** — two matrix legs uploading one artifact name is an error on
+  `upload-artifact` v4+, so a per-target caller passes
+  `firmware-${{ matrix.target }}`.
+
+```yaml
+jobs:
+  firmware:
+    strategy:
+      matrix:
+        target: [esp32c5, esp32c6, esp32c3, esp32s3, esp32]
+    uses: signalk-espOS/espOS/.github/workflows/build-firmware.yml@main
+    with:
+      target: ${{ matrix.target }}
+      name: ble-gateway-${{ matrix.target }}
+      tag: ${{ inputs.tag }}
+      artifact: firmware-${{ matrix.target }}
+    secrets:
+      signing_key: ${{ secrets.SIGNING_KEY_PEM }}
+```
+
+The caller downloads every artifact and makes **one** release. Five parallel
+releases on one tag would race each other, and only an aggregate job can attach
+every target's assets to the same tag.
+
 It reads the IDF pin from the consumer's own `.idf-version` (or the espOS
 submodule's), builds, merges the flash images with
 `tools/espos_merge_firmware.py`, and stages two assets: the merged image for

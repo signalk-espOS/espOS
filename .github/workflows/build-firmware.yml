@@ -14,6 +14,28 @@
 #       secrets:
 #         signing_key: ${{ secrets.SIGNING_KEY_PEM }}
 #
+# Driven by release-please, and/or several targets at once. Pass `tag`: a
+# release created with the workflow token does not fire the `release:` event,
+# so the caller is the only thing that knows it is building a release. Pass a
+# distinct `artifact` per leg, because two legs uploading one name is an error.
+# The caller then downloads them all and makes ONE release -- five parallel
+# releases on one tag would race, and only an aggregate can attach every
+# target's assets.
+#
+#   jobs:
+#     firmware:
+#       strategy:
+#         matrix:
+#           target: [esp32c5, esp32c6, esp32c3, esp32s3, esp32]
+#       uses: signalk-espOS/espOS/.github/workflows/build-firmware.yml@main
+#       with:
+#         target: ${{ matrix.target }}
+#         name: ble-gateway-${{ matrix.target }}
+#         tag: ${{ inputs.tag }}
+#         artifact: firmware-${{ matrix.target }}
+#       secrets:
+#         signing_key: ${{ secrets.SIGNING_KEY_PEM }}
+#
 # The reason this exists is not line count. Both espOS consumers had grown
 # their own copy of the same release job, and the copies had already drifted:
 # one checked the merged image for a blank storage partition, the other did
@@ -53,6 +75,22 @@ on:
         description: "esptool version for the merge"
         type: string
         default: "4.8.1"
+      tag:
+        description: >-
+          The release tag being built. Required from a workflow_call, because
+          `github.event.release.tag_name` is empty there -- release-please
+          creates the release with a token that does not fire the `release:`
+          event, so the caller is the only thing that knows the tag.
+        type: string
+        default: ""
+      artifact:
+        description: >-
+          Artifact name. Defaults to `firmware`, which is fine for one call and
+          wrong for a matrix: two legs uploading one name is an error on
+          upload-artifact v4+, so a multi-target caller passes
+          `firmware-${{ matrix.target }}`.
+        type: string
+        default: "firmware"
     secrets:
       signing_key:
         description: >-
@@ -102,9 +140,14 @@ jobs:
           echo "version=$v" >> "$GITHUB_OUTPUT"
           echo "building with ESP-IDF $v"
 
+      # inputs.tag counts as a release: without this a workflow_call skipped
+      # the whole step, no key was restored, and the release went out signed
+      # with the per-run throwaway -- installable over USB and then refusing
+      # every future OTA, on the boat, months later. That is the exact failure
+      # this file's header warns about, and it would have shipped silently.
       - name: restore the signing key
         id: signing
-        if: github.event_name == 'release'
+        if: github.event_name == 'release' || inputs.tag != ''
         env:
           KEY: ${{ secrets.signing_key }}
           ALLOW_UNSIGNED: ${{ vars.ESPOS_ALLOW_UNSIGNED_RELEASE }}
@@ -156,12 +199,20 @@ jobs:
           python "$merge" --build-dir build --chip "${{ inputs.target }}" \
             --out merged.bin $args
 
+      # Also on a workflow_call: a caller driven by release-please IS a release,
+      # and gating on the `release` event alone meant the reusable workflow
+      # built a release and then uploaded nothing -- which is why both consumers
+      # kept their own copy of this job instead.
       - name: stage the assets
-        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+        if: >-
+          github.event_name == 'release' ||
+          github.event_name == 'workflow_dispatch' ||
+          inputs.tag != ''
         env:
           # Via env, not an expression: a tag name is arbitrary text and would
           # otherwise be pasted into this script before bash parses it.
-          TAG: ${{ github.event.release.tag_name }}
+          # inputs.tag first: on a workflow_call the release event is absent.
+          TAG: ${{ inputs.tag || github.event.release.tag_name }}
           NAME: ${{ inputs.name }}
         run: |
           # A manual run is not a release: tag it with the commit so two
@@ -185,12 +236,18 @@ jobs:
           ls -l dist/
 
       - name: upload
-        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+        if: >-
+          github.event_name == 'release' ||
+          github.event_name == 'workflow_dispatch' ||
+          inputs.tag != ''
         uses: actions/upload-artifact@v7
         with:
           # One flat directory: upload-artifact strips to the least common
           # ancestor, so mixing build/foo.bin with a top-level file silently
           # drops the prefix a later job asked for.
-          name: firmware
+          #
+          # Named by the caller so a per-target matrix does not collide: two
+          # legs uploading one name is an error on upload-artifact v4+.
+          name: ${{ inputs.artifact }}
           path: dist/
           if-no-files-found: error
