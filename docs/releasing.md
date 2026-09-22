@@ -327,6 +327,14 @@ The caller downloads every artifact and makes **one** release. Five parallel
 releases on one tag would race each other, and only an aggregate job can attach
 every target's assets to the same tag.
 
+> **Never write an expression inside a `description:` value.** GitHub evaluates
+> `${}` interpolations there, so documenting `firmware-${...matrix.target...}`
+> as an example made the whole workflow fail to parse **for every caller** —
+> `matrix` does not exist in the called workflow's context. The error is
+> reported against the *caller's* line number, not the description, which is
+> why it took five attempts to find. A `#` comment is safe; a `description:` is
+> not.
+
 It reads the IDF pin from the consumer's own `.idf-version` (or the espOS
 submodule's), builds, merges the flash images with
 `tools/espos_merge_firmware.py`, and stages two assets: the merged image for
