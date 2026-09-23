@@ -36,28 +36,45 @@ espos_health_state_t espos_health_policy_memory(const espos_health_policy_cfg_t 
 
     /* Alarms first, then warnings: internal RAM is judged on its own because on
      * a PSRAM board the total can read tens of megabytes while the internal
-     * pool — the one the radio, DMA and the task stacks come from — is gone. */
+     * pool — the one the radio, DMA and the task stacks come from — is gone.
+     *
+     * The message states the THRESHOLD that was breached, not the live figure.
+     * That is not cosmetic: espos_health_report() suppresses a report whose
+     * state and message both match the last one, and a message carrying the
+     * current byte count never matches, so every tick fanned out to every sink
+     * for as long as the condition held. On a board whose idle free heap sits
+     * below the warn floor -- an ESP32-C5 with ~166 KiB internal RAM idles at
+     * 27-35 KB against the default 40 KB -- that is a SignalK notification
+     * built, published and freed every 10 s for the life of the device. The
+     * churn fragmented the heap until `largest_block` fell through its alarm
+     * floor and the watchdog rebooted the board every ~9 minutes with 18 KB
+     * still free (espOS #124).
+     *
+     * The live numbers are what a human wants, so they stay in the log line
+     * espos_health_report() writes and in GET /api/v1/system/info -- both read
+     * the heap directly. What a sink needs is the state, and the state is what
+     * it now gets. */
     if (cfg->internal_alarm_kb && h->internal_free < cfg->internal_alarm_kb * 1024u) {
         st = ESPOS_HEALTH_ALARM;
         f = ESPOS_HEALTH_F_REBOOT_ON_ALARM;
-        snprintf(buf, sizeof(buf), "internal RAM exhausted: %u B free (alarm below %u KB)",
-                 (unsigned)h->internal_free, (unsigned)cfg->internal_alarm_kb);
+        snprintf(buf, sizeof(buf), "internal RAM exhausted (below %u KB free)",
+                 (unsigned)cfg->internal_alarm_kb);
         m = buf;
     } else if (cfg->largest_block_alarm_kb && h->largest_block < cfg->largest_block_alarm_kb * 1024u) {
         st = ESPOS_HEALTH_ALARM;
         f = ESPOS_HEALTH_F_REBOOT_ON_ALARM;
-        snprintf(buf, sizeof(buf), "internal RAM fragmented: largest block %u B (alarm below %u KB)",
-                 (unsigned)h->largest_block, (unsigned)cfg->largest_block_alarm_kb);
+        snprintf(buf, sizeof(buf), "internal RAM fragmented (largest block below %u KB)",
+                 (unsigned)cfg->largest_block_alarm_kb);
         m = buf;
     } else if (cfg->internal_warn_kb && h->internal_free < cfg->internal_warn_kb * 1024u) {
         st = ESPOS_HEALTH_WARN;
-        snprintf(buf, sizeof(buf), "internal RAM low: %u B free (warn below %u KB)",
-                 (unsigned)h->internal_free, (unsigned)cfg->internal_warn_kb);
+        snprintf(buf, sizeof(buf), "internal RAM low (below %u KB free)",
+                 (unsigned)cfg->internal_warn_kb);
         m = buf;
     } else if (cfg->heap_warn_kb && h->total_free < cfg->heap_warn_kb * 1024u) {
         st = ESPOS_HEALTH_WARN;
-        snprintf(buf, sizeof(buf), "heap low: %u B free (warn below %u KB)",
-                 (unsigned)h->total_free, (unsigned)cfg->heap_warn_kb);
+        snprintf(buf, sizeof(buf), "heap low (below %u KB free)",
+                 (unsigned)cfg->heap_warn_kb);
         m = buf;
     }
     if (message && message_size) {
