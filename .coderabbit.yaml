@@ -17,6 +17,10 @@ tone_instructions: >-
 
 reviews:
   profile: assertive
+  # Off, as in every sibling repository: CodeRabbit comments, it does not gate.
+  # A `mode: error` pre-merge check therefore reads as a hard failure in the
+  # walkthrough table but blocks a merge only if the "CodeRabbit" status is
+  # made required in branch protection.
   request_changes_workflow: false
   # Shows which linked repositories and guideline files informed the review.
   review_details: true
