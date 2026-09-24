@@ -74,6 +74,14 @@ static void port_heap(void *ctx, espos_health_heap_t *out)
 {
     (void)ctx;
     espos_health_port_heap(out);
+    /* The live figures, once per tick. The lowMemory message a sink receives
+     * states the threshold rather than the current value, so that a condition
+     * which has not changed is suppressed instead of republished every tick
+     * (espOS #124) -- which leaves this as the place the numbers themselves
+     * are visible to somebody watching a board decline. */
+    ESP_LOGD(TAG, "heap %u B free, internal %u B free, largest block %u B",
+             (unsigned)out->total_free, (unsigned)out->internal_free,
+             (unsigned)out->largest_block);
 }
 
 static esp_err_t port_report(void *ctx, const char *key, espos_health_state_t state, const char *message, uint32_t flags)

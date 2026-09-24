@@ -569,3 +569,66 @@ TEST_CASE("the device-side entry points exist on the host", "[health][policy]")
     espos_health_reset_record_t rec;
     TEST_ASSERT_FALSE(espos_health_last_reset(&rec));
 }
+
+/*
+ * The message must not carry the live figure.
+ *
+ * espos_health_report() suppresses a report whose state AND message both match
+ * the previous one. A message containing the current byte count never matches,
+ * so a condition that simply persists fanned out to every sink on every tick:
+ * on an ESP32-C5, whose idle free heap (27-35 KB) sits below the default 40 KB
+ * warn floor, that was a SignalK notification built, published and freed every
+ * 10 s for the life of the device. The resulting churn fragmented the heap
+ * until largest_block fell through its alarm floor and the watchdog rebooted
+ * the board every ~9 minutes with 18 KB still free. espOS #124.
+ */
+TEST_CASE("a persisting condition yields an identical message", "[health][policy]")
+{
+    char first[ESPOS_HEALTH_MSG_MAX];
+    char later[ESPOS_HEALTH_MSG_MAX];
+    uint32_t flags = 0;
+    espos_health_heap_t h = HEALTHY;
+
+    /* Heap drifting down, still in the same warn band. */
+    h.total_free = 39 * 1024;
+    TEST_ASSERT_EQUAL(ESPOS_HEALTH_WARN,
+                      espos_health_policy_memory(&CFG, &h, first, sizeof(first), &flags));
+    for (unsigned drop = 1; drop <= 10; drop++) {
+        h.total_free = 39 * 1024 - drop * 264;   /* the measured per-tick churn */
+        TEST_ASSERT_EQUAL(ESPOS_HEALTH_WARN,
+                          espos_health_policy_memory(&CFG, &h, later, sizeof(later), &flags));
+        TEST_ASSERT_EQUAL_STRING(first, later);
+    }
+
+    /* Same for each of the other three bands. */
+    h = HEALTHY;
+    h.internal_free = 19 * 1024;
+    espos_health_policy_memory(&CFG, &h, first, sizeof(first), &flags);
+    h.internal_free = 17 * 1024;
+    espos_health_policy_memory(&CFG, &h, later, sizeof(later), &flags);
+    TEST_ASSERT_EQUAL_STRING(first, later);
+
+    h = HEALTHY;
+    h.internal_free = 11 * 1024;
+    espos_health_policy_memory(&CFG, &h, first, sizeof(first), &flags);
+    h.internal_free = 9 * 1024;
+    espos_health_policy_memory(&CFG, &h, later, sizeof(later), &flags);
+    TEST_ASSERT_EQUAL_STRING(first, later);
+
+    h = HEALTHY;
+    h.largest_block = 7 * 1024;
+    espos_health_policy_memory(&CFG, &h, first, sizeof(first), &flags);
+    h.largest_block = 6 * 1024;
+    espos_health_policy_memory(&CFG, &h, later, sizeof(later), &flags);
+    TEST_ASSERT_EQUAL_STRING(first, later);
+
+    /* But crossing INTO a worse band must still change it, or the escalation
+     * a sink needs to see would be swallowed along with the noise. */
+    h = HEALTHY;
+    h.total_free = 39 * 1024;
+    espos_health_policy_memory(&CFG, &h, first, sizeof(first), &flags);
+    h = HEALTHY;
+    h.internal_free = 11 * 1024;
+    espos_health_policy_memory(&CFG, &h, later, sizeof(later), &flags);
+    TEST_ASSERT_TRUE(strcmp(first, later) != 0);
+}
