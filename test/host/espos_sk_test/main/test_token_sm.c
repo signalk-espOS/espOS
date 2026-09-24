@@ -497,6 +497,12 @@ TEST_CASE("duplicate pending request (400) backs off, first retry still prompt",
     espos_sk_tok_event(&SM, ESPOS_SK_EV_SERVER, &SRV_A);
     request_result(400, NULL, "A device with clientId 'x' has already requested access");
     TEST_ASSERT_EQUAL(ESPOS_SK_TOK_ERROR, ST()->state);
+    /* The status line has to say what the reader must DO. Now that the retry
+     * stretches to ten minutes, a line that reads like a stuck device rather
+     * than one waiting for a person is the difference between somebody
+     * approving it and somebody power-cycling it. The server's own wording
+     * names a uuid nobody can act on, so it is deliberately replaced. */
+    TEST_ASSERT_NOT_NULL(strstr(ST()->last_error, "approve it in Security -> Access Requests"));
 
     /* The usual case is somebody approving it within a minute or two, so the
      * FIRST retry stays prompt: a minute, less the jitter (rnd=0 -> -10 %). */
