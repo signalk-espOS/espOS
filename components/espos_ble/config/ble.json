@@ -65,7 +65,7 @@
       "min": 10,
       "max": 5000,
       "title": "Advertisement buffer",
-      "description": "Advertisements held between POSTs. When full the oldest are dropped and counted, so a slow or absent server cannot exhaust memory."
+      "description": "Advertisements held between POSTs. When full the oldest are dropped and counted, so a slow or absent server cannot exhaust memory. The buffer is one contiguous block of about 128 B per entry, allocated at start: where the heap cannot spare it the gateway logs a warning and uses a smaller buffer rather than failing to start, so on a small-RAM board the effective size may be well below this."
     },
     {
       "name": "control_ws",

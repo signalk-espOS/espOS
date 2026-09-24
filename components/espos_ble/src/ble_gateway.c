@@ -909,8 +909,41 @@ esp_err_t espos_ble_start(void)
      * drops everything, and a negative would become a huge size_t. */
     if (cap < 10) cap = 10;
     if (cap > 5000) cap = 5000;
+
+    /* Do not ask for more than the heap can give, and leave the rest of the
+     * gateway room to start.
+     *
+     * The ring is one contiguous block, and espos_ble_adv_t is 128 B once
+     * padded, so the default 500 entries is 62.5 KB. On an ESP32-C5 -- single
+     * core, ~166 KiB of internal RAM, running WiFi in STA+softAP with an HTTP
+     * server -- the free heap at this point is 25-27 KB, so the allocation
+     * could never succeed and BLE never started at all. The ESP_ERR_NO_MEM it
+     * returned was indistinguishable from the radio itself being short, which
+     * is what made it look like a Bluedroid problem (espOS #124).
+     *
+     * A quarter of the largest free block is the budget: enough that the ring
+     * is useful, little enough that the controller, its tasks and the scan
+     * callbacks still have somewhere to live. Shrinking beats failing -- the
+     * ring's whole contract is that a full ring drops the oldest and counts
+     * them, so a smaller one is a degraded gateway rather than no gateway. */
+    size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    size_t budget = largest / 4;
+    int32_t affordable = (int32_t)(budget / sizeof(espos_ble_adv_t));
+    if (affordable < 10) affordable = 10;   /* the descriptor's own floor */
+    if (cap > affordable) {
+        ESP_LOGW(TAG, "advertisement buffer %u entries needs %u B; largest "
+                      "free block is %u B, using %u entries",
+                 (unsigned)cap, (unsigned)((size_t)cap * sizeof(espos_ble_adv_t)),
+                 (unsigned)largest, (unsigned)affordable);
+        cap = affordable;
+    }
+
     g.storage = calloc((size_t)cap, sizeof(espos_ble_adv_t));
-    if (!g.storage) return ESP_ERR_NO_MEM;
+    if (!g.storage) {
+        ESP_LOGE(TAG, "no memory for %u advertisement slots (%u B)",
+                 (unsigned)cap, (unsigned)((size_t)cap * sizeof(espos_ble_adv_t)));
+        return ESP_ERR_NO_MEM;
+    }
     espos_ble_advq_init(&g.q, g.storage, (size_t)cap);
 
     g.lock = xSemaphoreCreateMutex();
