@@ -47,6 +47,21 @@ static void set_error(espos_sk_tok_sm_t *sm, const char *msg)
     snprintf(sm->st.last_error, sizeof(sm->st.last_error), "%s", msg ? msg : "");
 }
 
+/* Does this 400 mean "a request from this device is already pending"?
+ *
+ * Matched on the server's message because that is the only signal it gives:
+ * every 400 on the access-request endpoint carries the same status and no code.
+ * The substring is the stable part of signalk-server's sentence ("A device with
+ * clientId '<uuid>' has already requested access"); the uuid in the middle is
+ * why this is a search and not a comparison. A message we do not recognise is
+ * treated as some other 400, which is the safe way round: the generic path
+ * reports the server's text and backs off as an error, rather than advising
+ * somebody to approve a request that does not exist. */
+static bool dup_request(const char *msg)
+{
+    return msg && strstr(msg, "already requested access") != NULL;
+}
+
 static void arm(espos_sk_tok_sm_t *sm, uint32_t ms)
 {
     sm->st.next_action_ms = now(sm) + ms;
@@ -411,10 +426,20 @@ void espos_sk_tok_event(espos_sk_tok_sm_t *sm, espos_sk_tok_event_t ev, const vo
             notify(sm);
             return;
         }
-        if (r->http_status == 400) {
-            /* Typically "already requested access": a request this device made
-             * and lost track of, sitting unanswered on the server. Once someone
-             * decides it, a new one goes through.
+        if (r->http_status == 400 && dup_request(r->message)) {
+            /* "already requested access": a request this device made and lost
+             * track of, sitting unanswered on the server. Once someone decides
+             * it, a new one goes through.
+             *
+             * Only this 400 gets the treatment below. signalk-server answers 400
+             * to three other things on this endpoint -- a body that fails its
+             * validation, a permissions value it does not know, and a duplicate
+             * USER (unreachable from here, we always send a clientId) -- and all
+             * of those are bugs on this side, not a person who has not looked
+             * yet. Telling an operator to go approve something would send them
+             * to an empty Access Requests list, and stretching the retry to ten
+             * minutes would hide the bug rather than surface it, so those fall
+             * through to the generic error path with the server\'s own words.
              *
              * This backs off like every other error rather than retrying on a
              * fixed minute. A 400 here is not transient -- it says a human has
@@ -457,6 +482,19 @@ void espos_sk_tok_event(espos_sk_tok_sm_t *sm, espos_sk_tok_event_t ev, const vo
         }
         if (r->http_status == 0) {
             enter_error(sm, "server unreachable");
+        } else if (r->message[0]) {
+            /* Prefer what the server said over restating its status code. On a
+             * 400 that is not the duplicate case above, its message is the only
+             * thing that says WHICH request it rejected and why ("invalid
+             * permissions", a body that failed validation), and that is a bug on
+             * this side that someone has to read to fix.
+             *
+             * Passed straight through rather than prefixed with the status: a
+             * server message can be as long as the field itself, and adding
+             * "HTTP %d: " would push the tail of the sentence out of a
+             * 96-byte buffer (-Werror=format-truncation says so at compile
+             * time). The code is in last_http_status either way. */
+            enter_error(sm, r->message);
         } else {
             char m[ESPOS_SK_MSG_MAX];
             snprintf(m, sizeof(m), "request failed (HTTP %d)", r->http_status);
