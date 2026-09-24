@@ -353,8 +353,10 @@ reviews:
     - path: "components/espos_net/**"
       instructions: |
         This component owns the `_espos._tcp` mDNS advertisement and the
-        device identity. The TXT keys (`v`, `app`, `espos`, `target`,
-        `id`, `api`, `auth`) are what signalk-espos-manager browses for;
+        device identity. The TXT keys espOS emits are `v`, `app`, `espos`,
+        `target`, `id`, `api` and `auth`; signalk-espos-manager reads all
+        of them plus an optional `board` key that no firmware emits yet,
+        so adding `board` here is a manager-visible change.
         `id` (last two bytes of the base MAC, lower-case hex) is the
         plugin's only primary key for a device, so it must never change
         meaning or width. `auth` is hard-coded to `0` and the manager
@@ -628,15 +630,18 @@ reviews:
         instructions: >-
           Fail if the PR modifies version.txt, .release-please-manifest.json,
           CHANGELOG.md, or any line between an `x-release-please-start-version`
-          and `x-release-please-end` marker in an idf_component.yml, unless the
-          PR title starts with `chore: release`. Pass otherwise.
+          and `x-release-please-end` marker in an idf_component.yml that
+          already exists on the base branch, unless the PR title starts with
+          `chore: release`. A newly added idf_component.yml is exempt when
+          its version equals the one in version.txt. Pass otherwise.
       - name: Consumer contract change is declared
         mode: warning
         instructions: >-
           Determine whether the PR changes any of: the inputs, secrets, outputs
           or produced asset names of .github/workflows/build-firmware.yml; a
-          route path, HTTP status, or JSON key in components/espos_httpd/src
-          or docs/rest-api.md; a TXT key in components/espos_net/src/mdns.c;
+          route path, HTTP status, or JSON key in any file under components/
+          that calls espos_httpd_register or espos_httpd_register_ex, or in
+          docs/rest-api.md; a TXT key in components/espos_net/src/mdns.c;
           the manifest parser or espos_ota_version_cmp in components/espos_ota;
           a partition table or the consumer sdkconfig lint in
           components/espos_core. If it does, pass only when the PR body names
