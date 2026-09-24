@@ -15,6 +15,16 @@ pull request. The `[Unreleased]` block below was written by hand before the
 switch; its entries belong to the next feature release and are folded into
 that section when it is cut.
 
+## [0.10.3](https://github.com/signalk-espOS/espOS/compare/v0.10.2...v0.10.3) (2026-09-24)
+
+
+### Fixed
+
+* **ble:** size the advertisement buffer to the heap, not to a constant ([#126](https://github.com/signalk-espOS/espOS/issues/126)) ([2e4e68a](https://github.com/signalk-espOS/espOS/commit/2e4e68a6c298bb4f36401ee1fa44464c38500ea0))
+* **ci:** an expression in a description breaks the workflow for every caller ([#123](https://github.com/signalk-espOS/espOS/issues/123)) ([fe047e0](https://github.com/signalk-espOS/espOS/commit/fe047e0de84f5f2289ab6e4112a92a38a7bbe192))
+* **ci:** make build-firmware.yml usable from a workflow_call ([#121](https://github.com/signalk-espOS/espOS/issues/121)) ([485a382](https://github.com/signalk-espOS/espOS/commit/485a382d0fb83f2017ab7d4baf2c3b660e363c00))
+* **health:** stop republishing a condition that has not changed ([#125](https://github.com/signalk-espOS/espOS/issues/125)) ([e8b09ab](https://github.com/signalk-espOS/espOS/commit/e8b09abf079f869772dc172a0e36e31706b14896))
+
 ## [0.10.2](https://github.com/signalk-espOS/espOS/compare/v0.10.1...v0.10.2) (2026-09-21)
 
 
