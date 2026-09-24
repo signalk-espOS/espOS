@@ -174,6 +174,11 @@ typedef struct espos_sk_tok_sm {
     bool started;
     bool reeval;                  /* server/token changed while an action was in flight */
     uint32_t error_backoff_ms;
+    /* Separate from error_backoff_ms on purpose: a duplicate pending request is
+     * a wait for a person, not a fault to retry out of, so it has its own
+     * ladder and its own (shorter) ceiling. Sharing one counter would let an
+     * unreachable server stretch the approval wait, or vice versa. */
+    uint32_t dup_backoff_ms;
     uint32_t timer_due_ms;
     /* Consecutive unauthorised answers over a PLAINTEXT connection. On http a
      * single 401 is not proof the token died: anything on the path can answer
