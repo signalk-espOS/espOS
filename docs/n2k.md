@@ -59,7 +59,7 @@ otherwise needs a serial cable to diagnose:
 |---|---|
 | `running: false` | the driver never came up — pins, or a failed `twai_new_node_onchip` |
 | `frames: 0` **and** `errors: 0` | the wire is electrically quiet: unplugged, unpowered, nobody transmitting — or the driver missed the bus, see below |
-| `frames: 0`, `errors` climbing | the bus is live and not understood. `ack_err` alone = nothing else is listening; `stuff_err`/`form_err` = wrong bitrate |
+| `frames: 0`, `errors` climbing | the bus is live and not understood. The flags are symptoms, not proof: `ack_err` alone (no node acknowledged the frame) usually means nothing else is listening; repeated `stuff_err`/`form_err` point at a bitrate or wiring mismatch |
 | `dropped` climbing | frames arrive faster than they are consumed; raise `CONFIG_ESPOS_N2K_RX_QUEUE_DEPTH` |
 
 **A bus connected after boot is not picked up until the device restarts.** A

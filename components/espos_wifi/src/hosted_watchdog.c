@@ -20,11 +20,12 @@
  * detector. Miss enough of them and the link is gone regardless of what
  * the WiFi state machine believes.
  *
- * Recovery is a transport re-init, not a reboot: deinit, init, reconnect.
- * An application watchdog that reboots is the correct backstop, but it
- * costs a full boot and drops every socket; this takes seconds and the
- * config, layout and UI survive. The reboot path stays as the outer net
- * for when re-init itself fails.
+ * Recovery is a deliberate esp_restart(), not a transport re-init: the
+ * esp_hosted_deinit()/init() pair asserts instead of failing when it cannot
+ * re-allocate its SDIO pool (recover() below, and docs/wifi.md, "Why a
+ * restart and not a transport re-init"). Detection is the valuable half: a
+ * device that restarts 60 s after its link dies beats one that sits
+ * unreachable until someone power-cycles it.
  */
 
 #include "sdkconfig.h"

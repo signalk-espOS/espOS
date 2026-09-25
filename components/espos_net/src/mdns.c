@@ -139,8 +139,9 @@ static void register_builtin(void)
     mdns_txt_item_t http_txt[] = { { "path", "/" } };
     (void)responder_add("_http", "_tcp", (uint16_t)port, http_txt, sizeof(http_txt) / sizeof(http_txt[0]));
     /* What a browser needs to know before it fetches anything: which
-     * firmware, which espOS, which chip, which device, where the API is and
-     * that it needs no credentials (auth=0 until the REST API grows some). */
+     * firmware, which espOS, which chip, which device and where the API is.
+     * auth is fixed at 0: it predates httpd.api_key and does not track it;
+     * /system/ping carries the live value. */
     mdns_txt_item_t espos_txt[] = {
         { "v", ESPOS_MDNS_PROJECT_VER },
         { "app", ESPOS_MDNS_PROJECT_NAME },

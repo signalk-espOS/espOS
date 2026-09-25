@@ -732,6 +732,51 @@ on its own:
 * **`queue_peak`** is the high-water mark, so it answers "how close did this
   ever come" rather than "how deep is it now".
 
+## NMEA 2000
+
+Present only when the build has `espos_n2k` and the firmware handed it the
+receiver with `espos_n2k_api_register(&receiver)` ([n2k.md](n2k.md)).
+
+### `GET /n2k` · protected
+
+```json
+{"present": true, "running": true, "ever_received": true, "idle_s": 0,
+ "frames": 89559, "dropped": 0, "errors": 59, "bus_off": 0,
+ "last_error": {"flags": 8, "arb_lost": false, "bit_err": false, "form_err": false,
+                "stuff_err": true, "ack_err": false}}
+```
+
+`present: false`, and nothing else, means the component is in the build but
+the application never registered a receiver. `idle_s` is seconds since the
+last frame and `null` until one has arrived. `last_error` is the TWAI error
+word of the most recent bus error, raw in `flags` and decoded alongside.
+The flags are symptoms, not diagnoses: `ack_err` alone (no node acknowledged
+the frame) is the usual sign that nothing else is listening, and repeated
+`stuff_err` or `form_err` point at a bitrate or wiring mismatch, but one
+flag is not proof of either. This is the route to read on a silent bus;
+[n2k.md](n2k.md) has the table of what the counters mean.
+
+## Power
+
+Present only when the build has `espos_power` and `espos_power_start()` has
+registered the route ([power.md](power.md)); the registered route answers
+`503 not_started` if the component is not running, which only happens when
+start failed after registering it.
+
+### `GET /power` · protected
+
+```json
+{"mode": "cycle", "decision": "stay", "why": "stream", "timer_wake": true, "wake_count": 12,
+ "last_awake_ms": 4210, "interval_s": 300, "uptime_ms": 2600, "deadline_ms": 30000, "holds": 0}
+```
+
+`mode` ∈ `off cycle`; `decision` ∈ `sleep stay` is what the policy decided
+last and `why` ∈ `off unconfirmed ota window network stream publishing hold
+done deadline` names the rule that won. `timer_wake` says whether this boot
+was the cycle's timer wake; `wake_count` and `last_awake_ms` come from RTC
+memory and survive deep sleep; `deadline_ms` is this wake's time budget and
+`holds` the application's open `espos_power_hold()` count.
+
 ## Planned (shape reserved, not implemented)
 
 Nothing — M1–M7 and the authentication are implemented. Future additions go

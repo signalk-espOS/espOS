@@ -162,7 +162,9 @@ mean most forks ship the shared key without noticing.
 
 * `app` (optional, top level or per build) must equal the device's
   project name when present.
-* Per build: `version`, `target` (`esp32 esp32s3 esp32c3 esp32c6 esp32p4`),
+* Per build: `version`, `target` (the IDF target name, compared verbatim
+  with the device's own; CI builds `esp32 esp32s3 esp32c3 esp32c5 esp32c6
+  esp32p4`),
   `url` (absolute, or relative to the manifest URL) are required;
   `channel` defaults to `stable`; `size`, `sha256`, `notes`, `date` are
   informational (`sha256` is not what protects the image — the signature

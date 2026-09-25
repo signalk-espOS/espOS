@@ -212,8 +212,9 @@ name as the instance name, and advertises two services on `httpd.port`:
 `esp_app_desc_t` carries, `git describe` for the version in a tagged
 checkout), compiled in by the component's `CMakeLists.txt`; `espos` is
 espOS's own `version.txt` (the manifest version in a registry-installed
-copy). `id` is `espos_net_short_id()`. `auth=0` says the REST API takes no
-credentials; it flips when it grows some.
+copy). `id` is `espos_net_short_id()`. `auth=0` is a fixed value: the advertisement
+predates `httpd.api_key` and does not reflect whether a key is set. Ask
+`GET /api/v1/system/ping`, whose `auth` field is live.
 
 `espos_net_start()` brings the responder up before any interface has an
 address. That is deliberate: the responder accepts records without a link

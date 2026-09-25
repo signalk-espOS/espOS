@@ -17,7 +17,8 @@ espos_project_prologue(NAME "espOS" PARTITIONS "${ESPOS_PARTITIONS_DIR}/4mb.csv"
 
 project(espos)
 
-# Committed UI bundle (ui/dist-gz) → LittleFS "storage" partition image,
+# Committed UI bundle (components/espos_httpd/ui-dist) → LittleFS "storage"
+# partition image,
 # flashed with `idf.py flash`. A missing bundle is a broken checkout and a
 # hard error; `npm run build` in ui/ only when the UI itself changes.
 espos_project_ui_partition(NAME "espOS")
