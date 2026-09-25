@@ -490,16 +490,112 @@ TEST_CASE("device requests disabled (403) → denied with message", "[sk_tok]")
     TEST_ASSERT_NOT_NULL(strstr(ST()->last_error, "disabled"));
 }
 
-TEST_CASE("duplicate pending request (400) retries after a minute", "[sk_tok]")
+TEST_CASE("duplicate pending request (400) backs off, first retry still prompt", "[sk_tok]")
 {
     reset(NULL);
     espos_sk_tok_event(&SM, ESPOS_SK_EV_START, NULL);
     espos_sk_tok_event(&SM, ESPOS_SK_EV_SERVER, &SRV_A);
     request_result(400, NULL, "A device with clientId 'x' has already requested access");
     TEST_ASSERT_EQUAL(ESPOS_SK_TOK_ERROR, ST()->state);
-    TEST_ASSERT_EQUAL_UINT32(F.now + 60000, F.timer_due);
-    tick(60000);
+    /* The status line has to say what the reader must DO. Now that the retry
+     * stretches to ten minutes, a line that reads like a stuck device rather
+     * than one waiting for a person is the difference between somebody
+     * approving it and somebody power-cycling it. The server's own wording
+     * names a uuid nobody can act on, so it is deliberately replaced. */
+    TEST_ASSERT_NOT_NULL(strstr(ST()->last_error, "approve it in Security -> Access Requests"));
+
+    /* The usual case is somebody approving it within a minute or two, so the
+     * FIRST retry stays prompt: a minute, less the jitter (rnd=0 -> -10 %). */
+    uint32_t d1 = F.timer_due - F.now;
+    TEST_ASSERT_TRUE(d1 >= 54000 && d1 <= 72000);
+    tick(d1);
     TEST_ASSERT_EQUAL(2, F.requests);
+}
+
+TEST_CASE("duplicate pending request stops asking every minute forever", "[sk_tok]")
+{
+    reset(NULL);
+    espos_sk_tok_event(&SM, ESPOS_SK_EV_START, NULL);
+    espos_sk_tok_event(&SM, ESPOS_SK_EV_SERVER, &SRV_A);
+
+    /* Nobody approves it. Measured on an ESP32-C5 before this backoff existed:
+     * 31 requests in ~34 minutes, each spiking the heap, until the watchdog
+     * rebooted the board (espOS #128). */
+    uint32_t prev = 0;
+    for (int i = 0; i < 6; i++) {
+        request_result(400, NULL, "already requested access");
+        uint32_t d = F.timer_due - F.now;
+        /* Growing OR already at the ceiling. Not "strictly greater than the
+         * last": the cap is the point, so once it is reached the wait stops
+         * growing -- an earlier version of this assertion demanded growth
+         * forever and failed on the code behaving correctly.
+         *
+         * Observed ladder: 54s, 108s, 216s, 432s, 540s, 540s. */
+        if (i > 0) {
+            TEST_ASSERT_TRUE_MESSAGE(d > prev || d >= 540000u,
+                                     "each wait must grow until it is capped");
+        }
+        prev = d;
+        tick(d);
+    }
+    /* Six refusals in, the wait is minutes rather than the fixed minute it used
+     * to be -- and bounded, so a device is still picked up soon after someone
+     * finally approves it rather than sleeping for hours. */
+    TEST_ASSERT_TRUE(prev >= 8u * 60000u);
+    TEST_ASSERT_TRUE(prev <= 600000u + 600000u / 5u);
+}
+
+TEST_CASE("an answered server resets the duplicate backoff", "[sk_tok]")
+{
+    reset(NULL);
+    espos_sk_tok_event(&SM, ESPOS_SK_EV_START, NULL);
+    espos_sk_tok_event(&SM, ESPOS_SK_EV_SERVER, &SRV_A);
+    for (int i = 0; i < 4; i++) {
+        request_result(400, NULL, "already requested access");
+        tick(F.timer_due - F.now);
+    }
+    /* The request finally lands: the ladder must reset, or the NEXT time this
+     * device is waiting for approval it would start minutes deep for a reason
+     * that has already been resolved. */
+    request_result(202, "/signalk/v1/requests/abc", NULL);
+    TEST_ASSERT_EQUAL(ESPOS_SK_TOK_REQUESTED, ST()->state);
+    /* Getting back to a fresh request has to go THROUGH the machine rather than
+     * around it. An earlier version of this test re-sent EV_SERVER and then a
+     * REQUEST_RESULT, but in REQUESTED that result is stale and dropped, so the
+     * delay it measured was the 5 s poll timer and the assertion passed without
+     * the reset ever being exercised. A 404 on the poll is the real path: the
+     * server lost the request, so the device asks again. */
+    tick(F.timer_due - F.now);
+    poll_result(404, NULL, NULL, NULL);
+    request_result(400, NULL, "already requested access");
+    TEST_ASSERT_EQUAL(ESPOS_SK_TOK_ERROR, ST()->state);
+    uint32_t d = F.timer_due - F.now;
+    /* Both bounds: an upper one alone would also pass if the wait collapsed to
+     * zero, which would be the old every-minute storm at a faster rate. This is
+     * the same 54-72 s window the first retry gets. */
+    TEST_ASSERT_TRUE_MESSAGE(d >= 54000 && d <= 72000, "backoff should be back at its floor");
+}
+
+TEST_CASE("a 400 that is not a duplicate reports the server's reason", "[sk_tok]")
+{
+    reset(NULL);
+    espos_sk_tok_event(&SM, ESPOS_SK_EV_START, NULL);
+    espos_sk_tok_event(&SM, ESPOS_SK_EV_SERVER, &SRV_A);
+
+    /* signalk-server answers 400 to three other things on this endpoint, all of
+     * them malformed requests from this side rather than a person who has not
+     * looked yet. Advising somebody to approve a request would send them to an
+     * empty list, so these must keep the server's own words and back off as the
+     * error they are. */
+    request_result(400, NULL, "invalid permissions");
+    TEST_ASSERT_EQUAL(ESPOS_SK_TOK_ERROR, ST()->state);
+    TEST_ASSERT_NOT_NULL(strstr(ST()->last_error, "invalid permissions"));
+    TEST_ASSERT_NULL(strstr(ST()->last_error, "Access Requests"));
+
+    /* The error ladder, not the ten-minute approval one: a bug on this side
+     * should surface, not be hidden behind a long sleep. */
+    uint32_t d = F.timer_due - F.now;
+    TEST_ASSERT_TRUE_MESSAGE(d >= 9000 && d <= 12000, "should use the error backoff floor");
 }
 
 TEST_CASE("unreachable server: exponential error backoff, resumes the right step", "[sk_tok]")

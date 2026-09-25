@@ -9,11 +9,16 @@
 #include <stdio.h>
 #include "espos_sk_token_sm.h"
 
-#define POLL_MIN_MS   5000u
-#define POLL_MAX_MS   60000u
-#define ERR_MIN_MS    10000u
-#define ERR_MAX_MS    300000u
-#define DUP_RETRY_MS  60000u
+#define POLL_MIN_MS 5000u
+#define POLL_MAX_MS 60000u
+#define ERR_MIN_MS  10000u
+#define ERR_MAX_MS  300000u
+/* A duplicate pending request backs off from a minute to ten. Not the error
+ * ladder's own numbers: this is not a fault to retry out of, it is a wait for a
+ * person, and ten minutes is short enough that a device is picked up soon after
+ * someone approves it. */
+#define DUP_MIN_MS    60000u
+#define DUP_MAX_MS    600000u
 #define OPEN_CHECK_MS 60000u
 /* Flat, not exponential. A certificate problem is fixed from outside — the
  * server renews, or an operator presses "trust the new certificate" — and the
@@ -40,6 +45,21 @@ static uint32_t now(espos_sk_tok_sm_t *sm)
 static void set_error(espos_sk_tok_sm_t *sm, const char *msg)
 {
     snprintf(sm->st.last_error, sizeof(sm->st.last_error), "%s", msg ? msg : "");
+}
+
+/* Does this 400 mean "a request from this device is already pending"?
+ *
+ * Matched on the server's message because that is the only signal it gives:
+ * every 400 on the access-request endpoint carries the same status and no code.
+ * The substring is the stable part of signalk-server's sentence ("A device with
+ * clientId '<uuid>' has already requested access"); the uuid in the middle is
+ * why this is a search and not a comparison. A message we do not recognise is
+ * treated as some other 400, which is the safe way round: the generic path
+ * reports the server's text and backs off as an error, rather than advising
+ * somebody to approve a request that does not exist. */
+static bool dup_request(const char *msg)
+{
+    return msg && strstr(msg, "already requested access") != NULL;
 }
 
 static void arm(espos_sk_tok_sm_t *sm, uint32_t ms)
@@ -214,6 +234,7 @@ static void evaluate(espos_sk_tok_sm_t *sm)
                     sm->st.approved_since_ms = now(sm);
                 }
                 sm->error_backoff_ms = ERR_MIN_MS;
+                sm->dup_backoff_ms = DUP_MIN_MS;
                 set_error(sm, "");
                 arm(sm, sm->cfg.check_interval_ms);
                 notify(sm);
@@ -260,6 +281,7 @@ void espos_sk_tok_init(espos_sk_tok_sm_t *sm, const espos_sk_tok_port_t *port, v
     sm->st.has_token = sm->store.token[0] != '\0';
     snprintf(sm->st.pending_href, sizeof(sm->st.pending_href), "%s", sm->store.pending_href);
     sm->error_backoff_ms = ERR_MIN_MS;
+    sm->dup_backoff_ms = DUP_MIN_MS;
     sm->st.poll_interval_ms = POLL_MIN_MS;
 }
 
@@ -335,6 +357,7 @@ void espos_sk_tok_event(espos_sk_tok_sm_t *sm, espos_sk_tok_event_t ev, const vo
             sm->st.has_server = false;
         }
         sm->error_backoff_ms = ERR_MIN_MS;
+        sm->dup_backoff_ms = DUP_MIN_MS;
         set_error(sm, "");
         if (sm->st.busy) {
             /* an action for the old server is in flight: its result must not
@@ -375,6 +398,7 @@ void espos_sk_tok_event(espos_sk_tok_sm_t *sm, espos_sk_tok_event_t ev, const vo
             sm->st.requested_since_ms = now(sm);
             sm->st.poll_interval_ms = POLL_MIN_MS;
             sm->error_backoff_ms = ERR_MIN_MS;
+            sm->dup_backoff_ms = DUP_MIN_MS;
             set_error(sm, "");
             arm(sm, POLL_MIN_MS);
             notify(sm);
@@ -384,6 +408,7 @@ void espos_sk_tok_event(espos_sk_tok_sm_t *sm, espos_sk_tok_event_t ev, const vo
             /* "Server security is not enabled": nothing to request */
             sm->st.state = ESPOS_SK_TOK_OPEN;
             sm->error_backoff_ms = ERR_MIN_MS;
+            sm->dup_backoff_ms = DUP_MIN_MS;
             set_error(sm, "");
             arm(sm, OPEN_CHECK_MS);
             notify(sm);
@@ -401,17 +426,75 @@ void espos_sk_tok_event(espos_sk_tok_sm_t *sm, espos_sk_tok_event_t ev, const vo
             notify(sm);
             return;
         }
-        if (r->http_status == 400) {
-            /* typically "already requested access": an unanswered request we
-             * lost track of. Once the admin decides it, a new one goes through. */
+        if (r->http_status == 400 && dup_request(r->message)) {
+            /* "already requested access": a request this device made and lost
+             * track of, sitting unanswered on the server. Once someone decides
+             * it, a new one goes through.
+             *
+             * Only this 400 gets the treatment below. signalk-server answers 400
+             * to three other things on this endpoint -- a body that fails its
+             * validation, a permissions value it does not know, and a duplicate
+             * USER (unreachable from here, we always send a clientId) -- and all
+             * of those are bugs on this side, not a person who has not looked
+             * yet. Telling an operator to go approve something would send them
+             * to an empty Access Requests list, and stretching the retry to ten
+             * minutes would hide the bug rather than surface it, so those fall
+             * through to the generic error path with the server\'s own words.
+             *
+             * This backs off like every other error rather than retrying on a
+             * fixed minute. A 400 here is not transient -- it says a human has
+             * not looked yet -- so asking again at the same rate forever
+             * achieves nothing and is not free: measured on an ESP32-C5, 31
+             * such requests over ~34 minutes spiked the heap on every cycle
+             * while the deltas that could not be sent accumulated, and the
+             * combination fragmented internal RAM until the health watchdog
+             * rebooted the board (espOS #128). The first retry is still prompt,
+             * because the usual case IS someone approving it within a minute or
+             * two; it is the twentieth that has no business being prompt.
+             *
+             * The cap matters as much as the growth: DUP_MAX_MS bounds how long
+             * a device can sit unnoticed after approval, so nobody has to
+             * power-cycle it to be seen. */
             sm->st.state = ESPOS_SK_TOK_ERROR;
-            set_error(sm, r->message[0] ? r->message : "request rejected (400)");
-            arm(sm, DUP_RETRY_MS);
+            /* What the reader must DO, not what the server said. Its own
+             * wording ("A device with clientId '<uuid>' has already requested
+             * access") is accurate but describes the server's state, names a
+             * uuid nobody can act on, and does not fit: ESPOS_SK_MSG_MAX is 96
+             * bytes and the clientId alone eats half of it, so appending advice
+             * would truncate one or the other. Now that the retry stretches to
+             * ten minutes it matters more than it did -- a status line reading
+             * like a stuck device rather than one waiting for a person is the
+             * difference between somebody approving it and somebody
+             * power-cycling it. The raw server text is still in
+             * last_error/last_http_status for anyone debugging. */
+            set_error(sm, "already asked; approve it in Security -> Access Requests");
+            uint32_t d = sm->dup_backoff_ms;
+            uint32_t j = sm->port->random(sm->ctx) % (d / 5 + 1);
+            arm(sm, d - d / 10 + j);
+            if (sm->dup_backoff_ms < DUP_MAX_MS) {
+                sm->dup_backoff_ms *= 2;
+                if (sm->dup_backoff_ms > DUP_MAX_MS) {
+                    sm->dup_backoff_ms = DUP_MAX_MS;
+                }
+            }
             notify(sm);
             return;
         }
         if (r->http_status == 0) {
             enter_error(sm, "server unreachable");
+        } else if (r->message[0]) {
+            /* Prefer what the server said over restating its status code. On a
+             * 400 that is not the duplicate case above, its message is the only
+             * thing that says WHICH request it rejected and why ("invalid
+             * permissions", a body that failed validation), and that is a bug on
+             * this side that someone has to read to fix.
+             *
+             * Passed straight through rather than prefixed with the status: a
+             * server message can be as long as the field itself, and adding
+             * "HTTP %d: " would push the tail of the sentence out of a
+             * 96-byte buffer (-Werror=format-truncation says so at compile
+             * time). The code is in last_http_status either way. */
+            enter_error(sm, r->message);
         } else {
             char m[ESPOS_SK_MSG_MAX];
             snprintf(m, sizeof(m), "request failed (HTTP %d)", r->http_status);
@@ -444,6 +527,7 @@ void espos_sk_tok_event(espos_sk_tok_sm_t *sm, espos_sk_tok_event_t ev, const vo
         }
         if (r->http_status == 200 || r->http_status == 202) {
             sm->error_backoff_ms = ERR_MIN_MS; /* the server answers again */
+            sm->dup_backoff_ms = DUP_MIN_MS;
             if (strcmp(r->state, "COMPLETED") == 0) {
                 if (strcmp(r->permission, "APPROVED") == 0 && r->token[0]) {
                     snprintf(sm->store.token, sizeof(sm->store.token), "%s", r->token);
@@ -535,6 +619,7 @@ void espos_sk_tok_event(espos_sk_tok_sm_t *sm, espos_sk_tok_event_t ev, const vo
             }
             sm->st.state = ESPOS_SK_TOK_APPROVED;
             sm->error_backoff_ms = ERR_MIN_MS;
+            sm->dup_backoff_ms = DUP_MIN_MS;
             set_error(sm, "");
             arm(sm, sm->cfg.check_interval_ms);
             notify(sm);
@@ -614,6 +699,7 @@ void espos_sk_tok_event(espos_sk_tok_sm_t *sm, espos_sk_tok_event_t ev, const vo
         clear_pending(sm);
         save(sm);
         sm->error_backoff_ms = ERR_MIN_MS;
+        sm->dup_backoff_ms = DUP_MIN_MS;
         set_error(sm, "");
         if (!sm->st.has_server) {
             notify(sm); /* kept; verified as soon as a server is known */
@@ -633,6 +719,7 @@ void espos_sk_tok_event(espos_sk_tok_sm_t *sm, espos_sk_tok_event_t ev, const vo
             return;
         }
         sm->error_backoff_ms = ERR_MIN_MS;
+        sm->dup_backoff_ms = DUP_MIN_MS;
         set_error(sm, "");
         if (sm->st.state == ESPOS_SK_TOK_DENIED || sm->st.state == ESPOS_SK_TOK_OPEN) {
             clear_pending(sm);
