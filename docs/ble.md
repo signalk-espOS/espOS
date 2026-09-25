@@ -129,6 +129,58 @@ co-processor. If the radio sees nothing at all while HCI is alive, suspect the
 antenna: the C6-MINI-1U module has no PCB antenna and needs an external 2.4
 GHz one on its IPEX connector.
 
+### When the controller cannot start at all
+
+`esp_bt_controller_init()` needs roughly **24 KB of internal RAM in one
+contiguous block**, and it competes for it with the WiFi driver. On a part where
+internal RAM is tight that block may not exist even when plenty of memory is
+free, and the failure looks like a radio fault rather than a shortage. The ROM
+reports it as:
+
+```
+W BLE_INIT: r_ble_controller_init failed 257
+```
+
+`257` is `0x101`, which is plain `ESP_ERR_NO_MEM`. espOS logs both numbers that
+matter beside it, because the total is the misleading one:
+
+```
+E espos_ble_backend: bt_controller_init: ESP_ERR_NO_MEM -- internal heap 33040 B
+  free, largest block 16384 B; the controller needs ~24 KB CONTIGUOUS
+```
+
+Measured on a Waveshare ESP32-C5 (199 KB internal, single core, IDF v6.0.3),
+with the WiFi station, the HTTP server and the SignalK client running: 33 KB
+free, largest block 16 KB, and the call fails **having allocated nothing**.
+Freeing *total* heap does not help — capping WiFi buffers (~40 KB) and trimming
+Bluedroid (64 KB of image) both left it failing. With the station not started at
+all the same image measures 77 KB largest and the controller starts, uses
+23.8 KB and scans.
+
+`espos_ble_reserve_controller()` exists for this: it claims the controller's
+block before a station is started, and nothing else — not the advertisement
+ring, which sizes itself from the largest free block and, run that early,
+measures an untouched heap and took 224 entries (28 KB), after which
+`esp_wifi_init()` got 1 of the 10 rx buffers it asked for.
+
+It is **opt-in**, and `espos_start()` does not call it, because reserving does
+not create memory. On the C5 above, reserving let the controller start and then
+`espos_sk_start()` failed `ESP_ERR_NO_MEM` instead. That part is simply at its
+ceiling on WiFi + SignalK alone, which it says itself:
+
+```
+I espos_skws: notification lowMemory: alarm (internal RAM exhausted)
+I espos_skws: notification tlsMemory: warn (largest free internal block 5 KB,
+  need 24 KB for a TLS handshake)
+```
+
+Where a module has PSRAM, that is the answer rather than reordering — the C5
+modules carry an 8 MB die (`Found 8MB PSRAM device`) that a default build leaves
+switched off. Note that `CONFIG_SPIRAM` changes the bootloader, so enabling it
+means one USB flash per device and cannot be rolled out over OTA, and on C5
+rev v1.0 IDF warns PSRAM contents are not encrypted, so TLS buffers should stay
+in internal RAM.
+
 ## Status and troubleshooting
 
 `GET /api/v1/ble/status` (and the `ble` SSE event) report the counters

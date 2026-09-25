@@ -21,6 +21,7 @@
 #include "ble_proto.h"
 #include "ble_types.h"
 #include "esp_bt_device.h"
+#include "esp_heap_caps.h"
 #include "esp_check.h"
 #include "esp_bt_main.h"
 #include "esp_gap_ble_api.h"
@@ -38,6 +39,18 @@ static const char *TAG = "espos_ble_backend";
 
 static espos_ble_callbacks_t s_cb;
 static bool s_scanning;
+/* Whether controller_up() has succeeded. Not merely a fast path: the controller
+ * may be started before the network (see espos_ble_reserve_controller) and
+ * esp_bt_controller_init() on a running controller is an error, not a no-op.
+ *
+ * Untested by the host suite, and not for want of trying: espos_ble_test
+ * compiles ble_proto.c alone because everything in this file needs IDF's
+ * Bluetooth stack, which does not exist on the linux target. Covering the three
+ * states this flag creates (reserve twice, start after reserve, retry after a
+ * failed enable) needs a fake controller behind a seam this component does not
+ * have. Verified on hardware instead -- an ESP32-C5, reserve then start -- which
+ * is the weaker check, so treat this flag as the delicate part of the file. */
+static bool s_controller_up;
 /* A scan was stopped while it was still arming. Cleared by the next deliberate
  * start; see the SCAN_PARAM_SET_COMPLETE_EVT case. */
 static bool s_scan_inhibited;
@@ -168,10 +181,59 @@ static esp_err_t controller_up(void)
      * BLE-only gateway and that RAM is scarce. */
     esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT);
     esp_bt_controller_config_t cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
-    ESP_RETURN_ON_ERROR(esp_bt_controller_init(&cfg), TAG, "bt_controller_init");
-    ESP_RETURN_ON_ERROR(esp_bt_controller_enable(ESP_BT_MODE_BLE), TAG,
-                        "bt_controller_enable");
+
+    /* Say what ran out, not just that something did. The controller answers
+     * ESP_ERR_NO_MEM (the ROM prints it as "r_ble_controller_init failed 257",
+     * which is 0x101) when it cannot get its ~24 KB in one piece, and the
+     * number that decides that is the LARGEST FREE BLOCK, not the total --
+     * measured on a C5 at 33 KB free / 16 KB largest, failing without
+     * allocating a byte (espOS #127). Without both numbers in the log this
+     * reads as a radio fault and invites freeing total heap, which cannot
+     * help. */
+    esp_err_t cerr = esp_bt_controller_init(&cfg);
+    if (cerr != ESP_OK) {
+        ESP_LOGE(TAG, "bt_controller_init: %s -- internal heap %u B free, largest block %u B; "
+                      "the controller needs ~24 KB CONTIGUOUS",
+                 esp_err_to_name(cerr),
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+        return cerr;
+    }
+
+    /* Hand back an initialised-but-not-enabled controller rather than leaving
+     * one behind. init succeeding and enable failing is a plausible split on a
+     * part this tight, and the caller's retry would then call
+     * esp_bt_controller_init() on a live controller, which answers
+     * ESP_ERR_INVALID_STATE -- so one transient enable failure would wedge BLE
+     * until reboot. Deinit puts it back where the retry expects it. */
+    esp_err_t eerr = esp_bt_controller_enable(ESP_BT_MODE_BLE);
+    if (eerr != ESP_OK) {
+        ESP_LOGE(TAG, "bt_controller_enable: %s", esp_err_to_name(eerr));
+        esp_err_t derr = esp_bt_controller_deinit();
+        if (derr != ESP_OK) {
+            /* Nothing useful left to do, but say so: a later retry will fail on
+             * init and this line is what explains why. */
+            ESP_LOGE(TAG, "bt_controller_deinit after a failed enable: %s", esp_err_to_name(derr));
+        }
+        return eerr;
+    }
 #endif
+    return ESP_OK;
+}
+
+esp_err_t espos_ble_backend_controller_only(void)
+{
+    /* Just the radio, and nothing above it. This is what reserving the
+     * controller's ~24 KB means: claim the block, leave the Bluedroid host and
+     * its BTU/BTC threads for later. Starting the host here would also start
+     * those threads, whose stacks come from the same internal RAM the reserve
+     * exists to protect -- and on a C5 that is what tipped the rest of the
+     * firmware over. */
+    if (s_controller_up) {
+        return ESP_OK;
+    }
+    ESP_RETURN_ON_ERROR(controller_up(), TAG, "controller");
+    s_controller_up = true;
     return ESP_OK;
 }
 
@@ -179,9 +241,27 @@ esp_err_t espos_ble_backend_init(const espos_ble_callbacks_t *cb)
 {
     if (cb) s_cb = *cb;
 
-    ESP_RETURN_ON_ERROR(controller_up(), TAG, "controller");
-    ESP_RETURN_ON_ERROR(esp_bluedroid_init(), TAG, "bluedroid_init");
-    ESP_RETURN_ON_ERROR(esp_bluedroid_enable(), TAG, "bluedroid_enable");
+    /* The controller may already be up: espos_ble_reserve_controller() can have
+     * run minutes earlier, before the network. Re-initialising a live
+     * controller is an error rather than a no-op, so skip it and carry on with
+     * the host, which is what the gateway actually needs from this call. */
+    if (!s_controller_up) {
+        ESP_RETURN_ON_ERROR(controller_up(), TAG, "controller");
+        s_controller_up = true;
+    }
+
+    /* Bluedroid is NOT skipped on a second call, because a reserve deliberately
+     * never started it -- see espos_ble_backend_controller_only(). Guarding on
+     * its own state anyway: esp_bluedroid_init() answers ESP_ERR_INVALID_STATE
+     * on an already-initialised host, and under ESP_RETURN_ON_ERROR that would
+     * fail espos_ble_start() outright and leave the gateway never scanning. A
+     * stack that is already up is success here, not failure. */
+    if (esp_bluedroid_get_status() == ESP_BLUEDROID_STATUS_UNINITIALIZED) {
+        ESP_RETURN_ON_ERROR(esp_bluedroid_init(), TAG, "bluedroid_init");
+    }
+    if (esp_bluedroid_get_status() != ESP_BLUEDROID_STATUS_ENABLED) {
+        ESP_RETURN_ON_ERROR(esp_bluedroid_enable(), TAG, "bluedroid_enable");
+    }
     ESP_RETURN_ON_ERROR(esp_ble_gap_register_callback(gap_cb), TAG, "gap_register");
 
     const uint8_t *mac = esp_bt_dev_get_address();

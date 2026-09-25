@@ -65,6 +65,10 @@ typedef struct {
 
 /* Backend interface. One implementation is compiled in per target: the
  * esp_hosted VHCI path on the ESP32-P4, native Bluedroid elsewhere. */
+/* Bring up ONLY the radio controller, not the Bluedroid host above it. Backs
+ * espos_ble_reserve_controller(); idempotent. */
+esp_err_t espos_ble_backend_controller_only(void);
+
 esp_err_t espos_ble_backend_init(const espos_ble_callbacks_t *cb);
 esp_err_t espos_ble_backend_deinit(void);
 esp_err_t espos_ble_scan_start(bool active, uint16_t interval_ms, uint16_t window_ms);

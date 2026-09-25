@@ -868,6 +868,25 @@ static void gateway_task(void *arg)
 /* Public API                                                         */
 /* ---------------------------------------------------------------- */
 
+esp_err_t espos_ble_reserve_controller(void)
+{
+    /* Honour the same switch espos_ble_start() honours. A device with BLE
+     * turned off must not have 24 KB taken from it for a radio it will never
+     * use -- and on a part this tight that is the difference between the rest
+     * of the firmware fitting and not. */
+    bool enabled = true;
+    espos_config_get_bool(ESPOS_CFG_NS_BLE, ESPOS_CFG_BLE_ENABLED, &enabled);
+    if (!enabled) {
+        return ESP_OK;
+    }
+
+    /* The controller only. Not espos_ble_backend_init(), which also brings up
+     * the Bluedroid host: that starts the BTU and BTC threads, whose stacks are
+     * internal RAM, so it would spend exactly the memory this call exists to
+     * protect. The host comes up in espos_ble_start() with the callbacks. */
+    return espos_ble_backend_controller_only();
+}
+
 esp_err_t espos_ble_start(void)
 {
     if (g.running) return ESP_OK;
