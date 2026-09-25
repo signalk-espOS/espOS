@@ -749,15 +749,19 @@ receiver with `espos_n2k_api_register(&receiver)` ([n2k.md](n2k.md)).
 `present: false`, and nothing else, means the component is in the build but
 the application never registered a receiver. `idle_s` is seconds since the
 last frame and `null` until one has arrived. `last_error` is the TWAI error
-word of the most recent bus error, raw in `flags` and decoded alongside:
-`ack_err` alone means nothing else on the bus is listening, `stuff_err` or
-`form_err` means the wrong bitrate. This is the route to read on a silent
-bus; [n2k.md](n2k.md) has the table of what the counters mean.
+word of the most recent bus error, raw in `flags` and decoded alongside.
+The flags are symptoms, not diagnoses: `ack_err` alone (no node acknowledged
+the frame) is the usual sign that nothing else is listening, and repeated
+`stuff_err` or `form_err` point at a bitrate or wiring mismatch, but one
+flag is not proof of either. This is the route to read on a silent bus;
+[n2k.md](n2k.md) has the table of what the counters mean.
 
 ## Power
 
-Present only when the build has `espos_power` ([power.md](power.md));
-`503 not_started` until `espos_power_start()` has run.
+Present only when the build has `espos_power` and `espos_power_start()` has
+registered the route ([power.md](power.md)); the registered route answers
+`503 not_started` if the component is not running, which only happens when
+start failed after registering it.
 
 ### `GET /power` · protected
 
