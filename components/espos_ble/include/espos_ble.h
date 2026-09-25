@@ -32,9 +32,46 @@
 extern "C" {
 #endif
 
-/** Start the gateway: brings up the BLE stack, starts scanning, and runs the
- * POST + control-WS tasks. Reads its settings from the `ble` config
- * namespace. Idempotent. */
+/** Reserve the radio controller's memory, before anything else takes it.
+ *
+ * Optional: espos_ble_start() calls this itself if it has not run. It exists
+ * because WHEN the controller is initialised decides whether it can be at all.
+ * esp_bt_controller_init() needs ~24 KB in ONE contiguous block, and it takes
+ * it from the same internal heap the WiFi driver uses. Measured on an
+ * ESP32-C5 (199 KB internal, single core, espOS #127): with the station up
+ * first there are 33 KB free but the largest block is 16 KB, so the
+ * controller cannot start however much total memory is spare -- and no amount
+ * of freeing total heap fixes it, which is why capping WiFi buffers (~40 KB)
+ * and trimming Bluedroid (64 KB of image) both failed to.
+ *
+ * Call it before starting a WiFi station on a part where internal RAM is
+ * tight. On parts with room, or where the controller is a co-processor
+ * (ESP32-P4), the order does not matter and this is a no-op beyond bringing
+ * the stack up sooner.
+ *
+ * Deliberately does NOT allocate the advertisement ring or start scanning.
+ * The ring sizes itself from the largest free block, and run this early it
+ * measures a heap nothing has taken yet and reserves far too much: 224 entries
+ * (28 KB) on the C5, after which esp_wifi_init() got 1 of the 10 rx buffers it
+ * wanted and the device reboot-looped. The ring belongs with the rest of the
+ * gateway, after the network.
+ *
+ * espos_start() deliberately does NOT call this, and that is the honest state
+ * of espOS #127 rather than an oversight. Reserving first does let the
+ * controller start on a C5 -- measured -- but the memory has to come from
+ * somewhere, and on that part it came from espos_sk_start(), which then failed
+ * ESP_ERR_NO_MEM and, being a fatal stage, reboot-looped the device. Trading a
+ * gateway with no BLE for a gateway that does not boot is not a fix. On a C5
+ * the real answer is the 8 MB PSRAM die the module has and the build never
+ * enabled (CONFIG_SPIRAM), which is a bootloader-level change and so a USB
+ * flash rather than an OTA. Until a caller knows its own budget, this stays
+ * opt-in. */
+esp_err_t espos_ble_reserve_controller(void);
+
+/** Start the gateway: brings up the BLE stack (if
+ * espos_ble_reserve_controller() has not already), allocates the
+ * advertisement ring, starts scanning, and runs the POST + control-WS tasks.
+ * Reads its settings from the `ble` config namespace. Idempotent. */
 esp_err_t espos_ble_start(void);
 esp_err_t espos_ble_stop(void);
 

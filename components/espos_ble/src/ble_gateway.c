@@ -868,6 +868,24 @@ static void gateway_task(void *arg)
 /* Public API                                                         */
 /* ---------------------------------------------------------------- */
 
+esp_err_t espos_ble_reserve_controller(void)
+{
+    /* Honour the same switch espos_ble_start() honours. A device with BLE
+     * turned off must not have 24 KB taken from it for a radio it will never
+     * use -- and on a part this tight that is the difference between the rest
+     * of the firmware fitting and not. */
+    bool enabled = true;
+    espos_config_get_bool(ESPOS_CFG_NS_BLE, ESPOS_CFG_BLE_ENABLED, &enabled);
+    if (!enabled) {
+        return ESP_OK;
+    }
+
+    /* No callbacks yet: the gateway installs those when it starts. Passing
+     * NULL leaves the ones already registered alone, which matters because
+     * this may be the second call. */
+    return espos_ble_backend_init(NULL);
+}
+
 esp_err_t espos_ble_start(void)
 {
     if (g.running) return ESP_OK;
