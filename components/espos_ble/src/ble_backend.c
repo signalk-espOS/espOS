@@ -192,8 +192,23 @@ static esp_err_t controller_up(void)
         return cerr;
     }
 
-    ESP_RETURN_ON_ERROR(esp_bt_controller_enable(ESP_BT_MODE_BLE), TAG,
-                        "bt_controller_enable");
+    /* Hand back an initialised-but-not-enabled controller rather than leaving
+     * one behind. init succeeding and enable failing is a plausible split on a
+     * part this tight, and the caller's retry would then call
+     * esp_bt_controller_init() on a live controller, which answers
+     * ESP_ERR_INVALID_STATE -- so one transient enable failure would wedge BLE
+     * until reboot. Deinit puts it back where the retry expects it. */
+    esp_err_t eerr = esp_bt_controller_enable(ESP_BT_MODE_BLE);
+    if (eerr != ESP_OK) {
+        ESP_LOGE(TAG, "bt_controller_enable: %s", esp_err_to_name(eerr));
+        esp_err_t derr = esp_bt_controller_deinit();
+        if (derr != ESP_OK) {
+            /* Nothing useful left to do, but say so: a later retry will fail on
+             * init and this line is what explains why. */
+            ESP_LOGE(TAG, "bt_controller_deinit after a failed enable: %s", esp_err_to_name(derr));
+        }
+        return eerr;
+    }
 #endif
     return ESP_OK;
 }

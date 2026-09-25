@@ -56,16 +56,11 @@ extern "C" {
  * wanted and the device reboot-looped. The ring belongs with the rest of the
  * gateway, after the network.
  *
- * espos_start() deliberately does NOT call this, and that is the honest state
- * of espOS #127 rather than an oversight. Reserving first does let the
- * controller start on a C5 -- measured -- but the memory has to come from
- * somewhere, and on that part it came from espos_sk_start(), which then failed
- * ESP_ERR_NO_MEM and, being a fatal stage, reboot-looped the device. Trading a
- * gateway with no BLE for a gateway that does not boot is not a fix. On a C5
- * the real answer is the 8 MB PSRAM die the module has and the build never
- * enabled (CONFIG_SPIRAM), which is a bootloader-level change and so a USB
- * flash rather than an OTA. Until a caller knows its own budget, this stays
- * opt-in. */
+ * Opt-in: espos_start() does not call it. Reserving first is not free -- the
+ * memory comes out of whatever starts next, and on a part with no headroom
+ * that is a different subsystem failing instead. Only a caller that knows its
+ * own budget can make that trade, so it makes it explicitly. See
+ * docs/ble.md for the measurements behind this. */
 esp_err_t espos_ble_reserve_controller(void);
 
 /** Start the gateway: brings up the BLE stack (if
