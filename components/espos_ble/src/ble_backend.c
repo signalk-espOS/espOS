@@ -41,7 +41,15 @@ static espos_ble_callbacks_t s_cb;
 static bool s_scanning;
 /* Whether controller_up() has succeeded. Not merely a fast path: the controller
  * may be started before the network (see espos_ble_reserve_controller) and
- * esp_bt_controller_init() on a running controller is an error, not a no-op. */
+ * esp_bt_controller_init() on a running controller is an error, not a no-op.
+ *
+ * Untested by the host suite, and not for want of trying: espos_ble_test
+ * compiles ble_proto.c alone because everything in this file needs IDF's
+ * Bluetooth stack, which does not exist on the linux target. Covering the three
+ * states this flag creates (reserve twice, start after reserve, retry after a
+ * failed enable) needs a fake controller behind a seam this component does not
+ * have. Verified on hardware instead -- an ESP32-C5, reserve then start -- which
+ * is the weaker check, so treat this flag as the delicate part of the file. */
 static bool s_controller_up;
 /* A scan was stopped while it was still arming. Cleared by the next deliberate
  * start; see the SCAN_PARAM_SET_COMPLETE_EVT case. */
