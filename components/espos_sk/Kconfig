@@ -10,6 +10,48 @@ menu "espOS SignalK"
             paths) can reach several KiB; raise on PSRAM boards that
             subscribe to whole families.
 
+    config ESPOS_SK_TASK_STACK
+        int "SignalK client task stack size (bytes)"
+        default 8192
+        range 3072 16384
+        help
+            The task that runs discovery, the token state machine and the
+            HTTP legs (access request, poll, verify, meta reconciliation).
+
+            Measured rather than guessed: on an ESP32-C5 running the BLE
+            gateway against a live server -- discovery, an approved token,
+            meta for the published paths -- the high-water mark showed this
+            task using 1488 B of the 12288 B it used to be given, i.e. 12 %.
+
+            The default is 8192 and not the ~2 KB that suggests, because of
+            what that measurement did NOT cover: the server was plain HTTP on
+            port 80, so no TLS handshake ever completed on this task, and
+            mbedTLS is the deepest call path it has. 8192 is still 4 KB back
+            on every espOS device while leaving five times the observed peak
+            for the path that was not exercised. Sizing this from the 1488 B
+            alone would be exactly the mistake of trusting one workload.
+
+            Lower it only against your own high-water numbers
+            (CONFIG_FREERTOS_USE_TRACE_FACILITY +
+            uxTaskGetStackHighWaterMark) taken on a TLS server, never to a
+            round number that looks sufficient. A stack-protection fault here
+            is a reboot loop rather than a degraded mode.
+
+    config ESPOS_SK_WS_TASK_STACK
+        int "SignalK stream task stack size (bytes)"
+        default 8192
+        range 4096 16384
+        help
+            The websocket task: frame reassembly, delta parsing, inbound PUT
+            dispatch and the notification sink.
+
+            Deliberately NOT reduced, and that is the measurement talking
+            rather than caution: the same run that found the client task using
+            12 % of its stack showed this one using 5272 of 8192 B, 64 %, with
+            only 2920 B spare. It parses whatever the server sends, so its
+            depth depends on frames this device did not choose. The default
+            stays where it was.
+
     config ESPOS_SK_TLS
         bool "Talk to the server over TLS (https/wss)"
         default y

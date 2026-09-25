@@ -1125,7 +1125,7 @@ esp_err_t espos_sk_start(void)
     }
     espos_config_subscribe(on_config_change, NULL);
     s.started = true;
-    if (xTaskCreate(sk_task, "espos_sk", 12288, NULL, tskIDLE_PRIORITY + 3, &s.task) != pdPASS) {
+    if (xTaskCreate(sk_task, "espos_sk", CONFIG_ESPOS_SK_TASK_STACK, NULL, tskIDLE_PRIORITY + 3, &s.task) != pdPASS) {
         s.started = false;
         return ESP_ERR_NO_MEM;
     }

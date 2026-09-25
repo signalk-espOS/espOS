@@ -1060,7 +1060,7 @@ esp_err_t espos_sk_ws_start(void)
     }
     load_cfg();
     s.stop = false;
-    if (xTaskCreate(ws_task, "espos_skws", 8192, NULL, tskIDLE_PRIORITY + 3, &s.task) != pdPASS) {
+    if (xTaskCreate(ws_task, "espos_skws", CONFIG_ESPOS_SK_WS_TASK_STACK, NULL, tskIDLE_PRIORITY + 3, &s.task) != pdPASS) {
         return ESP_ERR_NO_MEM;
     }
 #if CONFIG_ESPOS_SK_NOTIFICATIONS
