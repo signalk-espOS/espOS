@@ -1,0 +1,776 @@
+# SPDX-FileCopyrightText: 2026 Dirk Wahrheit
+# SPDX-License-Identifier: Apache-2.0
+#
+# CodeRabbit configuration for signalk-espOS/espOS.
+# Schema: https://coderabbit.ai/integrations/schema.v2.json
+# Validate locally with `coderabbit config validate`.
+#
+# The "ecosystem" and "conventions" sections of the catch-all instruction are
+# shared verbatim with signalk-espOS/registry and
+# signalk-espOS/signalk-espos-manager. Edit all three together.
+
+language: en-US
+tone_instructions: >-
+  Terse engineering register. Lead with the defect and the concrete failure it
+  causes on a device or a boat network. No praise, no restating the diff, no
+  emoji.
+
+reviews:
+  profile: assertive
+  # Off, as in every sibling repository: CodeRabbit comments, it does not gate.
+  # A `mode: error` pre-merge check therefore reads as a hard failure in the
+  # walkthrough table but blocks a merge only if the "CodeRabbit" status is
+  # made required in branch protection.
+  request_changes_workflow: false
+  # Shows which linked repositories and guideline files informed the review.
+  review_details: true
+  in_progress_fortune: false
+  poem: false
+  # One maintainer; reviewer suggestions would always name the same person.
+  suggested_reviewers: false
+  high_level_summary_instructions: |
+    Present tense, no "This PR". Say what changed and who sees it: a device
+    on the wire, a consumer firmware building against espOS, the registry,
+    or the signalk-espos-manager plugin. Name the contract point when one
+    moves.
+
+  labeling_instructions:
+    - label: bug
+      instructions: "A `fix:` change, or anything that corrects observed wrong behaviour."
+    - label: enhancement
+      instructions: "A `feat:` change or a new capability, option, component or example."
+    - label: documentation
+      instructions: "Changes confined to `docs/`, README files or doc comments."
+    - label: dependencies
+      instructions: "Bumps in `idf_component.yml` dependencies, `dependencies.lock` or `ui/package.json`."
+    - label: github_actions
+      instructions: "Changes under `.github/workflows/`."
+  auto_apply_labels: false
+
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    drafts: false
+    # release-please PRs only move versions and CHANGELOG.md; the substantive
+    # change was reviewed on its own PR.
+    ignore_title_keywords:
+      - "chore: release"
+      - "[skip review]"
+    ignore_usernames:
+      - "github-actions[bot]"
+      - "dependabot[bot]"
+
+  # Generated or vendored content. Anything that must not be committed at all
+  # (sdkconfig, *.pem, CHANGELOG.md edits) stays visible so the instructions
+  # below can flag it.
+  path_filters:
+    - "!components/espos_httpd/ui-dist/**"
+    - "!dependencies.lock"
+    - "!**/dependencies.lock"
+    - "!ui/package-lock.json"
+    - "!test/fuzz/corpus/**"
+    - "!LICENSES/**"
+    - "!**/managed_components/**"
+    - "!**/build/**"
+    - "!**/build-*/**"
+
+  path_instructions:
+    - path: "**/*"
+      instructions: |
+        ## Scope
+
+        Review the diff against `main` together with the code, docs and
+        consumers it touches, not the hunk in isolation. The build gate is
+        ESP-IDF 6 (`.idf-version`) on six targets plus a linux-target host
+        test suite; there is no hardware-in-the-loop CI. Weigh "tested on
+        hardware" against whether the PR body names the target, board and
+        IDF version the PR template asks for.
+
+        ## This repository
+
+        espOS is 23 ESP-IDF components (`components/espos_*`) that a
+        firmware project composes with one call, `espos_start()`, plus the
+        reference app in `main/`, the embedded web UI (`ui/`, built and
+        committed as a gzipped bundle in `components/espos_httpd/ui-dist/`),
+        Unity host tests on the IDF linux target (`test/host/`), libFuzzer
+        harnesses (`test/fuzz/`), the mkdocs site (`docs/`), and the
+        release plumbing: release-please cuts `vX.Y.Z` from Conventional
+        Commit titles, `publish.yml` uploads every component to the IDF
+        component registry under `signalk-espos/` via OIDC, and
+        `build-firmware.yml` is the reusable workflow consumer firmware
+        calls to build, sign and name its release assets.
+
+        ## The espOS ecosystem: three repositories, one contract chain
+
+        - **signalk-espOS/espOS** is the ESP-IDF 6 runtime a firmware project builds
+          on, pinned as the git submodule `espos/` at a release tag or pulled from the
+          IDF component registry (`signalk-espos/espos_*`). It owns everything a
+          device says to the network: the `_espos._tcp` mDNS advertisement (TXT
+          `id`, `v`, `app`, `espos`, `target`, `api`, and `auth`, which is
+          hard-coded to `0`), the HTTP API under `/api/v1/` (`system/ping` answers
+          `{app, version, auth}` without a key; `system/info`, `ota/*`, `config` and
+          the rest need `Authorization: Bearer <key>` or the `espos_sid` cookie),
+          pull-based signed OTA (`POST /ota {"url": ...}`; the device downloads and
+          accepts only an RSA-3072 signature from the key it was flashed with), the
+          OTA version manifest (`schema: 1`), and the reusable `build-firmware.yml`
+          workflow (`workflow_call`) that turns a consumer's tag into
+          `<name>-<tag>-merged.bin` and `<name>-<tag>-ota.bin` release assets, where
+          the caller's `name` input carries the target or board segment. espOS's own
+          releases carry no binaries: the `vX.Y.Z` tag and the component registry
+          are the deliverable.
+        - **signalk-espOS/registry** holds one `projects/<id>.json` per firmware
+          project, validated by `schema/project.schema.json`, and a generated and
+          committed `index.json` that resolves each project's GitHub releases into
+          per-board builds (`otaUrl`, `mergedUrl`, the CORS-readable `*WebUrl`
+          variants, the `espos` version each build pins) plus `esposLatest`. It is
+          read unauthenticated from raw.githubusercontent.com; `schema: 1` at the top
+          is the wire version.
+        - **signalk-espOS/signalk-espos-manager** is the Signal K server plugin. It
+          browses `_espos._tcp`, keys every device on TXT `id` (the last two bytes of
+          the base MAC in hex; no REST route exposes it), matches `app` plus
+          `hardware.board` (must equal `boards[].reportedAs` exactly) against the
+          registry, mirrors firmware under its unauthenticated webapp mount
+          (`/signalk-espos-manager/fw/<app>/`), points the device's `ota.manifest_*`
+          config at that mount, hands the device a LAN `url` to pull, and hosts a
+          browser flasher (GitHub Pages, esptool-js) that can only read
+          `mergedWebUrl` because GitHub release downloads carry no CORS header.
+        - Downstream firmware (dirkwa/espos-p4-cockpit, dirkwa/espos-ble-gateway)
+          pins espOS as a submodule, releases through `build-firmware.yml`, and is
+          what the registry lists.
+
+        ### Contract points
+
+        A change on one side of any of these must say, in the PR body, how the other
+        side keeps working, or name the companion PR. Flag one that does not.
+
+        1. mDNS TXT keys and the JSON shapes of `/api/v1/system/ping`,
+           `/system/info` (`hardware.board`, `hardware.mac`, `chip`, ...; the whole
+           `hardware` object is absent on firmware before 0.10), `/ota/status`
+           (`state`, `running.key_fp`, `running.pending_verify`, ...) and `/config`
+           (`ota.manifest_src`, `ota.manifest_path`): espOS emits, the manager
+           parses tolerantly but by exact key name. Firmware 0.7.x to 0.10.x
+           coexist on one boat, so fields are added, never renamed or repurposed.
+        2. `hardware.board` versus `boards[].reportedAs`: the firmware passes it as
+           `espos_start_opts_t.board`, the registry declares it, the manager
+           compares it exactly (trimmed, case-sensitive). A board name is a wire
+           string, not a label.
+        3. Release asset names versus the registry's `assets.ota` and
+           `assets.merged` regexes (named groups `version` and `board`):
+           `build-firmware.yml` emits them, the registry indexes one build per
+           board or nothing at all.
+        4. The registry entry schema versus the manager's `RegistryProject` type
+           (`src/registry/types.ts`) and the flasher catalogue: the schema states it
+           mirrors that type. Additive changes only; the parser drops what it does
+           not know.
+        5. The `index.json` shape (`schema`, `esposLatest`,
+           `projects[].releases[].builds[]`): the registry emits it, the plugin and
+           the hosted flasher consume it.
+        6. The OTA manifest `{schema: 1, app, builds[]}`, its byte limits (version
+           31, build url 255, notes 127, manifest url 167, manifest path 127, whole
+           manifest 16 KiB) and where it lives: the device fetches it with a bare
+           `esp_http_client` and no credentials, so it must sit on an
+           unauthenticated mount. espOS's OTA client defines the format, the
+           manager's `src/mirror/manifest.ts` obeys it.
+        7. Version ordering: espOS's `espos_ota_version_cmp` in C is the oracle;
+           the manager's `src/mirror/version.ts` is a byte-exact port with a fixture
+           generated from the C code. It is not semver.
+        8. Signing: a device accepts only images signed with the key it was flashed
+           with; `signingKeyId` in the registry names that key; changing a project's
+           key strands every fielded device unless `"signed": false` says so.
+        9. espOS tags `vX.Y.Z`: the registry resolves a firmware's submodule SHA to a
+           tag by exact match (never nearest-tag) and derives `esposLatest`; the
+           manager shows a build as "behind" from that.
+        10. The `build-firmware.yml` inputs (`target`, `name`, `require`,
+            `submodules`, `esptool`, `tag`, `artifact`), its `signing_key` secret
+            and `unsigned` output: every consumer firmware's release workflow calls
+            them by name.
+
+        ## espOS-specific rules
+
+        - `docs/rest-api.md` is a contract; the repo says so itself. A
+          route or JSON field change without a matching change to that
+          file and to `ui/mock/server.mjs` in the same PR is incomplete.
+          Every route is protected unless registered `ESPOS_HTTPD_PUBLIC`;
+          a write without `Content-Type: application/json` gets 415 (that
+          is the CSRF guard); secrets read back as `********`; `503
+          restarting` while a reboot is pending.
+        - Public headers under `components/*/include/` are a C ABI
+          (`docs/development.md`, `tools/check_public_headers.py`): opaque
+          handles, fixed-width ints, explicit append-only enum values
+          ending in `_MAX`, pointer plus length for buffers, callbacks
+          ending in `void *arg`, no `CONFIG_` symbols, no C++, includes
+          limited to libc, espOS headers and `esp_err.h`. A non-additive
+          change bumps `ESPOS_ABI_VERSION` in `espos.h`. Event IDs are ABI.
+        - Weak hooks invert dependencies on purpose
+          (`espos_httpd_board_hook`, `espos_httpd_wallclock_hook`,
+          `espos_log_wallclock_hook`, `espos_ota_quiesce_hook`,
+          `espos_ota_resume_hook`, `espos_ota_server_url_hook`, the weak
+          `espos_time_now_ms` in `sk_tls.c`). The component holding the
+          strong definition must build `WHOLE_ARCHIVE` when nothing else
+          pulls that object in (`espos_time`, `espos_sk`, `espos_voice` do;
+          `espos_core` does not need it because `app_main` pulls it in).
+          Issue #49 is the reason: the weak stub silently won and two
+          endpoints disagreed. Flag a new strong definition without
+          `WHOLE_ARCHIVE`, and flag any suggestion to replace the pattern
+          with a direct call.
+        - Callbacks run on tasks you do not own: copy what you need, return
+          fast, never block. Never call `espos_mdns_*`, `espos_sk_http_*` or
+          `espos_wifi_refresh_rssi()` from an `ESPOS_EVENT` handler or a URI
+          handler; all URI handlers share one httpd task; `ESPOS_EVENT`
+          handlers share the default loop with `WIFI_EVENT`/`IP_EVENT`.
+          Status getters never make a driver or RPC call. Nothing inside
+          espos_time logs under its own lock.
+        - ESP32-P4 with the esp_hosted co-processor: never
+          `esp_hosted_deinit()`/`init()` for recovery (the pair asserts);
+          the recovery is `esp_restart()`. The WiFi state machine never
+          calls the driver under its lock. The pinned values in
+          `sdkconfig.d/espos.defaults.esp32p4` (`WIFI_RMT_RX_BA_WIN=6`,
+          hosted mempool in PSRAM with 64-byte cache lines, RX streaming
+          mode, `SPIRAM=y`) are load-bearing and lint-checked. The C6 is
+          one radio shared by WiFi and BLE. Internal RAM is the scarce
+          pool: large buffers go to PSRAM via `MALLOC_CAP_SPIRAM`.
+        - Config/NVS: keys come from the generated `ESPOS_CFG_NS_<NS>` and
+          `ESPOS_CFG_<NS>_<KEY>` constants, never spelled by hand;
+          namespaces and keys are at most 15 characters; a layout change
+          bumps the descriptor `version` and adds a migration; a new key is
+          documented in `docs/config.md`. A new `CONFIG_ESPOS_*` option is
+          documented in its component's doc (CI checks the reverse).
+        - Errors: the public API returns `esp_err_t`; `ESP_ERROR_CHECK` only
+          in `espos_start()` and handler registration; `espos_*_start()`
+          is idempotent and answers `ESP_ERR_INVALID_STATE` naming the
+          missing prerequisite; optional stacks (radio, Ethernet,
+          provisioning, duty cycle) are non-fatal by design.
+        - Style: C11, 4 spaces, `espos_` prefix, root `.clang-format`
+          (LLVM base, Linux braces, `SortIncludes: Never` with
+          `sdkconfig.h` first, braced initializers `{ .a = 1 }`, short
+          one-line ifs are house style). `espos_n2k`, `espos_voice` and
+          `espos_audio` are C++ with their own Google-style
+          `.clang-format`; never mix the two in one component. CI formats
+          only changed files; flag mass reformatting. Two SPDX lines on
+          every new source file; `reuse lint` must stay clean.
+        - A new dependency in any `idf_component.yml` or `ui/package.json`
+          needs an issue or discussion first, and the manifest comment
+          must say why it exists. Third-party dependencies are exact-pinned
+          (`==`); sibling espOS components use `^<version>` plus
+          `override_path`.
+        - Tests: a state machine, parser, wire format or store needs Unity
+          host tests; REST behaviour needs a case in
+          `test/host/espos_httpd_test/run_test.py`; a new component needs
+          its own `test/host/espos_<c>_test` with a `port_sim.c`, its
+          manifest listed in `release-please-config.json`, and its headers
+          in the Doxyfile `INPUT`.
+        - `CHANGELOG.md`, `version.txt`, `.release-please-manifest.json`
+          and every `version:` line between the `x-release-please` markers
+          belong to release-please. Flag any hand edit. `.idf-version`
+          changes are their own PR; a consumer's `.idf-version` must equal
+          espOS's.
+
+        ## What NOT to flag
+
+        - The committed gzipped UI bundle in
+          `components/espos_httpd/ui-dist/` (builds need no Node; CI checks
+          freshness) and the placeholder `www/index.html`.
+        - The tracked root `dependencies.lock` (the application pins
+          exactly) while example and host-test locks are ignored.
+        - No root `sdkconfig.defaults`: `sdkconfig.d/espos.defaults` is it.
+        - Weak functions with empty or `false` stubs plus `WHOLE_ARCHIVE`.
+        - `esp_restart()` as hosted-radio recovery; cached RSSI; the P4
+          Kconfig pins.
+        - Plain-http OTA and an informational `sha256`: the RSA-3072
+          signature is what protects the image.
+        - No committed signing key; a dev key is generated only in prologue
+          builds; the registry path makes the consumer generate one.
+        - `vTaskDelay(1)` per OTA chunk and the quiesce hooks (P4 SDIO
+          starvation, #119).
+        - The legacy `_sensesp-n2k._tcp` mDNS type kept by default: it is
+          on the wire.
+        - A plaintext 401 not clearing the Signal K token immediately (a
+          second opinion after 5 s).
+        - `git describe` with a `version.txt` fallback and `fetch-depth: 0`.
+        - `pull_request_target` in `pr-title.yml`: it checks out no code.
+        - The duplicated version lookup in `espos_net/CMakeLists.txt`.
+        - `files.exclude` naming `examples/*/sdkconfig` rather than
+          `sdkconfig*` (the wider glob stripped the tracked defaults, #108;
+          `tools/check_published_files.py` guards it).
+        - Blank offset columns in the partition CSVs.
+        - `time.now = 0` and `iso = ""` meaning unknown; `flow.nodes` being
+          `null` when no graph is registered.
+        - `espressif/cjson` as a registry dependency: IDF 6 removed the
+          bundled cJSON.
+        - Radio, Ethernet, provisioning and duty-cycle failures being
+          non-fatal in `espos_start()`.
+        - `espos_prov` using protocomm rather than network_provisioning,
+          and not sharing a firmware with `espos_ble`.
+
+        ## Conventions shared by every signalk-espOS repository
+
+        - Conventional Commits: `<type>(<scope>): <subject>`, imperative, lower-case
+          subject, no trailing period. Types in use: feat, fix, perf, refactor,
+          revert, docs, build, ci, test, chore. PRs are squash-merged, so the PR
+          title becomes the commit subject (and, in espOS, the release-notes line).
+          Flag a title that does not say what changed for whom.
+        - One logical change per PR. The house style is a long body that gives the
+          evidence: which device, which firmware version, what was observed. Flag a
+          body that says "tested" without saying what ran, and flag test plans with
+          unchecked checkboxes.
+        - No attribution trailers anywhere: no `Co-Authored-By`, no "Generated
+          with", no AI-tool mentions in commits, PR bodies, comments or code.
+        - No version bumps in feature or fix PRs. Versions move only in a dedicated
+          release PR.
+        - Comments say why, never what. Flag comments that restate the code,
+          narrate the bug they fixed, or cite a PR number instead of the reason.
+        - Documentation describes how things work now. Flag implementation-status
+          wording ("currently", "step 3", "TODO", progress markers) and snippets or
+          values that will drift from the code.
+        - Flag leftovers from earlier commits of the same PR: dangling imports,
+          comments naming symbols that no longer exist, superseded TODOs.
+        - Boat configuration is never committed: no SSIDs, passwords, device keys,
+          signing keys or LAN addresses, in source, defaults, fixtures or docs.
+          Firmware images are public release assets and `strings` prints every
+          literal.
+
+    - path: "components/espos_httpd/**"
+      instructions: |
+        This component owns the device's HTTP contract. `docs/rest-api.md`
+        must change in the same PR as any route, field, status code or auth
+        rule, and `ui/mock/server.mjs` must mirror it. The consumers are
+        the embedded UI (`ui/`), signalk-espos-manager (`src/device/*.ts`
+        parse `/system/ping`, `/system/info`, `/ota/status`, `/config`
+        by exact key name and treat `hardware` as optional) and any fleet
+        tool; a rename or a semantic change to an existing key breaks a
+        boat with mixed firmware versions. Additive only.
+
+        Registration goes through `espos_httpd_register[_ex]()`; a route
+        is protected unless it carries `ESPOS_HTTPD_PUBLIC`, so flag a
+        new public route and ask why. `/system/ping` stays public and
+        minimal: it is the liveness probe. Auth: Bearer or the `espos_sid`
+        cookie (`HttpOnly; SameSite=Strict`), 401 with
+        `WWW-Authenticate`, 429 with `Retry-After` after five bad keys in
+        60 s, 403 on an Origin mismatch for a cookie write. SSE
+        (`/api/v1/events`) is capped at `CONFIG_ESPOS_HTTPD_SSE_MAX_CLIENTS`
+        and evicts the oldest stream; a new event name is documented in
+        rest-api.md. `hardware.board` appears only when the firmware
+        passed `espos_start_opts_t.board`. All URI handlers run on the one
+        httpd task: no blocking calls, no `espos_mdns_*`, no
+        `espos_sk_http_*`.
+
+    - path: "components/espos_net/**"
+      instructions: |
+        This component owns the `_espos._tcp` mDNS advertisement and the
+        device identity. The TXT keys espOS emits are `v`, `app`, `espos`,
+        `target`, `id`, `api` and `auth`; signalk-espos-manager reads all
+        of them plus an optional `board` key that no firmware emits yet,
+        so adding `board` here is a manager-visible change.
+        `id` (last two bytes of the base MAC, lower-case hex) is the
+        plugin's only primary key for a device, so it must never change
+        meaning or width. `auth` is hard-coded to `0` and the manager
+        ignores it; `/system/ping` carries the live value. Adding a TXT
+        key is fine; renaming or removing one breaks discovery for every
+        fielded device. CI enforces that `espressif/mdns` is declared only
+        here and in espos_n2k. `net.hostname` defaults to `espos-<id>` and
+        a 0.7-era `wifi.hostname` migrates once; keep that migration.
+
+    - path: "components/espos_ota/**"
+      instructions: |
+        This component owns the OTA contract on the device side. Signed
+        apps without hardware Secure Boot (RSA-3072, Secure Boot V2
+        format), the public key compiled into the running app, the
+        consumer lint in `espos_core/project_include.cmake` demanding the
+        `CONFIG_SECURE_SIGNED_*` settings. The device pulls: `POST /ota`
+        with `{"url": ...}` or `{}` for the available build; there is no
+        upload endpoint and there must not become one by accident. The
+        image's `project_name` must equal the running app's.
+
+        The manifest (`schema: 1`, `app`, `builds[]` with `version`,
+        `target`, `channel`, `url` absolute or manifest-relative, `size`,
+        `sha256`, `notes`, `date`; at most 16 KiB) is produced by
+        signalk-espos-manager's `src/mirror/manifest.ts` under this
+        component's byte limits, so a limit or field change is a
+        cross-repo change. `ota.manifest_src = signalk` appends
+        `ota.manifest_path` to the connected Signal K server's address and
+        fetches with a bare `esp_http_client`, no credentials; the default
+        path still names the legacy plugin id `signalk-espos-updates`.
+
+        `espos_ota_version_cmp` is the version oracle: dotted numerics, a
+        `-suffix` sorts below the release, anything unparsable compares as
+        a string. signalk-espos-manager ports it byte for byte
+        (`src/mirror/version.ts`) with a fixture generated from this C
+        code (`test/fixtures/regenerate-vercmp.md` there), so any change
+        to the comparator must say that the fixture and port were
+        regenerated. Rollback: `pending_verify` confirms on WiFi connect
+        or after 60 s without a station, invalidates after
+        `ota.confirm_tmo_s`; no anti-rollback is configured. Keep the
+        `vTaskDelay(1)` per chunk and the quiesce/resume hooks (P4).
+
+    - path: "components/{espos_core,espos_wifi}/**"
+      instructions: |
+        `espos_core` is the boot sequence (`espos_init()` then
+        `espos_start_network()`: httpd, net, time, wifi, sk, ota, ble; or
+        `espos_start()` with the `before_network` hook), the consumer
+        sdkconfig lint (`project_include.cmake`, which must stay in step
+        with `sdkconfig.d/espos.defaults`; `tools/check_sdkconfig_lint.py`
+        checks), and the shipped partition tables
+        (`partitions/{4mb,8mb,16mb}.csv`, read through
+        `ESPOS_PARTITIONS_DIR`). Framework code that a consumer relies on
+        at build time (partitions, the lint, `espos_project_ui_partition()`)
+        must survive `files.exclude`. A radio that fails to start is
+        non-fatal (#97); keep it that way.
+
+        `espos_wifi` is a pure-C state machine plus the esp_hosted
+        watchdog. The state machine never calls the driver under its lock
+        (the P4 deadlocked within a second of boot when it did); status
+        snapshots never make a driver or RPC call and RSSI is cached;
+        hosted recovery is `esp_restart()`, never
+        `esp_hosted_deinit()`/`init()`. The portal holds BLE scanning off
+        because the P4's C6 is one radio. The portal's DHCP lease is
+        reported from what the server hands out (#116).
+
+    - path: "components/**/idf_component.yml"
+      instructions: |
+        Manifests are published to the IDF component registry under
+        `signalk-espos/` in lockstep with `version.txt`. Rules: `version:`
+        sits between `x-release-please-start-version` and
+        `x-release-please-end` markers and is bumped only by
+        release-please; sibling espOS dependencies are `^<version>` with
+        `override_path: "../espos_x"`; third-party dependencies are
+        exact-pinned; `idf: ">=6.0.0,<6.1.0"`; `esp_hosted` and
+        `esp_wifi_remote` are gated `rules: target == esp32p4`;
+        `espressif/mdns` appears only in espos_net and espos_n2k; every
+        dependency has a comment saying why it exists. `files.exclude` is
+        identical across manifests and must keep shipping `partitions/`,
+        `ui-dist/`, `www/`, `config/*.json` and `espos_config/tools/`;
+        `examples/*/sdkconfig` is deliberately narrower than `sdkconfig*`.
+        Every component a `CMakeLists.txt` hard-requires must be in the
+        manifest (`tools/check_component_deps.py`). A new manifest must be
+        added to `release-please-config.json` `extra-files` and pass
+        `scripts/check_release_markers.py`.
+
+    - path: "components/**/CMakeLists.txt"
+      instructions: |
+        Check `WHOLE_ARCHIVE` against the weak-hook rule in the catch-all
+        instruction: a component that defines the strong side of a weak
+        hook and is not otherwise referenced needs it, and a component
+        that gains a strong definition in this PR needs it added. Check
+        that `REQUIRES`/`PRIV_REQUIRES` agree with the manifest. cJSON is
+        `espressif__cjson` in `PRIV_REQUIRES`. Host tests build libraries
+        under test with `WHOLE_ARCHIVE` on purpose.
+
+    - path: "{components/**/Kconfig*,sdkconfig.d/**}"
+      instructions: |
+        Kconfig symbols are `ESPOS_<COMPONENT>_*` inside a `menu "espOS
+        <Name>"` per component, and every `CONFIG_ESPOS_*` the docs
+        mention must exist (`tools/check_kconfig_docs.py`). Defaults live
+        only in `sdkconfig.d/espos.defaults`, its `.esp32`/`.esp32p4`
+        siblings and the `debug`/`release` profiles, applied in the
+        prologue order espos defaults, profile, project defaults,
+        `sdkconfig.local`, partition fragment. A generated `sdkconfig`,
+        `sdkconfig.old` or `sdkconfig.local` in the diff is a mistake.
+        Any value the consumer lint in `espos_core/project_include.cmake`
+        enforces must change in both places. ESP32 needs chip revision 3
+        or later for RSA signatures.
+
+    - path: "**/config/*.json"
+      instructions: |
+        Config descriptors: one JSON per NVS namespace, namespaces match
+        `^[a-z][a-z0-9_]{0,14}$`, keys are at most 15 characters,
+        `config_version` is reserved. A key rename or type change is a
+        layout change: bump `version`, add a migration, document in
+        `docs/config.md`. The generator (`espos_config/tools`) produces
+        the `ESPOS_CFG_*` constants; code that spells a key string by hand
+        is a bug. Secrets are declared as such so REST reads them back
+        masked. A `default` is what every device reads for a key nobody
+        set (`espos_config_is_set()` false), so changing one, for example
+        in `components/espos_ota/config/ota.json`, changes fielded
+        devices on their next update; treat it as a behaviour change.
+
+    - path: ".github/workflows/**"
+      instructions: |
+        `build-firmware.yml` is a published interface: dirkwa/espos-p4-cockpit
+        and dirkwa/espos-ble-gateway call it via `workflow_call`. Its
+        inputs (`target`, `name`, `require`, `submodules`, `esptool`,
+        `tag`, `artifact`), the `signing_key` secret, the `unsigned`
+        output, the `ESPOS_ALLOW_UNSIGNED_RELEASE` variable and the asset
+        names `<name>-<VERSION>-{merged,ota}.bin` are contract; a change
+        needs the consumers named and `docs/releasing.md` updated.
+        Remember: no `${{ }}` expression inside an input `description:`
+        (it broke every caller, #123); `tag` must be honoured because
+        `github.event.release.tag_name` is empty when release-please
+        drives the caller; `fetch-depth: 0` and `persist-credentials:
+        false` on checkout; the IDF version comes from `.idf-version`
+        with `espos/.idf-version` as fallback; the signing step runs on a
+        release or a non-empty `tag`, validates the key with `openssl rsa
+        -check`, and refuses to sign with nothing unless the opt-out
+        variable is set. The workflow produces no manifest, checksum or
+        signature files; the caller aggregates artifacts into one release.
+
+        `release-please.yml` calls `publish.yml` with `secrets: inherit`;
+        a called workflow receives no secrets otherwise. `publish.yml`
+        authenticates to the component registry via OIDC (no registry
+        secret) and both files are registered trusted uploaders, so a
+        rename of either breaks publishing. `pr-title.yml` runs on
+        `pull_request_target` and checks out no code; keep it that way.
+        `ci.yml` builds six targets with a 90 % slot-size budget, runs the
+        host tests, fuzzers, format on changed files only, `reuse lint`,
+        the secrets check, the manifest pack dry-run and the UI bundle
+        freshness check; a new check script belongs here too.
+        Permissions stay minimal (`contents: read` unless the job needs
+        more); concurrency is per ref with main and tags keyed per SHA.
+
+    - path: "{cmake,scripts,tools}/**"
+      instructions: |
+        `cmake/espos_project.cmake` is the consumer prologue: it applies
+        the sdkconfig layering, picks the partition table, fingerprints
+        the signing key and forces a re-link (IDF would otherwise keep the
+        old signature), generates a dev key only when none exists, and
+        enforces the `.idf-version` policy (another 6.0.x builds with a
+        warning; outside `[6.0.0, 6.1.0)` is refused unless
+        `-DESPOS_ALLOW_IDF_MISMATCH=1`). `cmake/` ships in no component,
+        so registry consumers depend on `espos_core/project_include.cmake`
+        alone; a rule that matters for them belongs there.
+
+        Scripts under `scripts/` and `tools/` are CI gates
+        (`check_no_secrets.sh`, `check_manifests.sh`,
+        `check_release_markers.py`, `check_public_headers.py`,
+        `check_component_deps.py`, `check_published_files.py`,
+        `check_sdkconfig_lint.py`, `check_kconfig_docs.py`,
+        `registry_order.py --check`). A change that weakens what a gate
+        rejects is a review finding, not a cleanup. `scripts/build.sh` is
+        the niced, locked idf.py wrapper consumers call; keep it usable
+        from a submodule path. `tools/espos_merge_firmware.py` and
+        `espos_size_diff.py` are what `build-firmware.yml` runs, with an
+        `espos/tools/...` fallback path that must keep working.
+
+    - path: "test/**"
+      instructions: |
+        Host tests are IDF projects on the linux target using Unity, run
+        by `test/host/run_all.sh` (it builds each `test/host/*/` with a
+        `CMakeLists.txt` and runs `run_test.py` when present, else the
+        Unity ELF). `espos_httpd_test/run_test.py` drives the real REST
+        server against a Python mock signalk-server; a REST behaviour
+        change without a case there is untested. Each test project's
+        `main/CMakeLists.txt` builds the library under test with
+        `WHOLE_ARCHIVE` on purpose. SIGPIPE is ignored only in this host
+        harness (lwIP has none). `test/fuzz/` is plain clang with
+        ASan/UBSan, not an IDF project; corpus files are raw bytes and
+        must not receive SPDX headers. A fake device or mock server must
+        reproduce the real firmware's status codes and JSON, not an
+        idealised version of them.
+
+    - path: "docs/**"
+      instructions: |
+        The site builds with `mkdocs build --strict`; a broken anchor or
+        a page missing from `mkdocs.yml` fails CI. `docs/rest-api.md`,
+        `docs/ota.md`, `docs/net.md` and `docs/releasing.md` are
+        contracts read by the other two repositories' reviewers; a
+        behaviour change on the device without the matching doc line is
+        incomplete, and a doc line without the code is a lie. Tutorials
+        are capped at 120 lines and `migration-from-sensesp.md` at 250.
+        Every `CONFIG_ESPOS_*` named must exist. `docs/decisions.md` is
+        the record of why; a reversal of a recorded decision needs a new
+        dated entry, not a silent edit. Docs describe how the system
+        works now, not how it was built.
+
+    - path: "ui/**"
+      instructions: |
+        Preact + Vite + TypeScript, built by `npm run build` (`tsc`,
+        `vite build`, `scripts/gzip-dist.mjs`) into
+        `components/espos_httpd/ui-dist/`, which is committed; a UI change
+        must commit the rebuilt bundle or CI fails the freshness check.
+        The bundle lives in a flash partition, so size is a budget: flag
+        a new dependency or a large asset. `ui/mock/server.mjs` and
+        `mock/schema.json` are the dependency-free API mock and must
+        track every REST change. Devices are reached over plain http on a
+        boat LAN: no secure-context-only browser APIs without a fallback.
+        The UI talks only to `/api/v1`; the Bearer key or the
+        `espos_sid` cookie is the auth, so a 401 renders a login prompt,
+        not an error. Dependabot bumps the toolchain as one grouped PR.
+
+    - path: "main/**"
+      instructions: |
+        The reference app CI builds for every target. It names every
+        component and is not a tutorial (`main/README.md`); framework code
+        never lands here (CONTRIBUTING "Where code goes"). Its
+        `config/app.json` is a descriptor like any other.
+
+    - path: "{examples/**,components/*/examples/**}"
+      instructions: |
+        Each example is a full IDF project and CI builds the matrix in
+        `ci.yml`; a new example joins that matrix and `examples/README.md`
+        and `docs/examples.md`. Examples use the prologue except
+        `espos_core/examples/from_registry`, which proves the registry
+        path (no prologue, explicit signing key, `create-project-from-
+        example`). Tracked example files must survive `files.exclude`
+        (`tools/check_published_files.py`). No boat-specific values:
+        SSIDs, hosts and keys are placeholders.
+
+  finishing_touches:
+    docstrings:
+      enabled: false
+    unit_tests:
+      # Host tests are IDF projects on the linux target; generated tests
+      # would not fit the harness.
+      enabled: false
+
+  pre_merge_checks:
+    docstrings:
+      mode: "off"
+    title:
+      mode: warning
+      requirements: >-
+        Conventional Commit, checked by pr-title.yml: `<type>(<scope>): <subject>`
+        with type in feat, fix, perf, refactor, revert, docs, test, build, ci,
+        chore; optional scope equal to the component name without `espos_`
+        (wifi, sk, ota, core, httpd, net, ...) or ui, docs, build, ci,
+        release, deps; subject in the imperative, starting lower-case, no
+        trailing period, and readable as the CHANGELOG line it becomes.
+        Breaking changes carry `!` before the colon.
+    description:
+      mode: warning
+    issue_assessment:
+      mode: warning
+    custom_checks:
+      - name: Versions move only in release PRs
+        mode: error
+        instructions: >-
+          Fail if the PR modifies version.txt, .release-please-manifest.json,
+          CHANGELOG.md, or any line between an `x-release-please-start-version`
+          and `x-release-please-end` marker in an idf_component.yml that
+          already exists on the base branch, unless the PR title starts with
+          `chore: release`. A newly added idf_component.yml is exempt when
+          its version equals the one in version.txt. Pass otherwise.
+      - name: Consumer contract change is declared
+        mode: warning
+        instructions: >-
+          Determine whether the PR changes any of: the inputs, secrets, outputs
+          or produced asset names of .github/workflows/build-firmware.yml; a
+          route path, HTTP status, or JSON key in any file under components/
+          that calls espos_httpd_register or espos_httpd_register_ex, or in
+          docs/rest-api.md; a TXT key in components/espos_net/src/mdns.c;
+          the manifest parser or espos_ota_version_cmp in components/espos_ota;
+          a partition table or the consumer sdkconfig lint in
+          components/espos_core. If it does, pass only when the PR body names
+          the affected consumer (signalk-espos-manager, signalk-espOS/registry,
+          espos-p4-cockpit, espos-ble-gateway) and states either that it keeps
+          working unchanged or links the companion change. Fail when the body
+          is silent about consumers. Pass when none of those files change.
+      - name: No secrets or machine-specific values
+        mode: error
+        instructions: >-
+          Fail if the PR adds or modifies any tracked file matching *.pem,
+          *.nvs.csv, *.nvs.bin, *.secret, a `provisioning/` or `secrets/`
+          directory, a generated `sdkconfig`, `sdkconfig.old` or
+          `sdkconfig.local`. Also fail if an added line in a C/C++ source or
+          header, a Kconfig, a file under sdkconfig.d/, a *.defaults* file, a
+          CMake file or a workflow contains a non-empty WiFi password or PSK
+          literal, a Bearer key or token value, a private LAN IPv4 address
+          (10.x, 172.16-31.x, 192.168.x) other than the portal's 192.168.4.x
+          range, a serial port path such as /dev/ttyUSB0 or /dev/cu.*, or an
+          absolute path under /home or /Users. Files under docs/, README
+          files, ui/mock/, test/ and example placeholders such as
+          `<your-ssid>` are out of scope for this check.
+      - name: REST change carries its contract docs and mock
+        mode: warning
+        instructions: >-
+          If the PR changes a registered route, its method, a response or
+          request JSON key, an error code or an auth rule in
+          components/espos_httpd/src (api_system.c, api_config.c, api_logs.c,
+          api_coredump.c, auth.c, auth_policy.c, sse.c, static.c) or in any
+          file under components/ that calls espos_httpd_register or
+          espos_httpd_register_ex, pass only
+          when docs/rest-api.md and ui/mock/server.mjs are also changed in
+          this PR or the body states why they need no change. Fail otherwise.
+          Pass when no such change is present.
+      - name: Public header ABI bump
+        mode: warning
+        instructions: >-
+          For every changed file under components/*/include/, determine
+          whether the change is non-additive: a removed or renamed function,
+          type, field, macro or enum value; a changed function signature; a
+          reordered struct or enum; a changed enum numeric value. If any is
+          found, pass only when ESPOS_ABI_VERSION in
+          components/espos_core/include/espos.h is also changed in this PR.
+          Purely additive header changes pass.
+
+  tools:
+    # clang-tidy cannot resolve ESP-IDF headers in the review sandbox, and
+    # the repo's .clang-tidy is advisory; cppcheck stays on (assertive profile
+    # reports errors only).
+    clang:
+      enabled: false
+    # Grammar suggestions on technical prose are noise; the AI review already
+    # reads the docs.
+    languagetool:
+      enabled: false
+
+chat:
+  art: false
+  auto_reply: true
+
+knowledge_base:
+  web_search:
+    enabled: true
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      # Local: the contributor rules and the design record apply everywhere;
+      # the contract documents apply to the code that implements them.
+      - "CONTRIBUTING.md"
+      - files: "docs/decisions.md"
+        applyTo: "**"
+      - files: "docs/development.md,docs/concepts.md"
+        applyTo: "components/**,main/**,test/**"
+      - files: "docs/rest-api.md"
+        applyTo: "components/espos_httpd/**,ui/**,test/host/espos_httpd_test/**"
+      - files: "docs/ota.md"
+        applyTo: "components/espos_ota/**,cmake/**"
+      - files: "docs/net.md"
+        applyTo: "components/espos_net/**,components/espos_wifi/**,components/espos_eth/**"
+      - files: "docs/releasing.md"
+        applyTo: ".github/workflows/**,components/**/idf_component.yml,cmake/**,scripts/**,tools/**"
+      # Cross-repo (same organization): what the registry and the plugin
+      # expect from this runtime.
+      - files: "registry:schema/project.schema.json,registry:README.md"
+        applyTo: ".github/workflows/build-firmware.yml,components/espos_ota/**,components/espos_httpd/src/api_system.c,docs/releasing.md"
+      - files: "signalk-espos-manager:README.md"
+        applyTo: "components/espos_ota/**,components/espos_httpd/**,components/espos_net/**"
+  learnings:
+    scope: global
+  issues:
+    scope: global
+  pull_requests:
+    scope: global
+  automatic_linking_mode: auto
+  linked_repositories:
+    - repository: signalk-espOS/signalk-espos-manager
+      instructions: >-
+        The Signal K plugin that consumes this runtime. src/discovery/mdns.ts
+        reads the _espos._tcp TXT keys; src/device/parse.ts and client.ts
+        parse /api/v1/system/ping, /system/info, /ota/status and /config by
+        exact key name and treat `hardware` as optional; src/ota/ drives
+        POST /ota {url}, /ota/confirm and /ota/rollback and assumes a device
+        keeps answering briefly after state `ready`; src/mirror/manifest.ts
+        writes the schema-1 manifest under this runtime's byte limits;
+        src/mirror/version.ts is a byte-exact port of espos_ota_version_cmp
+        with a C-generated fixture. Check what a change here breaks there.
+    - repository: signalk-espOS/registry
+      instructions: >-
+        Firmware registry. scripts/reindex.mjs reads this repo's vX.Y.Z tags
+        to resolve consumer submodule pins and esposLatest, and matches
+        release assets named by build-firmware.yml
+        (<name>-<tag>-{merged,ota}.bin) against per-project regexes;
+        schema/project.schema.json declares boards[].reportedAs, which must
+        equal what a firmware passes as espos_start_opts_t.board.
+    - repository: dirkwa/espos-p4-cockpit
+      instructions: >-
+        Consumer firmware (ESP32-P4 panel). Pins espOS as the espos/
+        submodule, calls build-firmware.yml via workflow_call with the tag
+        and artifact inputs, uses the prologue, the P4 sdkconfig defaults,
+        the shipped partition tables and the esp_hosted rules. Check that
+        workflow, prologue, Kconfig-lint, partition and public-header changes
+        keep its build and OTA working.
+    - repository: dirkwa/espos-ble-gateway
+      instructions: >-
+        Consumer firmware built for six targets in a release matrix
+        (esp32, s3, c3, c5, c6, p4). Same checks as the cockpit; this one
+        exercises espos_ble, espos_prov constraints and the esp32c5/c6
+        targets.
