@@ -13,7 +13,7 @@ menu "espOS SignalK"
     config ESPOS_SK_TASK_STACK
         int "SignalK client task stack size (bytes)"
         default 8192
-        range 3072 16384
+        range 6144 16384
         help
             The task that runs discovery, the token state machine and the
             HTTP legs (access request, poll, verify, meta reconciliation).
@@ -37,10 +37,15 @@ menu "espOS SignalK"
             round number that looks sufficient. A stack-protection fault here
             is a reboot loop rather than a degraded mode.
 
+            The floor is 6144 for the same reason the default is not 2048: the
+            TLS path on this task is unmeasured, so a range that invites a
+            build down to 3 KB would be offering a setting nobody has shown to
+            work.
+
     config ESPOS_SK_WS_TASK_STACK
         int "SignalK stream task stack size (bytes)"
         default 8192
-        range 4096 16384
+        range 6144 16384
         help
             The websocket task: frame reassembly, delta parsing, inbound PUT
             dispatch and the notification sink.
@@ -51,6 +56,12 @@ menu "espOS SignalK"
             only 2920 B spare. It parses whatever the server sends, so its
             depth depends on frames this device did not choose. The default
             stays where it was.
+
+            The floor is 6144 rather than the 4096 a stack option would
+            normally allow, because 4096 is BELOW the 5272 B this task was
+            measured using -- an option whose range lets a build fault on the
+            first big frame is a trap, not a choice. 6144 leaves the knob
+            useful on a tight board while staying above what was observed.
 
     config ESPOS_SK_TLS
         bool "Talk to the server over TLS (https/wss)"
