@@ -880,10 +880,11 @@ esp_err_t espos_ble_reserve_controller(void)
         return ESP_OK;
     }
 
-    /* No callbacks yet: the gateway installs those when it starts. Passing
-     * NULL leaves the ones already registered alone, which matters because
-     * this may be the second call. */
-    return espos_ble_backend_init(NULL);
+    /* The controller only. Not espos_ble_backend_init(), which also brings up
+     * the Bluedroid host: that starts the BTU and BTC threads, whose stacks are
+     * internal RAM, so it would spend exactly the memory this call exists to
+     * protect. The host comes up in espos_ble_start() with the callbacks. */
+    return espos_ble_backend_controller_only();
 }
 
 esp_err_t espos_ble_start(void)

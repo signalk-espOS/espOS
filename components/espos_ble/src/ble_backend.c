@@ -198,22 +198,47 @@ static esp_err_t controller_up(void)
     return ESP_OK;
 }
 
+esp_err_t espos_ble_backend_controller_only(void)
+{
+    /* Just the radio, and nothing above it. This is what reserving the
+     * controller's ~24 KB means: claim the block, leave the Bluedroid host and
+     * its BTU/BTC threads for later. Starting the host here would also start
+     * those threads, whose stacks come from the same internal RAM the reserve
+     * exists to protect -- and on a C5 that is what tipped the rest of the
+     * firmware over. */
+    if (s_controller_up) {
+        return ESP_OK;
+    }
+    ESP_RETURN_ON_ERROR(controller_up(), TAG, "controller");
+    s_controller_up = true;
+    return ESP_OK;
+}
+
 esp_err_t espos_ble_backend_init(const espos_ble_callbacks_t *cb)
 {
     if (cb) s_cb = *cb;
 
-    /* Idempotent in the controller: espos_ble_reserve_controller() may already
-     * have brought the stack up long before the gateway starts, which is the
-     * whole point of it existing. Re-initialising a live controller returns
-     * ESP_ERR_INVALID_STATE, so the second caller must skip rather than fail.
-     * The callbacks above are still installed, and the GAP/GATTC registration
-     * below still runs -- that is what the gateway actually needs from here. */
+    /* The controller may already be up: espos_ble_reserve_controller() can have
+     * run minutes earlier, before the network. Re-initialising a live
+     * controller is an error rather than a no-op, so skip it and carry on with
+     * the host, which is what the gateway actually needs from this call. */
     if (!s_controller_up) {
         ESP_RETURN_ON_ERROR(controller_up(), TAG, "controller");
         s_controller_up = true;
     }
-    ESP_RETURN_ON_ERROR(esp_bluedroid_init(), TAG, "bluedroid_init");
-    ESP_RETURN_ON_ERROR(esp_bluedroid_enable(), TAG, "bluedroid_enable");
+
+    /* Bluedroid is NOT skipped on a second call, because a reserve deliberately
+     * never started it -- see espos_ble_backend_controller_only(). Guarding on
+     * its own state anyway: esp_bluedroid_init() answers ESP_ERR_INVALID_STATE
+     * on an already-initialised host, and under ESP_RETURN_ON_ERROR that would
+     * fail espos_ble_start() outright and leave the gateway never scanning. A
+     * stack that is already up is success here, not failure. */
+    if (esp_bluedroid_get_status() == ESP_BLUEDROID_STATUS_UNINITIALIZED) {
+        ESP_RETURN_ON_ERROR(esp_bluedroid_init(), TAG, "bluedroid_init");
+    }
+    if (esp_bluedroid_get_status() != ESP_BLUEDROID_STATUS_ENABLED) {
+        ESP_RETURN_ON_ERROR(esp_bluedroid_enable(), TAG, "bluedroid_enable");
+    }
     ESP_RETURN_ON_ERROR(esp_ble_gap_register_callback(gap_cb), TAG, "gap_register");
 
     const uint8_t *mac = esp_bt_dev_get_address();
