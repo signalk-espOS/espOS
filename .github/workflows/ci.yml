@@ -175,8 +175,6 @@ jobs:
       - uses: actions/checkout@v7
       - run: scripts/check_no_secrets.sh
 
-  # Every component must be packable for the Espressif Component Registry, or
-  # the release job that uploads them fails after the tag exists.
   # Every component must pack for the Espressif Component Registry, or the
   # release job that uploads them fails after the tag exists; and every
   # manifest must carry version.txt's version (lockstep releases).

@@ -148,8 +148,11 @@ __attribute__((weak)) bool espos_httpd_wallclock_hook(bool *synced, const char *
  * build without espos_core -- a firmware that registers its own endpoints and
  * never calls espos_start() -- gets the weak stub and no board row.
  *
- * espos_core/src/espos_core.c provides the strong definition and is built
- * WHOLE_ARCHIVE, without which the linker keeps this stub and the field
+ * espos_core/src/espos_core.c provides the strong definition. That object is
+ * always in the link because app_main calls espos_start(), which lives there,
+ * so espos_core needs no WHOLE_ARCHIVE. A component whose strong definition
+ * sits in an object nothing else references does need it (espos_time,
+ * espos_sk, espos_voice); without it the linker keeps this stub and the field
  * silently never appears. That is not hypothetical: it is exactly what
  * happened to the wallclock hook (#49), where both halves compiled, both
  * linked, and the two endpoints disagreed on a running device.

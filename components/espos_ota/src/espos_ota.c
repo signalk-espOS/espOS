@@ -166,21 +166,6 @@ static void progress_cb(size_t received, size_t total, void *arg)
     }
 }
 
-/*
- * Where to fetch the manifest from.
- *
- * With ota.manifest_src = "signalk" the URL is derived from whichever server
- * this device is already talking to, so a fresh device that finds its server
- * also finds its updates and nothing has to be typed per device -- and a
- * server that moves does not strand a fleet on a stale URL.
- *
- * espos_sk is an OPTIONAL dependency: a firmware can do OTA with no SignalK
- * at all, and hard-requiring it to offer this one convenience would be the
- * wrong trade. The weak symbol is what keeps that true; espos_sk provides the
- * strong one (src/sk_ota_url.c). Same shape as the wall-clock hook in
- * espos_httpd, and the same trap: the strong definition only wins if the
- * linker pulls that object in, which is why espos_sk builds WHOLE_ARCHIVE.
- */
 /* Quiesce anything that cannot miss a deadline while an image downloads.
  *
  * Draining a multi-megabyte image saturates the core the network stack runs
@@ -200,6 +185,21 @@ static void progress_cb(size_t received, size_t total, void *arg)
 __attribute__((weak)) void espos_ota_quiesce_hook(void) {}
 __attribute__((weak)) void espos_ota_resume_hook(void) {}
 
+/*
+ * Where to fetch the manifest from.
+ *
+ * With ota.manifest_src = "signalk" the URL is derived from whichever server
+ * this device is already talking to, so a fresh device that finds its server
+ * also finds its updates and nothing has to be typed per device -- and a
+ * server that moves does not strand a fleet on a stale URL.
+ *
+ * espos_sk is an OPTIONAL dependency: a firmware can do OTA with no SignalK
+ * at all, and hard-requiring it to offer this one convenience would be the
+ * wrong trade. The weak symbol is what keeps that true; espos_sk provides the
+ * strong one (src/sk_ota_url.c). Same shape as the wall-clock hook in
+ * espos_httpd, and the same trap: the strong definition only wins if the
+ * linker pulls that object in, which is why espos_sk builds WHOLE_ARCHIVE.
+ */
 __attribute__((weak)) esp_err_t espos_ota_server_url_hook(const char *path, char *out, size_t n)
 {
     (void)path;
