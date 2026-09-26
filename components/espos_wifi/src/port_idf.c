@@ -77,10 +77,10 @@ static RTC_NOINIT_ATTR espos_wifi_last_ap_t s_last_ap;
  * while costing at most three fast failures when the AP really has moved. */
 #define FAST_RECONNECT_ATTEMPTS 3
 
-/* Fast attempts still available before falling back to a full scan. Refilled on
- * every successful association, so a device that keeps reconnecting to a live AP
- * keeps the shortcut, while one whose AP has actually gone spends the budget once
- * and then scans properly until it finds something.
+/* Fast attempts still available before falling back to a full scan. Refilled when
+ * a connection actually WORKS (GOT_IP), so a device that keeps reconnecting to a
+ * live AP keeps the shortcut, while one whose AP has gone -- or associates but
+ * never leases an address -- spends the budget once and then scans properly.
  *
  * Initialised to the full budget, not 0: after a reboot the remembered AP is in
  * RTC memory but this counter is not, and starting empty would switch the cache
@@ -112,8 +112,15 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
          * GOT_IP deliberately: the scan this saves happens before auth, so an
          * association that succeeds and then fails DHCP still tells us which
          * channel this AP is on. */
+        /* Store the AP here, because association is where the channel comes
+         * from and an association that then fails DHCP still tells us which
+         * channel this AP is on. The BUDGET is refilled in the GOT_IP handler
+         * instead: refilling it here would mean an AP that associates but never
+         * leases an address -- a broken DHCP server, a VLAN with no pool --
+         * tops the budget up on every attempt, so the device retries the fast
+         * path forever and never falls back to the full scan that might find a
+         * usable AP. Associating is not the same as working. */
         espos_wifi_last_ap_store(&s_last_ap, link.ssid, e->bssid, e->channel);
-        s_fast_attempts_left = FAST_RECONNECT_ATTEMPTS;
         wifi_ap_record_t ap;
         if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
             link.rssi = ap.rssi; /* we are on the event task, not under the SM lock */
@@ -191,6 +198,10 @@ static void on_ip_event(void *arg, esp_event_base_t base, int32_t id, void *data
     (void)arg;
     (void)base;
     if (id == IP_EVENT_STA_GOT_IP) {
+        /* A usable connection, not merely an association: this is what earns
+         * the fast-reconnect budget back. See the STA_CONNECTED handler for why
+         * it is not refilled there. */
+        s_fast_attempts_left = FAST_RECONNECT_ATTEMPTS;
         const ip_event_got_ip_t *e = data;
         espos_wifi_ip_t ip;
         snprintf(ip.ip, sizeof(ip.ip), IPSTR, IP2STR(&e->ip_info.ip));
