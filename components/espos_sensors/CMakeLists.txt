@@ -47,7 +47,7 @@ idf_component_register(
 # firmware that turns CONFIG_ESPOS_SENSORS_ONEWIRE on adds espressif/ds18b20
 # to its OWN manifest, and this makes its headers visible here when it does.
 #
-# idf_component_optional_requires is what "use it if the firmware pulled it
+# espos_optional_requires is what "use it if the firmware pulled it
 # in" looks like: naming espressif__ds18b20 in PRIV_REQUIRES would make it a
 # hard dependency of every firmware, which is the download the option exists
 # to avoid. espos_onewire.c is empty without the option, so a firmware that

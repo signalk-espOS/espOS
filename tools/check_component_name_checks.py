@@ -31,8 +31,10 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 # `if(espos_foo IN_LIST <anything>)` -- the variable name varies (comps, _comps).
 # \s+ spans newlines, because CMake allows the condition to wrap and a check
-# split across two lines is the same bug.
-BARE = re.compile(r"\b(espos_[a-z0-9_]+)\s+IN_LIST\b", re.S)
+# split across two lines is the same bug. The optional quotes matter too: CMake
+# takes `if("espos_wifi" IN_LIST comps)` as the same literal element, so a quoted
+# name is the identical defect and would otherwise slip past.
+BARE = re.compile(r"\"?\b(espos_[a-z0-9_]+)\b\"?\s+IN_LIST\b", re.S)
 
 def main() -> int:
     bad = []

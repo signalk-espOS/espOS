@@ -30,12 +30,15 @@ endif()
 # espOS's own CI could not catch it, because the from_registry example uses
 # override_path and therefore builds under the bare names too.
 #
-# COMPONENT_NAME is the bare name in both spellings, so comparing against that
-# resolves either. IDF's own __component_get_target() does exactly this
-# (tools/cmake/component.cmake: it falls back to matching COMPONENT_NAME when a
-# name is not a known target), which is why idf_component_get_property() and
-# idf_component_optional_requires() accept bare names and only raw
-# `IN_LIST BUILD_COMPONENTS` does not.
+# So this matches the entries of BUILD_COMPONENTS themselves: exactly, for an
+# in-tree build, or on a `__<bare name>` suffix for a namespaced one. Suffix
+# rather than stripping a literal `signalk-espos__`, so a fork or mirror
+# published under another namespace keeps working.
+#
+# Not by reading COMPONENT_NAME, which would be the other way to do it:
+# idf_component_get_property() raises a FATAL_ERROR on a name it cannot resolve,
+# and a component is resolvable that way only once it has been registered, which
+# is not guaranteed when these run.
 # An optional third argument receives the name as this build actually spells it,
 # so a caller that then needs idf_component_get_property() passes THAT rather
 # than the bare name: that function raises a FATAL_ERROR on a name it cannot
