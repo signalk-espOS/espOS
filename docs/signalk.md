@@ -616,6 +616,52 @@ advertises `_signalk-https._tcp`.
    not interrupt anything, and re-issuing it for a different name should give
    `cert_error` with "names different hosts".
 
+## Task stacks
+
+Two tasks, two Kconfig options. Both are at their historical sizes; what changed
+is that they are now options with measured numbers behind them rather than
+literals in the source.
+
+* **`CONFIG_ESPOS_SK_TASK_STACK`** (default 12288, range 6144–16384) — the client
+  task: discovery, the token state machine and its HTTP legs (access request,
+  poll, verify), plus the https probe.
+* **`CONFIG_ESPOS_SK_WS_TASK_STACK`** (default 8192, range 6144–16384) — the
+  stream task: frame reassembly, delta parsing, inbound PUT dispatch, the
+  notification sink — and metadata reconciliation, which issues an HTTP GET and
+  PUT per path (`reconcile_meta()` is called from `ws_task()`, not from the
+  client task).
+
+Measured on an ESP32-C5 running the BLE gateway against a live server —
+discovery, an approved token, meta for the published paths — with
+`CONFIG_FREERTOS_USE_TRACE_FACILITY=y` and `uxTaskGetStackHighWaterMark()`:
+
+| task | allocated | peak use | never touched |
+|---|---|---|---|
+| `espos_sk` | 12288 | 1488 | 10800 (88 %) |
+| `espos_skws` | 8192 | 5272 | 2920 (36 %) |
+
+**Neither default was lowered on the strength of that, and the reason is worth
+stating.** The server in that run was plain HTTP on port 80, so no TLS handshake
+completed on either task — and mbedTLS is the deepest call path both of them
+have. A 12 % high-water reading taken with the deepest path never taken does not
+show the stack is oversized; it shows the measurement was incomplete.
+
+So the numbers above are a floor, not a budget, and what to measure before
+lowering either default depends on the build:
+
+* **`CONFIG_ESPOS_SK_TLS=y`** (the default) — take the reading against a `wss`
+  server, where the client task's token legs and the stream task's
+  `espos_sk_http_get_meta()` / `put_meta()` calls actually go through mbedTLS.
+* **`CONFIG_ESPOS_SK_TLS=n`** — `sk_tls.c` is compiled out and the device can only
+  speak http/ws, so no wss reading is possible. Measure the busiest workload that
+  build does support instead: a reconnect that replays a full subscription burst
+  and reconciles meta for every published path.
+
+The floors are 6144 on both. 4096 would sit *below* the 5272 B the stream task was
+measured using, and an option whose range lets a build fault on the first large
+frame is a trap rather than a choice. A stack-protection fault here is a reboot
+loop, not a degraded mode.
+
 ## API
 
 * `GET /api/v1/sk/status` — token/server/discovery status plus the `ws`

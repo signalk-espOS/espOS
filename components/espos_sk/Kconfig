@@ -10,6 +10,72 @@ menu "espOS SignalK"
             paths) can reach several KiB; raise on PSRAM boards that
             subscribe to whole families.
 
+    config ESPOS_SK_TASK_STACK
+        int "SignalK client task stack size (bytes)"
+        default 12288
+        range 6144 16384
+        help
+            The task that runs discovery, the token state machine and its HTTP
+            legs (access request, poll, verify) plus the https probe. Meta
+            reconciliation is NOT here -- reconcile_meta() is called from
+            ws_task(), so it belongs to the stream task below.
+
+            Measured rather than guessed: on an ESP32-C5 running the BLE
+            gateway against a live server -- discovery, an approved token,
+            meta for the published paths -- the high-water mark showed this
+            task using 1488 B of the 12288 B it used to be given, i.e. 12 %.
+
+            The default stays 12288 anyway, and that is deliberate: the
+            server in that run was plain HTTP on port 80, so no TLS handshake
+            ever completed on this task, and mbedTLS is by far the deepest call
+            path it has (espos_sk_http_probe_https and the token legs all go
+            through it). A 12 % high-water number measured with the deepest
+            path never taken does not justify cutting the stack -- it only says
+            the measurement was incomplete.
+
+            Reducing it needs a high-water reading against a TLS server, not
+            that one -- or, in a CONFIG_ESPOS_SK_TLS=n build where sk_tls.c is
+            compiled out and no wss reading is possible, against the busiest
+            http/ws workload that build supports.
+
+            Lower it only against your own high-water numbers
+            (CONFIG_FREERTOS_USE_TRACE_FACILITY +
+            uxTaskGetStackHighWaterMark) taken on a TLS server, never to a
+            round number that looks sufficient. A stack-protection fault here
+            is a reboot loop rather than a degraded mode.
+
+            The floor is 6144 for the same reason the default is not 2048: the
+            TLS path on this task is unmeasured, so a range that invites a
+            build down to 3 KB would be offering a setting nobody has shown to
+            work.
+
+    config ESPOS_SK_WS_TASK_STACK
+        int "SignalK stream task stack size (bytes)"
+        default 8192
+        range 6144 16384
+        help
+            The websocket task: frame reassembly, delta parsing, inbound PUT
+            dispatch and the notification sink.
+
+            Deliberately NOT reduced, and that is the measurement talking
+            rather than caution: the same run that found the client task using
+            12 % of its stack showed this one using 5272 of 8192 B, 64 %, with
+            only 2920 B spare. It parses whatever the server sends, so its
+            depth depends on frames this device did not choose.
+
+            It also carries the deeper HTTP work than its name suggests:
+            reconcile_meta() runs here, and it issues espos_sk_http_get_meta()
+            and espos_sk_http_put_meta() per path -- over TLS on a wss server.
+            That path was not exercised in the measurement either (plain HTTP),
+            so 2920 B of observed headroom is the floor of what it needs, not a
+            budget to spend.
+
+            The floor is 6144 rather than the 4096 a stack option would
+            normally allow, because 4096 is BELOW the 5272 B this task was
+            measured using -- an option whose range lets a build fault on the
+            first big frame is a trap, not a choice. 6144 leaves the knob
+            useful on a tight board while staying above what was observed.
+
     config ESPOS_SK_TLS
         bool "Talk to the server over TLS (https/wss)"
         default y
