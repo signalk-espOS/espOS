@@ -15,6 +15,21 @@ pull request. The `[Unreleased]` block below was written by hand before the
 switch; its entries belong to the next feature release and are folded into
 that section when it is cut.
 
+## [0.11.0](https://github.com/signalk-espOS/espOS/compare/v0.10.3...v0.11.0) (2026-09-26)
+
+
+### Added
+
+* **ble:** let a firmware reserve the radio controller before the network ([#134](https://github.com/signalk-espOS/espOS/issues/134)) ([7e27551](https://github.com/signalk-espOS/espOS/commit/7e27551d9b77b3b8f74ba0c7b08b1eedc82b30be))
+* **sk:** make the SignalK task stacks configurable, with measured numbers ([#135](https://github.com/signalk-espOS/espOS/issues/135)) ([95be441](https://github.com/signalk-espOS/espOS/commit/95be4413080bd057f1c81b516694a9c5fa476f42))
+
+
+### Fixed
+
+* **build:** component checks that work when espOS is installed from the registry ([#140](https://github.com/signalk-espOS/espOS/issues/140)) ([8878485](https://github.com/signalk-espOS/espOS/commit/88784858683cf45905d21aca936ed37e2dbeb085))
+* **sk:** back off a duplicate access request instead of asking every minute ([#130](https://github.com/signalk-espOS/espOS/issues/130)) ([569b681](https://github.com/signalk-espOS/espOS/commit/569b681a486638bc84221a5af386688fe0ce5828))
+* **wifi:** reconnect to the last known AP without rescanning every channel ([#139](https://github.com/signalk-espOS/espOS/issues/139)) ([800cbbf](https://github.com/signalk-espOS/espOS/commit/800cbbff523b24ed6ba99cb1366e6fb9eb9f34d4))
+
 ## [0.10.3](https://github.com/signalk-espOS/espOS/compare/v0.10.2...v0.10.3) (2026-09-24)
 
 
