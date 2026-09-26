@@ -33,8 +33,8 @@ the same time — and no configuration changes that. If you are choosing a board
 order to bridge BLE sensors to SignalK, this is not it; use an ESP32-P4, where BLE
 comes from a separate co-processor, or a C6/S3/ESP32.
 
-Measured on a Waveshare ESP32-C5 (espOS #127), DMA-capable internal RAM consumed by
-each stage of `espos_start()`:
+Measured on a Waveshare ESP32-C5 (espOS #127), internal RAM consumed by each stage
+of `espos_start()`:
 
 | stage | internal RAM |
 |---|---|
@@ -45,9 +45,16 @@ each stage of `espos_start()`:
 | **BLE (Bluedroid host + controller)** | **51 KB** |
 | **total** | **~152 KB of ~176 KB** |
 
-That leaves under 15 KB, the HTTP requests the gateway needs start failing, and the
-[health watchdog](health.md) restarts the board. The failure is not subtle: a device
+That leaves **14.8 KB** of internal RAM free — and of that, only **7.3 KB** is
+DMA-capable, which is the pool sockets and TLS draw from. So the HTTP requests the
+gateway needs start failing, and the [health watchdog](health.md) restarts the board
+(it alarms below 12 KB free, with good reason). The failure is not subtle: a device
 that scans happily for 30 seconds and then reboots, repeatedly.
+
+Both figures matter and they are different pools. `heap_caps_get_free_size()` over
+`MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT` is the 14.8 KB; the same call over
+`MALLOC_CAP_DMA` is the 7.3 KB. Quoting only the first makes the headroom look
+twice as large as what a TLS handshake can actually reach.
 
 ### Why the usual escapes do not apply
 
