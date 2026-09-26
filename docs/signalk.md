@@ -616,6 +616,45 @@ advertises `_signalk-https._tcp`.
    not interrupt anything, and re-issuing it for a different name should give
    `cert_error` with "names different hosts".
 
+## Task stacks
+
+Two tasks, two Kconfig options, both sized from measured high-water marks rather
+than from a number that looked safe.
+
+* **`CONFIG_ESPOS_SK_TASK_STACK`** (default 8192, range 6144–16384) — the client
+  task: discovery, the token state machine, and the HTTP legs (access request,
+  poll, verify, meta reconciliation).
+* **`CONFIG_ESPOS_SK_WS_TASK_STACK`** (default 8192, range 6144–16384) — the
+  stream task: frame reassembly, delta parsing, inbound PUT dispatch, the
+  notification sink.
+
+Measured on an ESP32-C5 running the BLE gateway against a live server —
+discovery, an approved token, meta for the published paths — with
+`CONFIG_FREERTOS_USE_TRACE_FACILITY=y` and `uxTaskGetStackHighWaterMark()`:
+
+| task | allocated | peak use | never touched |
+|---|---|---|---|
+| `espos_sk` | 12288 (before) | 1488 | 10800 (88 %) |
+| `espos_skws` | 8192 | 5272 | 2920 (36 %) |
+
+The client task therefore dropped 12288 → 8192, and **not** to the ~2 KB that
+peak suggests. That measurement was taken against a plain-HTTP server on port 80,
+so no TLS handshake ever ran on that task, and mbedTLS is the deepest call path
+it has. 8192 returns 4 KB on every device while leaving five times the observed
+peak for the path that was not exercised.
+
+The stream task keeps 8192, and that is the measurement rather than caution: it
+was using 64 % of it, with 2920 B spare. It parses whatever the server sends, so
+its depth depends on frames this device did not choose.
+
+The floors are 6144 on both. 4096 would sit *below* the 5272 B the stream task
+was measured using, and an option whose range lets a build fault on the first
+large frame is a trap rather than a choice.
+
+Lower either only against your own high-water numbers, taken on a TLS server,
+and never to a round number that looks sufficient — a stack-protection fault
+here is a reboot loop, not a degraded mode.
+
 ## API
 
 * `GET /api/v1/sk/status` — token/server/discovery status plus the `ws`
