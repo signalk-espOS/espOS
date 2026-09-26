@@ -12,6 +12,9 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/timers.h"
 #include "esp_event.h"
+#include "wifi_last_ap.h"
+
+#include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_random.h"
@@ -36,6 +39,57 @@ static int s_portal_clients;
 static bool s_inited;
 static char s_ssid[33];     /* of the current association, for the GOT_IP line */
 
+/* Last AP we actually associated with, remembered across a disconnect so the
+ * next attempts can go straight to it instead of scanning every channel first.
+ *
+ * WHY IT IS WORTH THE COMPLEXITY: a WIFI_ALL_CHANNEL_SCAN costs ~2.3 s before
+ * `state: init -> auth` (measured on an ESP32-S3, espOS #136), and without a
+ * remembered channel every attempt pays it -- including a reconnect to the AP the
+ * device was just talking to. Against an AP that needs a few tries to complete
+ * the handshake, that is 2.3 s added to each of them, which is what makes a
+ * 30-60 s cold join out of a 2 s one.
+ *
+ * This is a CACHE, not a pin. espos_wifi_net_t.has_bssid is the pin -- an
+ * operator saying "only ever this BSSID" -- and it must keep meaning that, so it
+ * takes precedence and is never overwritten from here. The cache is a hint that
+ * is allowed to be wrong: if the AP moved channel, was replaced, or the device
+ * was carried to a different one with the same SSID, the fast attempt fails and
+ * the fall-back full scan finds it. Hence the attempt budget below rather than
+ * trusting it indefinitely.
+ *
+ * Kept per SSID: reconnecting to a DIFFERENT network in the list must not reuse
+ * another network's BSSID, which would pin the wrong AP entirely.
+ *
+ * RTC_NOINIT rather than plain static, because the reported case includes a
+ * FRESH BOOT: a device that reboots -- an OTA, a watchdog, a power blip -- would
+ * otherwise start with an empty cache and pay the full scan on exactly the
+ * attempts this is meant to shorten. RTC memory survives a reset (and deep
+ * sleep) but holds garbage after a cold power-on, so the magic and the checksum
+ * are what tell "remembered" from "never written", the same pattern
+ * espos_power/src/port_idf.c uses. A NVS write per association would be the
+ * alternative and is worse: this changes on every roam and NVS has a finite
+ * erase budget. */
+static RTC_NOINIT_ATTR espos_wifi_last_ap_t s_last_ap;
+
+/* How many attempts may use the cached BSSID/channel before falling back to a
+ * full scan. Small on purpose: the point is to remove the scan from the retries
+ * that follow a handshake miss against an AP that is definitely there, not to
+ * keep chasing an AP that has gone. Three covers the 1-3 misses reported in #136
+ * while costing at most three fast failures when the AP really has moved. */
+#define FAST_RECONNECT_ATTEMPTS 3
+
+/* Fast attempts still available before falling back to a full scan. Refilled when
+ * a connection actually WORKS (GOT_IP), so a device that keeps reconnecting to a
+ * live AP keeps the shortcut, while one whose AP has gone -- or associates but
+ * never leases an address -- spends the budget once and then scans properly.
+ *
+ * Initialised to the full budget, not 0: after a reboot the remembered AP is in
+ * RTC memory but this counter is not, and starting empty would switch the cache
+ * off for exactly the fresh-boot case it exists to help. A cold power-on gets the
+ * budget too, but then espos_wifi_last_ap_usable() rejects the uninitialised record
+ * and nothing is spent. */
+static uint8_t s_fast_attempts_left = FAST_RECONNECT_ATTEMPTS;
+
 esp_err_t espos_wifi_portal_dns_start(const char *ip);
 void espos_wifi_portal_dns_stop(void);
 
@@ -54,6 +108,20 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
         memcpy(link.bssid, e->bssid, 6);
         link.channel = e->channel;
         memcpy(s_ssid, link.ssid, sizeof(s_ssid));
+
+        /* Remember where we got in. Recorded on ASSOCIATION rather than on
+         * GOT_IP deliberately: the scan this saves happens before auth, so an
+         * association that succeeds and then fails DHCP still tells us which
+         * channel this AP is on. */
+        /* Store the AP here, because association is where the channel comes
+         * from and an association that then fails DHCP still tells us which
+         * channel this AP is on. The BUDGET is refilled in the GOT_IP handler
+         * instead: refilling it here would mean an AP that associates but never
+         * leases an address -- a broken DHCP server, a VLAN with no pool --
+         * tops the budget up on every attempt, so the device retries the fast
+         * path forever and never falls back to the full scan that might find a
+         * usable AP. Associating is not the same as working. */
+        espos_wifi_last_ap_store(&s_last_ap, link.ssid, e->bssid, e->channel);
         wifi_ap_record_t ap;
         if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
             link.rssi = ap.rssi; /* we are on the event task, not under the SM lock */
@@ -131,6 +199,10 @@ static void on_ip_event(void *arg, esp_event_base_t base, int32_t id, void *data
     (void)arg;
     (void)base;
     if (id == IP_EVENT_STA_GOT_IP) {
+        /* A usable connection, not merely an association: this is what earns
+         * the fast-reconnect budget back. See the STA_CONNECTED handler for why
+         * it is not refilled there. */
+        s_fast_attempts_left = FAST_RECONNECT_ATTEMPTS;
         const ip_event_got_ip_t *e = data;
         espos_wifi_ip_t ip;
         snprintf(ip.ip, sizeof(ip.ip), IPSTR, IP2STR(&e->ip_info.ip));
@@ -235,11 +307,28 @@ static esp_err_t p_connect(void *ctx, const espos_wifi_net_t *net)
      * when full; strncpy pads shorter values with NUL. */
     strncpy((char *)cfg.sta.ssid, net->ssid, sizeof(cfg.sta.ssid));
     strncpy((char *)cfg.sta.password, net->psk, sizeof(cfg.sta.password));
+    bool fast = false;
     if (net->has_bssid) {
+        /* The operator's pin wins, always. It means "only this BSSID", so the
+         * cache must not widen or narrow it. */
         cfg.sta.bssid_set = true;
         memcpy(cfg.sta.bssid, net->bssid, 6);
+    } else if (espos_wifi_last_ap_usable(&s_last_ap, net->ssid, s_fast_attempts_left,
+                                         net->has_bssid)) {
+        /* Go straight back to the AP we were last associated with on this SSID.
+         * Channel AND bssid: the channel is what removes the scan, the bssid is
+         * what stops WIFI_FAST_SCAN settling for a different AP in the same ESS
+         * on the way past. */
+        cfg.sta.bssid_set = true;
+        memcpy(cfg.sta.bssid, s_last_ap.bssid, 6);
+        cfg.sta.channel = s_last_ap.channel;
+        fast = true;
+        s_fast_attempts_left--;
     }
-    cfg.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
+    /* FAST_SCAN stops at the first acceptable AP, which is the whole point when
+     * we already know which one that is. Otherwise scan everything and take the
+     * strongest -- the behaviour every other build has had. */
+    cfg.sta.scan_method = fast ? WIFI_FAST_SCAN : WIFI_ALL_CHANNEL_SCAN;
     cfg.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
     /* With a password configured refuse open/WEP networks (WPA-PSK is the
      * floor; WPA2 and WPA3-SAE/H2E are negotiated when the AP offers them). */
@@ -252,7 +341,16 @@ static esp_err_t p_connect(void *ctx, const espos_wifi_net_t *net)
         ESP_LOGE(TAG, "set_config: %s", esp_err_to_name(err));
         return err;
     }
-    ESP_LOGI(TAG, "connecting to '%s'%s", net->ssid, net->has_bssid ? " (pinned BSSID)" : "");
+    if (net->has_bssid) {
+        ESP_LOGI(TAG, "connecting to '%s' (pinned BSSID)", net->ssid);
+    } else if (fast) {
+        /* Say so: an operator comparing a slow cold boot with a fast reconnect
+         * needs to know which of the two paths a given attempt took. */
+        ESP_LOGI(TAG, "connecting to '%s' (channel %u, last known AP)", net->ssid,
+                 (unsigned)s_last_ap.channel);
+    } else {
+        ESP_LOGI(TAG, "connecting to '%s' (all channels)", net->ssid);
+    }
     err = esp_wifi_connect();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_wifi_connect: %s", esp_err_to_name(err));
