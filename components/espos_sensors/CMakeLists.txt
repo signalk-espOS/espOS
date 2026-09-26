@@ -52,4 +52,4 @@ idf_component_register(
 # hard dependency of every firmware, which is the download the option exists
 # to avoid. espos_onewire.c is empty without the option, so a firmware that
 # has neither compiles fine.
-idf_component_optional_requires(PRIVATE espressif__ds18b20 espressif__onewire_bus)
+espos_optional_requires(PRIVATE espressif__ds18b20 espressif__onewire_bus)

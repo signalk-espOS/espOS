@@ -20,9 +20,12 @@ idf_component_register(
 # configured at all, so confirm a new image after a grace period rather than
 # roll back — is asked only when espos_wifi is in the build. Optional, so a
 # firmware without WiFi (Ethernet, the H-series) links OTA unchanged.
-idf_component_optional_requires(PRIVATE espos_wifi)
-idf_build_get_property(comps BUILD_COMPONENTS)
-if(espos_wifi IN_LIST comps)
+espos_optional_requires(PRIVATE espos_wifi)
+# espos_has_component(), not `IN_LIST BUILD_COMPONENTS` -- see espOS #138: that
+# list holds namespaced target names for a registry install, so the bare name
+# never matched and the no-station-configured grace period never applied.
+espos_has_component(_have_wifi espos_wifi)
+if(_have_wifi)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE ESPOS_OTA_HAVE_WIFI=1)
 endif()
 

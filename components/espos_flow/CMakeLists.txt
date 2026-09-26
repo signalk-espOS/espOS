@@ -44,7 +44,7 @@ idf_component_register(
 # Linked only when the firmware also builds espos_health; the source guards
 # the call with CONFIG_ESPOS_FLOW_HEALTH, which a firmware without the
 # component turns off.
-idf_component_optional_requires(PRIVATE espos_health)
+espos_optional_requires(PRIVATE espos_health)
 
 # GET /api/v1/flow is worth having and not worth requiring: a firmware with
 # no web server is a legitimate one, and api_flow.cpp guards itself with
@@ -52,7 +52,7 @@ idf_component_optional_requires(PRIVATE espos_health)
 # what puts espos_httpd's headers on the include path when it IS in the
 # build -- without it __has_include answers no even though the component is
 # present.
-idf_component_optional_requires(PRIVATE espos_httpd espressif__cjson)
+espos_optional_requires(PRIVATE espos_httpd espressif__cjson)
 
 # C11 for the runtime, C++ for the graph. IDF 6 compiles device code at
 # -std=gnu++26 with exceptions and RTTI off; the graph is written to that
@@ -63,8 +63,8 @@ idf_component_optional_requires(PRIVATE espos_httpd espressif__cjson)
 # option asks for the report; this says whether there is anything to report
 # to, so a firmware that keeps the default and drops the component still
 # compiles.
-idf_build_get_property(comps BUILD_COMPONENTS)
-if(espos_health IN_LIST comps)
+espos_has_component(_have_health espos_health)
+if(_have_health)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE ESPOS_FLOW_HAVE_HEALTH=1)
 endif()
 
@@ -82,10 +82,12 @@ endif()
 # espos_flow/transforms.hpp. It costs nothing to require -- the component is
 # header-only with no dependencies of its own beyond the C++ standard library,
 # so REQUIREing it adds an include directory and links no code.
-idf_component_optional_requires(PUBLIC espos_config espos_time)
-if(espos_config IN_LIST comps)
+espos_optional_requires(PUBLIC espos_config espos_time)
+espos_has_component(_have_config espos_config)
+if(_have_config)
     target_compile_definitions(${COMPONENT_LIB} INTERFACE ESPOS_FLOW_HAVE_CONFIG=1)
 endif()
-if(espos_time IN_LIST comps)
+espos_has_component(_have_time espos_time)
+if(_have_time)
     target_compile_definitions(${COMPONENT_LIB} INTERFACE ESPOS_FLOW_HAVE_TIME=1)
 endif()

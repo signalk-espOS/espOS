@@ -30,4 +30,4 @@ idf_component_register(
 # dependency is what puts espos_httpd's headers on the include path when it
 # IS in the build -- without it __has_include answers no even though the
 # component is present.
-idf_component_optional_requires(PRIVATE espos_httpd espressif__cjson)
+espos_optional_requires(PRIVATE espos_httpd espressif__cjson)
