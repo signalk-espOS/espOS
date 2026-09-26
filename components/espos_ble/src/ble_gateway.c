@@ -982,13 +982,31 @@ esp_err_t espos_ble_start(void)
                     ? heap_caps_calloc((size_t)cap, sizeof(espos_ble_adv_t), MALLOC_CAP_SPIRAM)
                     : calloc((size_t)cap, sizeof(espos_ble_adv_t));
     if (!g.storage && ring_external) {
-        /* PSRAM was there a moment ago and would not serve the request. Fall
-         * back rather than refuse to start: a gateway with a small internal ring
-         * beats no gateway. */
-        ESP_LOGW(TAG, "advertisement buffer: PSRAM refused %u B, using internal RAM",
-                 (unsigned)((size_t)cap * sizeof(espos_ble_adv_t)));
+        /* PSRAM was there a moment ago and would not serve the request. Fall back
+         * rather than refuse to start: a gateway with a small internal ring beats
+         * no gateway.
+         *
+         * Re-clamp first. `cap` above was sized against the EXTERNAL block --
+         * megabytes -- and asking internal RAM for that would either fail outright
+         * or, worse, succeed and take the memory the radio needs. So redo the
+         * quarter-of-the-largest-block arithmetic against the pool actually being
+         * used. */
         ring_external = false;
-        g.storage = calloc((size_t)cap, sizeof(espos_ble_adv_t));
+        size_t internal_largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        int32_t internal_affordable = (int32_t)((internal_largest / 4) / sizeof(espos_ble_adv_t));
+        if (internal_affordable < 10) internal_affordable = 10;
+        ESP_LOGW(TAG, "advertisement buffer: PSRAM refused %u B; internal largest "
+                      "free %u B, using %u entries",
+                 (unsigned)((size_t)cap * sizeof(espos_ble_adv_t)), (unsigned)internal_largest,
+                 (unsigned)internal_affordable);
+        if (cap > internal_affordable) {
+            cap = internal_affordable;
+        }
+        /* Explicit caps rather than calloc(): on a PSRAM board plain calloc() is
+         * subject to the malloc policy and could hand back external memory again,
+         * which is the allocation that just failed. */
+        g.storage = heap_caps_calloc((size_t)cap, sizeof(espos_ble_adv_t),
+                                     MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     }
     if (!g.storage) {
         ESP_LOGE(TAG, "no memory for %u advertisement slots (%u B)",
