@@ -945,24 +945,59 @@ esp_err_t espos_ble_start(void)
      * callbacks still have somewhere to live. Shrinking beats failing -- the
      * ring's whole contract is that a full ring drops the oldest and counts
      * them, so a smaller one is a degraded gateway rather than no gateway. */
-    size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
-    size_t budget = largest / 4;
+    /* Prefer external RAM where the board has it. The ring is a plain data
+     * buffer -- advertisements are written by the scan callback and read by the
+     * POST task, both on the CPU, and nothing DMAs into it -- so it does not
+     * belong in the internal/DMA pool that the radio, lwIP and every task stack
+     * compete for. Measured on an ESP32-C5 with 8 MB of PSRAM (espOS #127):
+     * espos_start() consumed 160 KB of DMA-capable memory, BLE 51 KB of it, and
+     * the device rebooted on lowMemory with 7 KB left while 8.2 MB of PSRAM sat
+     * untouched.
+     *
+     * MALLOC_CAP_SPIRAM first, then plain 8BIT: heap_caps_malloc() with SPIRAM
+     * returns NULL rather than falling back, and most espOS targets have no
+     * external RAM at all. */
+    size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM);
+    bool ring_external = largest > 0;
+    if (!ring_external) {
+        largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    }
+    /* A quarter of the block when the ring competes with the radio and every
+     * task stack for internal RAM. In external RAM it competes with nothing --
+     * 8 MB against a 62 KB default -- so the clamp is only a backstop there and
+     * a quarter would refuse the configured size for no reason. */
+    size_t budget = ring_external ? largest : largest / 4;
     int32_t affordable = (int32_t)(budget / sizeof(espos_ble_adv_t));
     if (affordable < 10) affordable = 10;   /* the descriptor's own floor */
     if (cap > affordable) {
-        ESP_LOGW(TAG, "advertisement buffer %u entries needs %u B; largest "
-                      "free block is %u B, using %u entries",
+        ESP_LOGW(TAG, "advertisement buffer %u entries needs %u B; largest free "
+                      "%s block is %u B, using %u entries",
                  (unsigned)cap, (unsigned)((size_t)cap * sizeof(espos_ble_adv_t)),
-                 (unsigned)largest, (unsigned)affordable);
+                 ring_external ? "external" : "internal", (unsigned)largest,
+                 (unsigned)affordable);
         cap = affordable;
     }
 
-    g.storage = calloc((size_t)cap, sizeof(espos_ble_adv_t));
+    g.storage = ring_external
+                    ? heap_caps_calloc((size_t)cap, sizeof(espos_ble_adv_t), MALLOC_CAP_SPIRAM)
+                    : calloc((size_t)cap, sizeof(espos_ble_adv_t));
+    if (!g.storage && ring_external) {
+        /* PSRAM was there a moment ago and would not serve the request. Fall
+         * back rather than refuse to start: a gateway with a small internal ring
+         * beats no gateway. */
+        ESP_LOGW(TAG, "advertisement buffer: PSRAM refused %u B, using internal RAM",
+                 (unsigned)((size_t)cap * sizeof(espos_ble_adv_t)));
+        ring_external = false;
+        g.storage = calloc((size_t)cap, sizeof(espos_ble_adv_t));
+    }
     if (!g.storage) {
         ESP_LOGE(TAG, "no memory for %u advertisement slots (%u B)",
                  (unsigned)cap, (unsigned)((size_t)cap * sizeof(espos_ble_adv_t)));
         return ESP_ERR_NO_MEM;
     }
+    ESP_LOGI(TAG, "advertisement buffer %u entries (%u B) in %s RAM", (unsigned)cap,
+             (unsigned)((size_t)cap * sizeof(espos_ble_adv_t)),
+             ring_external ? "external" : "internal");
     espos_ble_advq_init(&g.q, g.storage, (size_t)cap);
 
     g.lock = xSemaphoreCreateMutex();
