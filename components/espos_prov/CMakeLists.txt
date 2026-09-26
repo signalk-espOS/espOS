@@ -12,7 +12,13 @@ idf_component_register(
 # present it serves GET /api/v1/prov and suspends the BLE scanner for the
 # duration. The sources test __has_include, so a build without them compiles
 # the same file with those paths removed.
-idf_component_optional_requires(PRIVATE espos_httpd espos_ble)
+# Namespace-tolerant component checks (espOS #138). Its own copy, because a
+# component installed from the registry cannot reach a sibling's directory,
+# and this component does not require espos_core. The file guards against
+# being included twice.
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/espos_components.cmake")
+
+espos_optional_requires(PRIVATE espos_httpd espos_ble)
 
 # The PoP lives here: generated at random on first use and kept, so the person
 # standing at the device can read it once and use it again after a reboot.

@@ -224,3 +224,9 @@ unset(_espos_table)
 unset(_espos_rows)
 unset(_espos_cols)
 unset(_espos_end)
+
+# The component-name helpers live in their own file so every component that
+# needs them can include it without depending on espos_core being in the build
+# (espOS #138 review: espos_ota, espos_flow, espos_power, espos_n2k and
+# espos_prov all call them and none requires espos_core).
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/espos_components.cmake")
