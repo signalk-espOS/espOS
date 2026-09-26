@@ -42,11 +42,12 @@ static char s_ssid[33];     /* of the current association, for the GOT_IP line *
 /* Last AP we actually associated with, remembered across a disconnect so the
  * next attempts can go straight to it instead of scanning every channel first.
  *
- * WHY: p_connect() used WIFI_ALL_CHANNEL_SCAN unconditionally and never set
- * cfg.sta.channel, so every attempt paid a full scan even when reconnecting to
- * the AP it had just been talking to -- measured at ~2.3 s per attempt on an
- * ESP32-S3 before `state: init -> auth` (espOS #136). On an AP that needs a few
- * tries to complete the handshake that is 2.3 s added to each of them.
+ * WHY IT IS WORTH THE COMPLEXITY: a WIFI_ALL_CHANNEL_SCAN costs ~2.3 s before
+ * `state: init -> auth` (measured on an ESP32-S3, espOS #136), and without a
+ * remembered channel every attempt pays it -- including a reconnect to the AP the
+ * device was just talking to. Against an AP that needs a few tries to complete
+ * the handshake, that is 2.3 s added to each of them, which is what makes a
+ * 30-60 s cold join out of a 2 s one.
  *
  * This is a CACHE, not a pin. espos_wifi_net_t.has_bssid is the pin -- an
  * operator saying "only ever this BSSID" -- and it must keep meaning that, so it
