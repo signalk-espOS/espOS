@@ -18,12 +18,62 @@ with peripherals for `esp32p4` too.
 | `esp32c3` | in CI | RISC-V, single core, the smallest. Native radio. |
 | `esp32c6` | in CI | RISC-V, WiFi 6, native radio. The target the getting-started guide and the examples use. |
 | `esp32p4` | in CI, in daily use | **No radio of its own.** WiFi and BLE come from an ESP32-C6 co-processor over SDIO (below). PSRAM; internal RAM is the scarce pool ([health](health.md)). Rev 1.x silicon allowed. |
-| `esp32c5` | in CI | RISC-V, native radio, same shape as the C6. The target [BLE provisioning](provisioning.md) was verified on end to end, which is also why it has a BLE 5.0 radio worth knowing about: protocomm still advertises with the 4.2 API, so a build with `espos_prov` asks for `BT_BLE_42_FEATURES_SUPPORTED`. |
+| `esp32c5` | in CI | RISC-V, native radio, same shape as the C6. The target [BLE provisioning](provisioning.md) was verified on end to end, which is also why it has a BLE 5.0 radio worth knowing about: protocomm still advertises with the 4.2 API, so a build with `espos_prov` asks for `BT_BLE_42_FEATURES_SUPPORTED`. **Not a BLE gateway board** — it cannot run the BLE stack alongside WiFi and the SignalK client at once ([below](#the-esp32-c5-cannot-host-the-ble-gateway)). |
 | `esp32c61` | later | Same shape as the C6; waiting for hardware on the bench and a CI slot. |
 | `esp32h2`, `esp32h4` | not planned as such | No WiFi radio (BLE + 802.15.4 only). The runtime no longer assumes WiFi -- [`espos_net`](net.md) is the seam and a headless esp32h2 build is a CI gate -- so what these still need is a transport (Thread, or Ethernet on a board that has it). |
 
 The toolchain is one ESP-IDF for all of them: 6.0.x, tested on the release in
 `.idf-version` ([Development](development.md)).
+
+## The ESP32-C5 cannot host the BLE gateway
+
+A C5 runs WiFi and the SignalK client well, and it provisions over BLE. It cannot
+run the [BLE gateway](ble.md) — BLE scanning plus WiFi plus the SignalK client at
+the same time — and no configuration changes that. If you are choosing a board in
+order to bridge BLE sensors to SignalK, this is not it; use an ESP32-P4, where BLE
+comes from a separate co-processor, or a C6/S3/ESP32.
+
+Measured on a Waveshare ESP32-C5 (espOS #127), DMA-capable internal RAM consumed by
+each stage of `espos_start()`:
+
+| stage | internal RAM |
+|---|---|
+| HTTP server + `espos_net` | ~31 KB |
+| WiFi station | 38 KB |
+| SignalK client | 22 KB |
+| OTA | 10 KB |
+| **BLE (Bluedroid host + controller)** | **51 KB** |
+| **total** | **~152 KB of ~176 KB** |
+
+That leaves under 15 KB, the HTTP requests the gateway needs start failing, and the
+[health watchdog](health.md) restarts the board. The failure is not subtle: a device
+that scans happily for 30 seconds and then reboots, repeatedly.
+
+### Why the usual escapes do not apply
+
+* **PSRAM does not fix it.** These modules carry 8 MB, which a default build leaves
+  switched off (`CONFIG_SPIRAM`), and enabling it *is* what lets the controller
+  start at all — `esp_bt_controller_init()` needs ~24 KB in one contiguous block.
+  But the remaining consumers are task stacks and DMA buffers, and neither can live
+  in external RAM. Note also that `CONFIG_SPIRAM` is a bootloader-level setting, so
+  turning it on means a USB flash per device rather than an OTA.
+* **`CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y` makes it worse, not better.** It is
+  the one option that would move the largest single block (38 KB of WiFi and lwIP
+  buffers) out of internal RAM, and with it the station never associates at all:
+  `connecting to '<ssid>'`, then reason 36 every ~21 s, indefinitely. Those buffers
+  are DMA targets and PSRAM cannot serve DMA on this part.
+* **Shrinking what is left buys single-digit KB**, against a 40 KB shortfall, and
+  each candidate is a real capability: the WiFi buffers are already capped, TLS
+  needs 24 KB contiguous for a handshake, and the GATT client is the gateway's
+  entire purpose.
+
+### What the C5 is good for
+
+WiFi and SignalK: sensors, relays, switch panels, anything in
+[`espos_sensors`](sensors.md) or [`espos_devices`](devices.md). BLE provisioning
+also works, because that runs *before* the station comes up rather than beside it —
+which is exactly why "BLE provisioning was verified on this target" does not imply
+the gateway will fit.
 
 ## Flash size and partition tables
 

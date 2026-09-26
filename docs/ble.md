@@ -105,6 +105,13 @@ One backend covers both cases; only the controller bring-up differs.
 
 **Native Bluedroid** (ESP32, C3, S3, C6): the chip's own radio.
 
+**Not the ESP32-C5.** It has a native radio and the code builds, but the gateway
+cannot run there: BLE plus WiFi plus the SignalK client does not fit in its
+internal RAM, and the board scans for about 30 seconds and then reboots on the
+health watchdog. Measurements and why PSRAM does not rescue it are in
+[hardware.md](hardware.md#the-esp32-c5-cannot-host-the-ble-gateway). A C5 is a good
+WiFi/SignalK board; for a BLE bridge use a P4, C6, S3 or ESP32.
+
 **ESP32-P4**: no radio at all. Bluedroid's HCI is routed at an ESP32-C6
 co-processor over esp_hosted's SDIO transport
 (`CONFIG_ESP_HOSTED_ENABLE_BT_BLUEDROID` + `..._HCI_VHCI`, with
