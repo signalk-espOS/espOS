@@ -15,9 +15,14 @@ here. The from_registry example uses override_path, so it builds under the bare
 names too -- the one configuration that would notice is the one CI does not
 have. This is cheap, exact, and runs everywhere.
 
-Use espos_has_component(<var> <bare-name>) from espos_core's
-project_include.cmake instead; it matches COMPONENT_NAME, which is the bare name
-under either spelling.
+Use espos_has_component(<var> <bare-name>) from the calling component's own
+cmake/espos_components.cmake instead; it matches COMPONENT_NAME, which is the
+bare name under either spelling.
+
+Also checks that every shipped copy of that file is byte-identical. Each
+component carries its own because one installed from the registry cannot reach a
+sibling's directory, and copies that drift would give the same silent
+divergence this whole checker exists to prevent.
 """
 import pathlib
 import re
@@ -31,7 +36,12 @@ BARE = re.compile(r"\b(espos_[a-z0-9_]+)\s+IN_LIST\b", re.S)
 
 def main() -> int:
     bad = []
-    for f in sorted(ROOT.glob("components/*/CMakeLists.txt")):
+    scanned = sorted(ROOT.glob("components/*/CMakeLists.txt"))
+    # project_include.cmake and the component cmake/ files can hold the same
+    # check, so scan them too rather than only the obvious file.
+    scanned += sorted(ROOT.glob("components/*/project_include.cmake"))
+    scanned += sorted(ROOT.glob("components/*/cmake/*.cmake"))
+    for f in scanned:
         # Strip comments first, then scan the whole file: a wrapped condition
         # would slip past a line-at-a-time scan.
         lines = f.read_text().splitlines()
@@ -48,12 +58,29 @@ def main() -> int:
             print(f"  {path}:{n}: {line}")
         return 1
 
+    # Every copy must be identical. A component installed from the registry
+    # cannot include a sibling's file, so the duplication is deliberate -- but
+    # duplication that drifts is how one component ends up resolving names
+    # differently from the next.
+    copies = sorted(ROOT.glob("components/*/cmake/espos_components.cmake"))
+    if copies:
+        ref = copies[0]
+        ref_bytes = ref.read_bytes()
+        drifted = [c for c in copies[1:] if c.read_bytes() != ref_bytes]
+        if drifted:
+            print("error: shipped copies of espos_components.cmake have diverged.")
+            print(f"reference: {ref.relative_to(ROOT)}")
+            for c in drifted:
+                print(f"  differs: {c.relative_to(ROOT)}")
+            return 1
+
     n_ok = sum(
         1
         for f in ROOT.glob("components/*/CMakeLists.txt")
         if "espos_has_component(" in f.read_text()
     )
-    print(f"ok: no bare component-name checks; {n_ok} file(s) use espos_has_component()")
+    print(f"ok: no bare component-name checks; {n_ok} file(s) use espos_has_component(); "
+          f"{len(copies)} identical copies of espos_components.cmake")
     return 0
 
 if __name__ == "__main__":

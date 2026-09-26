@@ -52,4 +52,9 @@ idf_component_register(
 # hard dependency of every firmware, which is the download the option exists
 # to avoid. espos_onewire.c is empty without the option, so a firmware that
 # has neither compiles fine.
+# Namespace-tolerant component checks (espOS #138). Its own copy: a component
+# installed from the registry cannot reach a sibling's directory, and this
+# component does not require espos_core. Guarded against a second include.
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/espos_components.cmake")
+
 espos_optional_requires(PRIVATE espressif__ds18b20 espressif__onewire_bus)

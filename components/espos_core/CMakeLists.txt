@@ -38,15 +38,15 @@ idf_component_register(
 # Optional stages: link them only when they are in the build, and tell the
 # source which ones are, so espos_start() can call into them without an
 # #include that would fail in a firmware built without them.
+# Namespace-tolerant component checks (espOS #138); guarded against a second
+# include, which project_include.cmake has already done in a normal build.
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/espos_components.cmake")
+
 espos_optional_requires(PRIVATE espos_sk espos_ota espos_ble espos_prov espos_eth espos_power)
 # espos_has_component(), not `IN_LIST BUILD_COMPONENTS`: that list holds target
 # names and the component manager namespaces them on install, so the bare name
 # never matched for a registry install and every stage below silently compiled
 # out (espOS #138). The helper is in project_include.cmake.
-# Namespace-tolerant component checks (espOS #138); guarded against a second
-# include, which project_include.cmake has already done in a normal build.
-include("${CMAKE_CURRENT_LIST_DIR}/cmake/espos_components.cmake")
-
 espos_has_component(_have_wifi espos_wifi)
 if(_have_wifi)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE ESPOS_HAVE_WIFI=1)
