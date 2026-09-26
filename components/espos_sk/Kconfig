@@ -31,8 +31,12 @@ menu "espOS SignalK"
             path it has (espos_sk_http_probe_https and the token legs all go
             through it). A 12 % high-water number measured with the deepest
             path never taken does not justify cutting the stack -- it only says
-            the measurement was incomplete. Reducing it needs the same
-            high-water reading against a TLS server, not this one.
+            the measurement was incomplete.
+
+            Reducing it needs a high-water reading against a TLS server, not
+            that one -- or, in a CONFIG_ESPOS_SK_TLS=n build where sk_tls.c is
+            compiled out and no wss reading is possible, against the busiest
+            http/ws workload that build supports.
 
             Lower it only against your own high-water numbers
             (CONFIG_FREERTOS_USE_TRACE_FACILITY +

@@ -646,10 +646,16 @@ completed on either task — and mbedTLS is the deepest call path both of them
 have. A 12 % high-water reading taken with the deepest path never taken does not
 show the stack is oversized; it shows the measurement was incomplete.
 
-So the numbers above are a floor, not a budget. Lowering either default needs the
-same high-water reading against a `wss` server, where the client task's token
-legs and the stream task's `espos_sk_http_get_meta()` / `put_meta()` calls
-actually go through TLS.
+So the numbers above are a floor, not a budget, and what to measure before
+lowering either default depends on the build:
+
+* **`CONFIG_ESPOS_SK_TLS=y`** (the default) — take the reading against a `wss`
+  server, where the client task's token legs and the stream task's
+  `espos_sk_http_get_meta()` / `put_meta()` calls actually go through mbedTLS.
+* **`CONFIG_ESPOS_SK_TLS=n`** — `sk_tls.c` is compiled out and the device can only
+  speak http/ws, so no wss reading is possible. Measure the busiest workload that
+  build does support instead: a reconnect that replays a full subscription burst
+  and reconciles meta for every published path.
 
 The floors are 6144 on both. 4096 would sit *below* the 5272 B the stream task was
 measured using, and an option whose range lets a build fault on the first large
