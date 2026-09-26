@@ -12,6 +12,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/timers.h"
 #include "esp_event.h"
+#include "wifi_last_ap.h"
+
 #include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_netif.h"
@@ -66,51 +68,13 @@ static char s_ssid[33];     /* of the current association, for the GOT_IP line *
  * espos_power/src/port_idf.c uses. A NVS write per association would be the
  * alternative and is worse: this changes on every roam and NVS has a finite
  * erase budget. */
-#define LAST_AP_MAGIC 0x57494641u /* "WIFA" */
-
-static RTC_NOINIT_ATTR struct {
-    uint32_t magic;
-    char ssid[33];
-    uint8_t bssid[6];
-    uint8_t channel;
-    uint32_t check;
-} s_last_ap;
-
-static uint32_t last_ap_check(const char *ssid, const uint8_t *bssid, uint8_t channel)
-{
-    uint32_t h = LAST_AP_MAGIC ^ ((uint32_t)channel * 2654435761u);
-    for (size_t i = 0; i < 33 && ssid[i]; i++) {
-        h = (h ^ (uint8_t)ssid[i]) * 16777619u;
-    }
-    for (size_t i = 0; i < 6; i++) {
-        h = (h ^ bssid[i]) * 16777619u;
-    }
-    return h + 0x9e3779b9u;
-}
-
-/* Is there a usable remembered AP for this SSID? Checks the magic AND the
- * checksum: uninitialised RTC RAM can hold anything, including a byte pattern
- * that happens to match the magic, and acting on a garbage channel/bssid would
- * cost a failed attempt on every boot. */
-static bool last_ap_valid_for(const char *ssid)
-{
-    if (s_last_ap.magic != LAST_AP_MAGIC) {
-        return false;
-    }
-    if (s_last_ap.check != last_ap_check(s_last_ap.ssid, s_last_ap.bssid, s_last_ap.channel)) {
-        return false;
-    }
-    if (s_last_ap.channel == 0 || s_last_ap.channel > 177) {
-        return false; /* not a channel any band uses */
-    }
-    return strncmp(s_last_ap.ssid, ssid, sizeof(s_last_ap.ssid)) == 0;
-}
+static RTC_NOINIT_ATTR espos_wifi_last_ap_t s_last_ap;
 
 /* How many attempts may use the cached BSSID/channel before falling back to a
  * full scan. Small on purpose: the point is to remove the scan from the retries
  * that follow a handshake miss against an AP that is definitely there, not to
- * keep chasing an AP that has gone. Three covers the reported 1-3 misses while
- * costing at most three fast failures when the AP really has moved. */
+ * keep chasing an AP that has gone. Three covers the 1-3 misses reported in #136
+ * while costing at most three fast failures when the AP really has moved. */
 #define FAST_RECONNECT_ATTEMPTS 3
 
 /* Fast attempts still available before falling back to a full scan. Refilled on
@@ -121,8 +85,8 @@ static bool last_ap_valid_for(const char *ssid)
  * Initialised to the full budget, not 0: after a reboot the remembered AP is in
  * RTC memory but this counter is not, and starting empty would switch the cache
  * off for exactly the fresh-boot case it exists to help. A cold power-on gets the
- * budget too, but then last_ap_valid_for() rejects the uninitialised record and
- * nothing is spent. */
+ * budget too, but then espos_wifi_last_ap_usable() rejects the uninitialised record
+ * and nothing is spent. */
 static uint8_t s_fast_attempts_left = FAST_RECONNECT_ATTEMPTS;
 
 esp_err_t espos_wifi_portal_dns_start(const char *ip);
@@ -148,12 +112,7 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
          * GOT_IP deliberately: the scan this saves happens before auth, so an
          * association that succeeds and then fails DHCP still tells us which
          * channel this AP is on. */
-        memset(s_last_ap.ssid, 0, sizeof(s_last_ap.ssid));
-        memcpy(s_last_ap.ssid, link.ssid, sizeof(s_last_ap.ssid) - 1);
-        memcpy(s_last_ap.bssid, e->bssid, 6);
-        s_last_ap.channel = e->channel;
-        s_last_ap.magic = LAST_AP_MAGIC;
-        s_last_ap.check = last_ap_check(s_last_ap.ssid, s_last_ap.bssid, s_last_ap.channel);
+        espos_wifi_last_ap_store(&s_last_ap, link.ssid, e->bssid, e->channel);
         s_fast_attempts_left = FAST_RECONNECT_ATTEMPTS;
         wifi_ap_record_t ap;
         if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
@@ -342,7 +301,8 @@ static esp_err_t p_connect(void *ctx, const espos_wifi_net_t *net)
          * cache must not widen or narrow it. */
         cfg.sta.bssid_set = true;
         memcpy(cfg.sta.bssid, net->bssid, 6);
-    } else if (s_fast_attempts_left > 0 && last_ap_valid_for(net->ssid)) {
+    } else if (espos_wifi_last_ap_usable(&s_last_ap, net->ssid, s_fast_attempts_left,
+                                         net->has_bssid)) {
         /* Go straight back to the AP we were last associated with on this SSID.
          * Channel AND bssid: the channel is what removes the scan, the bssid is
          * what stops WIFI_FAST_SCAN settling for a different AP in the same ESS
