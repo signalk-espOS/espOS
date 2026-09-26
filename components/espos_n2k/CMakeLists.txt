@@ -30,4 +30,10 @@ idf_component_register(
 # dependency is what puts espos_httpd's headers on the include path when it
 # IS in the build -- without it __has_include answers no even though the
 # component is present.
+# Namespace-tolerant component checks (espOS #138). Its own copy, because a
+# component installed from the registry cannot reach a sibling's directory,
+# and this component does not require espos_core. The file guards against
+# being included twice.
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/espos_components.cmake")
+
 espos_optional_requires(PRIVATE espos_httpd espressif__cjson)

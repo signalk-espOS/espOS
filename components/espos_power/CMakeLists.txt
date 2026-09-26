@@ -26,6 +26,12 @@ idf_component_register(
 
 # With SignalK in the build the cycle waits for the stream and flushes it
 # before sleeping; without it, the network being up is what a wake waits for.
+# Namespace-tolerant component checks (espOS #138). Its own copy, because a
+# component installed from the registry cannot reach a sibling's directory,
+# and this component does not require espos_core. The file guards against
+# being included twice.
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/espos_components.cmake")
+
 espos_optional_requires(PRIVATE espos_sk espos_ota)
 espos_has_component(_have_sk espos_sk)
 if(_have_sk)

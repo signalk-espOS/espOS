@@ -44,6 +44,12 @@ idf_component_register(
 # Linked only when the firmware also builds espos_health; the source guards
 # the call with CONFIG_ESPOS_FLOW_HEALTH, which a firmware without the
 # component turns off.
+# Namespace-tolerant component checks (espOS #138). Its own copy, because a
+# component installed from the registry cannot reach a sibling's directory,
+# and this component does not require espos_core. The file guards against
+# being included twice.
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/espos_components.cmake")
+
 espos_optional_requires(PRIVATE espos_health)
 
 # GET /api/v1/flow is worth having and not worth requiring: a firmware with

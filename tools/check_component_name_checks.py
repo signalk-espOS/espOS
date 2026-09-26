@@ -25,17 +25,20 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 # `if(espos_foo IN_LIST <anything>)` -- the variable name varies (comps, _comps).
-BARE = re.compile(r"\b(espos_[a-z0-9_]+)\s+IN_LIST\b")
+# \s+ spans newlines, because CMake allows the condition to wrap and a check
+# split across two lines is the same bug.
+BARE = re.compile(r"\b(espos_[a-z0-9_]+)\s+IN_LIST\b", re.S)
 
 def main() -> int:
     bad = []
     for f in sorted(ROOT.glob("components/*/CMakeLists.txt")):
-        for n, line in enumerate(f.read_text().splitlines(), 1):
-            if line.lstrip().startswith("#"):
-                continue
-            m = BARE.search(line)
-            if m:
-                bad.append((f.relative_to(ROOT), n, m.group(1), line.strip()))
+        # Strip comments first, then scan the whole file: a wrapped condition
+        # would slip past a line-at-a-time scan.
+        lines = f.read_text().splitlines()
+        stripped = "\n".join("" if l.lstrip().startswith("#") else l for l in lines)
+        for m in BARE.finditer(stripped):
+            n = stripped.count("\n", 0, m.start()) + 1
+            bad.append((f.relative_to(ROOT), n, m.group(1), lines[n - 1].strip()))
 
     if bad:
         print("error: bare espOS component name tested against a target list.")

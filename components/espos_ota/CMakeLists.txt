@@ -20,6 +20,12 @@ idf_component_register(
 # configured at all, so confirm a new image after a grace period rather than
 # roll back — is asked only when espos_wifi is in the build. Optional, so a
 # firmware without WiFi (Ethernet, the H-series) links OTA unchanged.
+# Namespace-tolerant component checks (espOS #138). Its own copy, because a
+# component installed from the registry cannot reach a sibling's directory,
+# and this component does not require espos_core. The file guards against
+# being included twice.
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/espos_components.cmake")
+
 espos_optional_requires(PRIVATE espos_wifi)
 # espos_has_component(), not `IN_LIST BUILD_COMPONENTS` -- see espOS #138: that
 # list holds namespaced target names for a registry install, so the bare name
