@@ -59,12 +59,18 @@ first makes the headroom look twice what a TLS handshake can actually reach.
 
 ### Why the usual escapes do not apply
 
-* **PSRAM does not fix it.** These modules carry 8 MB, which a default build leaves
-  switched off (`CONFIG_SPIRAM`), and enabling it *is* what lets the controller
-  start at all — `esp_bt_controller_init()` needs ~24 KB in one contiguous block.
-  But the remaining consumers are task stacks and DMA buffers, and neither can live
-  in external RAM. Note also that `CONFIG_SPIRAM` is a bootloader-level setting, so
-  turning it on means a USB flash per device rather than an OTA.
+* **PSRAM does not fix it, in this configuration.** These modules carry 8 MB, which
+  a default build leaves switched off (`CONFIG_SPIRAM`), and enabling it *is* what
+  lets the controller start at all — `esp_bt_controller_init()` needs ~24 KB in one
+  contiguous block. What remains after that is task stacks and radio/WiFi DMA
+  buffers, and as the gateway is built they come from internal RAM: the DMA buffers
+  because PSRAM cannot serve DMA here, and the stacks because `xTaskCreate()`
+  allocates them internally. IDF 6 can place a stack in PSRAM
+  (`CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM`), but only for a stack passed to
+  `xTaskCreateStatic()` and only where it is never touched while the cache is
+  disabled — which is not how espOS, Bluedroid or the WiFi driver create theirs, so
+  it is a porting exercise rather than a setting. Note also that `CONFIG_SPIRAM` is
+  bootloader-level, so turning it on means a USB flash per device rather than an OTA.
 * **`CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y` makes it worse, not better.** It is
   the one option that would move the largest single block (38 KB of WiFi and lwIP
   buffers) out of internal RAM, and with it the station never associates at all:

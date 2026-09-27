@@ -69,15 +69,15 @@ recorded here because it is the kind of thing that reads as a hardware fault.
 | Board | Radio | Status |
 |---|---|---|
 | Waveshare ESP32-P4 (+ ESP32-C6 over SDIO) | HCI at the C6 via esp_hosted | **in daily use**: two gateways, 4.3 M and 41 M advertisements forwarded |
-| ESP32 / C3 / S3 / C6 | native Bluedroid | builds; not run |
+| ESP32 / C3 / S3 / C6 | native Bluedroid | buildable, not verified on hardware |
 | **ESP32-C5** | native Bluedroid | **does not work — do not buy one for this** |
 
 **The ESP32-C5 cannot run this gateway.** It builds and it scans, and then the
 board reboots after about 30 seconds: BLE plus WiFi plus the SignalK client comes
 to ~157 KB of the ~172 KB of internal RAM free at `app_main`, the HTTP posts start
 failing, and the health watchdog restarts it. Its 8 MB of PSRAM does not rescue it
-— what is left is task stacks and DMA buffers, neither of which can live in
-external RAM. The
+— what is left is task stacks and radio DMA buffers, which as this firmware is
+built come from internal RAM. The
 per-stage measurements are in
 [hardware.md](../../../../docs/hardware.md#the-esp32-c5-cannot-host-the-ble-gateway).
 A C5 is a capable WiFi/SignalK board; it is not a BLE bridge.
