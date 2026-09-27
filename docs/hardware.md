@@ -18,7 +18,7 @@ with peripherals for `esp32p4` too.
 | `esp32c3` | in CI | RISC-V, single core, the smallest. Native radio. |
 | `esp32c6` | in CI | RISC-V, WiFi 6, native radio. The target the getting-started guide and the examples use. |
 | `esp32p4` | in CI, in daily use | **No radio of its own.** WiFi and BLE come from an ESP32-C6 co-processor over SDIO (below). PSRAM; internal RAM is the scarce pool ([health](health.md)). Rev 1.x silicon allowed. |
-| `esp32c5` | in CI | RISC-V, native radio, same shape as the C6. The target [BLE provisioning](provisioning.md) was verified on end to end, which is also why it has a BLE 5.0 radio worth knowing about: protocomm still advertises with the 4.2 API, so a build with `espos_prov` asks for `BT_BLE_42_FEATURES_SUPPORTED`. **Not a BLE gateway board** — it cannot run the BLE stack alongside WiFi and the SignalK client at once ([below](#the-esp32-c5-cannot-host-the-ble-gateway)). |
+| `esp32c5` | in CI | RISC-V, native radio, same shape as the C6. [BLE provisioning](provisioning.md) was verified end to end on this target. Its radio is BLE 5.0, which is worth knowing because protocomm still advertises with the 4.2 API: a build with `espos_prov` asks for `BT_BLE_42_FEATURES_SUPPORTED`. **Not a BLE gateway board** — it cannot run the BLE stack alongside WiFi and the SignalK client at once ([below](#the-esp32-c5-cannot-host-the-ble-gateway)). |
 | `esp32c61` | later | Same shape as the C6; waiting for hardware on the bench and a CI slot. |
 | `esp32h2`, `esp32h4` | not planned as such | No WiFi radio (BLE + 802.15.4 only). The runtime no longer assumes WiFi -- [`espos_net`](net.md) is the seam and a headless esp32h2 build is a CI gate -- so what these still need is a transport (Thread, or Ethernet on a board that has it). |
 
@@ -69,9 +69,10 @@ first makes the headroom look twice what a TLS handshake can actually reach.
   a default build leaves switched off (`CONFIG_SPIRAM`), and enabling it *is* what
   lets the controller start at all — `esp_bt_controller_init()` needs ~24 KB in one
   contiguous block. What remains after that is task stacks and radio/WiFi DMA
-  buffers, and as the gateway is built they come from internal RAM: the DMA buffers
-  because PSRAM cannot serve DMA here, and the stacks because `xTaskCreate()`
-  allocates them internally. IDF 6 can place a stack in PSRAM
+  buffers, and as the gateway is built they come from internal RAM: the radio's
+  buffers because the WiFi and BLE drivers require internal memory for them on this
+  part, and the stacks because `xTaskCreate()` allocates them internally. IDF 6 can
+  place a stack in PSRAM
   (`CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM`), but only for a stack passed to
   `xTaskCreateStatic()` and only where it is never touched while the cache is
   disabled — which is not how espOS, Bluedroid or the WiFi driver create theirs, so
