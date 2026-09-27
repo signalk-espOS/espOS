@@ -185,10 +185,8 @@ I espos_skws: notification tlsMemory: warn (largest free internal block 5 KB,
 
 Where a module has PSRAM, that is the answer rather than reordering — the C5
 modules carry an 8 MB die (`Found 8MB PSRAM device`) that a default build leaves
-switched off. Note that `CONFIG_SPIRAM` changes the bootloader, so enabling it
-means one USB flash per device and cannot be rolled out over OTA, and on C5
-rev v1.0 IDF warns PSRAM contents are not encrypted, so TLS buffers should stay
-in internal RAM.
+switched off. Note that on C5 rev v1.0 IDF warns PSRAM contents are not
+encrypted, so TLS buffers should stay in internal RAM.
 
 ## Status and troubleshooting
 

@@ -46,6 +46,12 @@ of `espos_start()`:
 | **BLE (Bluedroid host + controller)** | **58.2 KB** |
 | **total** | **157.0 KB of the 171.5 KB free at `app_main`** |
 
+Which end it fails at depends on PSRAM, and both are dead. **Without** it the BLE
+controller never starts — `r_ble_controller_init failed 257`, which is
+`ESP_ERR_NO_MEM`, because it needs ~24 KB in one contiguous block and the largest is
+~15 KB; WiFi and Signal K keep running, so the device is useful as a WiFi node with
+no BLE. **With** it the controller starts and the budget above applies instead.
+
 That leaves **14.5 KB**, and of it only **7.3 KB** is DMA-capable — the pool sockets
 and a TLS handshake draw from. So the HTTP posts the gateway depends on start
 failing, and the [health watchdog](health.md) restarts the board; it alarms below
@@ -69,8 +75,10 @@ first makes the headroom look twice what a TLS handshake can actually reach.
   (`CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM`), but only for a stack passed to
   `xTaskCreateStatic()` and only where it is never touched while the cache is
   disabled — which is not how espOS, Bluedroid or the WiFi driver create theirs, so
-  it is a porting exercise rather than a setting. Note also that `CONFIG_SPIRAM` is
-  bootloader-level, so turning it on means a USB flash per device rather than an OTA.
+  it is a porting exercise rather than a setting. (`CONFIG_SPIRAM` itself is not a
+  bootloader change on this part — `esp_psram_init()` runs from `cpu_start.c` during
+  application startup, after the app is loaded — so enabling it ships by OTA like
+  any other build.)
 * **`CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y` makes it worse, not better.** It is
   the one option that would move the largest single block (38 KB of WiFi and lwIP
   buffers) out of internal RAM, and with it the station never associates at all:
