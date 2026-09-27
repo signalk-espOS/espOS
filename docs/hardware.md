@@ -83,8 +83,11 @@ first makes the headroom look twice what a TLS handshake can actually reach.
 * **`CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y` makes it worse, not better.** It is
   the one option that would move the largest single block (38 KB of WiFi and lwIP
   buffers) out of internal RAM, and with it the station never associates at all:
-  `connecting to '<ssid>'`, then reason 36 every ~21 s, indefinitely. Those buffers
-  are DMA targets and PSRAM cannot serve DMA on this part.
+  `connecting to '<ssid>'`, then reason 36 every ~21 s, indefinitely. The
+  association failure is measured; the reason is not — the likeliest explanation is
+  that the driver needs those buffers in internal memory, but nothing here proves
+  that, so treat the option as known-broken on this part rather than as evidence
+  about PSRAM in general.
 * **Shrinking what is left buys single-digit KB**, against a 40 KB shortfall, and
   each candidate is a real capability: the WiFi buffers are already capped, TLS
   needs 24 KB contiguous for a handshake, and the GATT client is the gateway's
