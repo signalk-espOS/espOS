@@ -52,16 +52,21 @@ controller never starts — `r_ble_controller_init failed 257`, which is
 ~15 KB; WiFi and Signal K keep running, so the device is useful as a WiFi node with
 no BLE. **With** it the controller starts and the budget above applies instead.
 
-That leaves **14.5 KB**, and of it only **7.3 KB** is DMA-capable — the pool sockets
-and a TLS handshake draw from. So the HTTP posts the gateway depends on start
-failing, and the [health watchdog](health.md) restarts the board; it alarms below
-12 KB, with good reason. The failure is not subtle: a device that scans happily for
-about 30 seconds and then reboots, repeatedly.
+That leaves **14.5 KB** of internal 8-bit RAM, of which **7.3 KB** is also
+DMA-capable. Both numbers matter, for different consumers:
 
-Both figures are worth quoting because they are different pools:
-`heap_caps_get_free_size()` over `MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT` gives the
-14.5 KB, and the same call over `MALLOC_CAP_DMA` gives 7.3 KB. Quoting only the
-first makes the headroom look twice what a TLS handshake can actually reach.
+* **14.5 KB** (`MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT`) is what TLS draws from —
+  mbedTLS's allocator asks for exactly those caps, and it is the pool espOS's own
+  handshake pre-flight measures (`CONFIG_ESPOS_SK_TLS_MIN_FREE_BLOCK_KB`, 24 KB).
+  With 14.5 KB free and a largest block well under that, a handshake is refused
+  before it is attempted.
+* **7.3 KB** (`MALLOC_CAP_DMA`) is the subset left for what genuinely needs DMA —
+  the radio and the network driver.
+
+Either way the gateway's HTTP posts start failing and the
+[health watchdog](health.md) restarts the board; it alarms below 12 KB, with good
+reason. The failure is not subtle: a device that scans happily for about 30 seconds
+and then reboots, repeatedly.
 
 ### Why the usual escapes do not apply
 
