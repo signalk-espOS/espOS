@@ -51,11 +51,18 @@ static char s_ssid[33];     /* of the current association, for the GOT_IP line *
  *
  * This is a CACHE, not a pin. espos_wifi_net_t.has_bssid is the pin -- an
  * operator saying "only ever this BSSID" -- and it must keep meaning that, so it
- * takes precedence and is never overwritten from here. The cache is a hint that
- * is allowed to be wrong: if the AP moved channel, was replaced, or the device
- * was carried to a different one with the same SSID, the fast attempt fails and
- * the fall-back full scan finds it. Hence the attempt budget below rather than
- * trusting it indefinitely.
+ * takes precedence and is never overwritten from here.
+ *
+ * The cache is allowed to be wrong, and a wrong channel costs time rather than an
+ * attempt: wifi_sta_config_t.channel is documented as a HINT -- "scan starting
+ * from the specified channel" -- so the driver orders its scan and still finds
+ * the AP wherever it actually is. Measured downstream on hardware (espOS #136):
+ * with the cache naming channel 1 and the AP moved to 6 and then to 11, both
+ * connected on the FIRST attempt in 0.81-1.64 s, still under the ~2.41 s a full
+ * scan costs. So the attempt budget below is not the mechanism that recovers a
+ * moved AP -- the driver does that by itself -- it bounds how long a cache that
+ * has gone stale for some OTHER reason (the AP replaced, the device carried to a
+ * different one on the same SSID) keeps being preferred.
  *
  * Kept per SSID: reconnecting to a DIFFERENT network in the list must not reuse
  * another network's BSSID, which would pin the wrong AP entirely.
