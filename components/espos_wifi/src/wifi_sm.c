@@ -104,6 +104,37 @@ static void portal_policy(espos_wifi_sm_t *sm)
     }
     uint32_t due = sm->st.disconnected_since_ms + sm->cfg.portal_after_ms;
     if ((int32_t)(now(sm) - due) >= 0) {
+        /* Not while an association is in flight. Raising the portal switches the
+         * radio to AP+STA, and a switch landing INSIDE an attempt is measurably
+         * worse than one between attempts: on an ESP32-S3 against an AP that
+         * already misses the occasional handshake, a portal settled beforehand
+         * connected first try three times out of three, while the deadline
+         * elapsing mid-attempt preceded a ~9 minute stall, every failed attempt
+         * logging an APSTA profile renegotiation the portal-closed run never did
+         * (espOS #144, measured downstream).
+         *
+         * Deferring costs at most the remainder of this attempt, because the
+         * deadline is folded into the timer that is already armed for it (see
+         * arm()): the attempt resolves, portal_policy() runs again from BACKOFF
+         * or from the disconnected path, and `due` is long past, so the portal
+         * comes up then. The deferral is bounded by the attempt rather than by
+         * success, so a device that never connects still gets its portal.
+         *
+         * OBTAINING_IP is deliberately NOT deferred: the association is done, so
+         * a mode switch cannot disturb it, and a device stuck waiting on DHCP is
+         * exactly one an operator needs the portal to reach. */
+        if (sm->connect_in_flight) {
+            /* Clear the deadline rather than keep it pending. Leaving a PAST-DUE
+             * deadline set makes arm() fold it to a 1 ms timer, which fires,
+             * defers here again, re-arms at 1 ms -- a busy loop for the rest of
+             * the attempt. Nothing is lost by clearing it: every path out of
+             * CONNECTING (association, failure, timeout) calls portal_policy()
+             * again, and `due` is computed from disconnected_since_ms, which does
+             * not move while we are still disconnected -- so it is already past
+             * and the portal comes up immediately then. */
+            sm->portal_due_ms = 0;
+            return;
+        }
         portal_up(sm);
     } else {
         sm->portal_due_ms = due ? due : 1;
@@ -190,6 +221,7 @@ static void start_attempt(espos_wifi_sm_t *sm)
         espos_wifi_sm_event(sm, ESPOS_WIFI_EV_STA_DISCONNECTED, &(int) { ESPOS_WIFI_REASON_CONNECT_TIMEOUT });
         return;
     }
+    sm->connect_in_flight = true;
     portal_policy(sm);
     arm(sm, sm->cfg.connect_timeout_ms, false);
     notify(sm);
@@ -201,6 +233,7 @@ static void start_attempt(espos_wifi_sm_t *sm)
 static void attempt_failed(espos_wifi_sm_t *sm, int reason)
 {
     sm->st.reason = reason;
+    sm->connect_in_flight = false;
     if (sm->st.state == ESPOS_WIFI_ST_CONNECTED) {
         sm->st.disconnect_count++;
         sm->st.disconnected_since_ms = now(sm);
@@ -210,6 +243,16 @@ static void attempt_failed(espos_wifi_sm_t *sm, int reason)
     int next = sm->st.net_index + 1;
     if ((size_t)next < sm->cfg.net_count) {
         sm->st.net_index = next;
+        /* Between networks is the only gap in a round, and the portal deadline has
+         * to be honoured in it -- otherwise a device with several configured
+         * networks defers through EVERY attempt of the round, making the deferral
+         * bounded by the round rather than by one attempt.
+         *
+         * The flag, not the state: attempt_failed() does not change state, so it is
+         * still CONNECTING here even though no association is in flight. Inferring
+         * "in flight" from the state was wrong for exactly this gap. */
+        sm->connect_in_flight = false;
+        portal_policy(sm);
         start_attempt(sm);
         return;
     }
@@ -410,7 +453,14 @@ void espos_wifi_sm_event(espos_wifi_sm_t *sm, espos_wifi_event_t ev, const void 
         if (arg) {
             sm->st.link = *(const espos_wifi_link_t *)arg;
         }
+        sm->connect_in_flight = false;
         set_state(sm, ESPOS_WIFI_ST_OBTAINING_IP);
+        /* Re-evaluate before arming: the association we deferred the portal for has
+         * just finished, so a deadline that elapsed during it is due NOW. Without
+         * this the portal stays deferred through the whole DHCP wait -- which is
+         * the opposite of what OBTAINING_IP is supposed to mean here, and leaves a
+         * device stuck on DHCP unreachable for dhcp_timeout_ms. */
+        portal_policy(sm);
         arm(sm, sm->cfg.dhcp_timeout_ms, true);
         notify(sm);
         return;

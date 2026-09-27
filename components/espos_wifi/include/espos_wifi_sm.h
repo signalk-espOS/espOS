@@ -129,6 +129,16 @@ typedef struct espos_wifi_sm {
     uint32_t portal_due_ms;      /* when the portal should come up (0 = not scheduled) */
     uint32_t state_due_ms;       /* deadline of the armed state timeout (0 = none) */
     uint32_t timer_due_ms;       /* deadline of the armed timer (0 = none); early fires are stale */
+    /* An esp_wifi_connect() is outstanding. Distinct from state == CONNECTING,
+     * which stays set between the attempts of a round: the portal must not be
+     * raised inside an association (espOS #144) but must be raised in the gap
+     * between two of them.
+     *
+     * Appended rather than inserted: a mid-struct field shifts every later
+     * member's offset, so a caller built against the old header reads the wrong
+     * ones. Appending changes only sizeof -- still an ABI break, hence the bump,
+     * but the narrower kind. */
+    bool connect_in_flight;
 } espos_wifi_sm_t;
 
 void espos_wifi_sm_init(espos_wifi_sm_t *sm, const espos_wifi_port_t *port, void *port_ctx,

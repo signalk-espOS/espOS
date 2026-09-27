@@ -17,6 +17,9 @@ static struct {
     bool timer_armed;
     uint32_t timer_due;
     int connects, disconnects, portal_starts, portal_stops, notifies;
+    /* Timer arms, so a test can catch a deferral that re-arms in a tight
+     * loop rather than waiting for the attempt (espOS #144). */
+    int arms;
     char last_ssid[33];
     bool last_has_bssid;
     uint32_t rnd;
@@ -54,6 +57,7 @@ static void f_arm(void *ctx, uint32_t ms)
     (void)ctx;
     F.timer_armed = true;
     F.timer_due = F.now + ms;
+    F.arms++;
 }
 static void f_cancel(void *ctx)
 {
@@ -361,6 +365,133 @@ TEST_CASE("portal comes up after portal_after without a connection, alongside re
     ev_connected("Boat");
     ev_got_ip();
     TEST_ASSERT_FALSE(ST()->portal_active);
+}
+
+TEST_CASE("the portal is not raised while an association is in flight", "[wifi_sm]")
+{
+    /* The deadline elapsing DURING an attempt is the case that matters: raising
+     * the portal then switches the radio to AP+STA mid-association, which on real
+     * hardware preceded a ~9 minute stall where a portal settled beforehand
+     * connected first try (espOS #144). */
+    espos_wifi_cfg_t c = cfg_with("Boat", NULL);
+    c.portal_after_ms = 5000;
+    c.connect_timeout_ms = 20000;   /* longer than the portal deadline, on purpose */
+    reset(&c);
+    espos_wifi_sm_event(&SM, ESPOS_WIFI_EV_START, NULL);
+    TEST_ASSERT_EQUAL(ESPOS_WIFI_ST_CONNECTING, ST()->state);
+
+    /* Sit in CONNECTING past the portal deadline without answering. */
+    tick(9000);
+    TEST_ASSERT_EQUAL(ESPOS_WIFI_ST_CONNECTING, ST()->state);
+    TEST_ASSERT_FALSE_MESSAGE(ST()->portal_active,
+                              "portal must not come up mid-association");
+    TEST_ASSERT_EQUAL_MESSAGE(0, F.portal_starts,
+                              "not even started and stopped again");
+}
+
+TEST_CASE("with several networks the portal is not deferred across the whole round", "[wifi_sm]")
+{
+    /* attempt_failed() moves straight to the next network without passing through
+     * backoff, so that gap is the only chance to honour the deadline in a round.
+     * Miss it and the deferral is bounded by the ROUND, not by one attempt. */
+    espos_wifi_cfg_t c = cfg_with("BoatA", "BoatB");
+    c.portal_after_ms = 5000;
+    c.connect_timeout_ms = 20000;
+    reset(&c);
+    espos_wifi_sm_event(&SM, ESPOS_WIFI_EV_START, NULL);
+    tick(9000);                             /* past the deadline, attempt 1 in flight */
+    TEST_ASSERT_FALSE(ST()->portal_active);
+
+    ev_disconnected(201);                   /* attempt 1 fails -> straight to BoatB */
+    TEST_ASSERT_EQUAL(ESPOS_WIFI_ST_CONNECTING, ST()->state);
+    TEST_ASSERT_EQUAL(1, ST()->net_index);
+    TEST_ASSERT_TRUE_MESSAGE(ST()->portal_active,
+                             "the gap between networks must honour the deadline");
+}
+
+TEST_CASE("a deferred portal comes up as soon as the attempt resolves", "[wifi_sm]")
+{
+    /* Deferral must be bounded by the ATTEMPT, not by success: a device that never
+     * connects still has to get its portal. */
+    espos_wifi_cfg_t c = cfg_with("Boat", NULL);
+    c.portal_after_ms = 5000;
+    c.connect_timeout_ms = 20000;
+    reset(&c);
+    espos_wifi_sm_event(&SM, ESPOS_WIFI_EV_START, NULL);
+    tick(9000);
+    TEST_ASSERT_FALSE(ST()->portal_active);
+
+    /* The attempt fails; the deadline is long past, so the portal is due now. */
+    ev_disconnected(201);
+    TEST_ASSERT_TRUE_MESSAGE(ST()->portal_active,
+                             "portal should come up the moment the attempt ends");
+}
+
+TEST_CASE("deferring does not spin the timer", "[wifi_sm]")
+{
+    /* A past-due deadline left pending makes arm() fold it to a 1 ms timer, which
+     * fires, defers, re-arms -- a busy loop for the whole attempt. Counting timer
+     * arms over a long stay in CONNECTING is what catches that. */
+    espos_wifi_cfg_t c = cfg_with("Boat", NULL);
+    c.portal_after_ms = 1000;
+    c.connect_timeout_ms = 30000;
+    reset(&c);
+    espos_wifi_sm_event(&SM, ESPOS_WIFI_EV_START, NULL);
+    const int max_rearms = 10;
+    int arms_before = F.arms;
+    /* Successive expiries, not one long tick: a single tick() fires the timer at
+     * most once, so a 1 ms re-arm loop would sail past it. Walk the clock in small
+     * steps and stop as soon as the arm count says the loop is back, so a
+     * regression fails fast rather than running to the loop bound. */
+    for (int i = 0; i < 200 && (F.arms - arms_before) <= max_rearms; i++) {
+        tick(100);
+        if (ST()->state != ESPOS_WIFI_ST_CONNECTING) break;
+    }
+    TEST_ASSERT_EQUAL(ESPOS_WIFI_ST_CONNECTING, ST()->state);
+    TEST_ASSERT_FALSE(ST()->portal_active);
+    TEST_ASSERT_TRUE_MESSAGE(F.arms - arms_before <= max_rearms,
+                             "timer re-armed repeatedly: the deferral is spinning");
+}
+
+TEST_CASE("a portal deferred through the attempt comes up once DHCP starts", "[wifi_sm]")
+{
+    /* The deadline elapsed while associating, so it is due the moment the
+     * association finishes -- not dhcp_timeout_ms later. A device that associates
+     * but cannot get a lease is one an operator needs to reach. */
+    espos_wifi_cfg_t c = cfg_with("Boat", NULL);
+    c.portal_after_ms = 3000;
+    c.connect_timeout_ms = 20000;
+    c.dhcp_timeout_ms = 30000;
+    reset(&c);
+    espos_wifi_sm_event(&SM, ESPOS_WIFI_EV_START, NULL);
+    tick(6000);                                   /* past the deadline, still associating */
+    TEST_ASSERT_EQUAL(ESPOS_WIFI_ST_CONNECTING, ST()->state);
+    TEST_ASSERT_FALSE(ST()->portal_active);        /* deferred */
+
+    ev_connected("Boat");                          /* association done, DHCP begins */
+    TEST_ASSERT_EQUAL(ESPOS_WIFI_ST_OBTAINING_IP, ST()->state);
+    TEST_ASSERT_TRUE_MESSAGE(ST()->portal_active,
+                             "a portal deferred during the attempt is due once it ends");
+
+    ev_got_ip();                                   /* and goes away on success */
+    TEST_ASSERT_FALSE(ST()->portal_active);
+}
+
+TEST_CASE("obtaining_ip does not defer the portal", "[wifi_sm]")
+{
+    /* The association is done by then, so a mode switch cannot disturb it -- and a
+     * device stuck on DHCP is exactly one an operator needs the portal to reach. */
+    espos_wifi_cfg_t c = cfg_with("Boat", NULL);
+    c.portal_after_ms = 3000;
+    c.dhcp_timeout_ms = 30000;
+    reset(&c);
+    espos_wifi_sm_event(&SM, ESPOS_WIFI_EV_START, NULL);
+    ev_connected("Boat");
+    TEST_ASSERT_EQUAL(ESPOS_WIFI_ST_OBTAINING_IP, ST()->state);
+    tick(6000);
+    TEST_ASSERT_EQUAL(ESPOS_WIFI_ST_OBTAINING_IP, ST()->state);
+    TEST_ASSERT_TRUE_MESSAGE(ST()->portal_active,
+                             "portal should still be raised while waiting for DHCP");
 }
 
 TEST_CASE("portal disabled: never started", "[wifi_sm]")
