@@ -123,7 +123,7 @@ static void portal_policy(espos_wifi_sm_t *sm)
          * OBTAINING_IP is deliberately NOT deferred: the association is done, so
          * a mode switch cannot disturb it, and a device stuck waiting on DHCP is
          * exactly one an operator needs the portal to reach. */
-        if (sm->st.state == ESPOS_WIFI_ST_CONNECTING) {
+        if (sm->connect_in_flight) {
             /* Clear the deadline rather than keep it pending. Leaving a PAST-DUE
              * deadline set makes arm() fold it to a 1 ms timer, which fires,
              * defers here again, re-arms at 1 ms -- a busy loop for the rest of
@@ -221,6 +221,7 @@ static void start_attempt(espos_wifi_sm_t *sm)
         espos_wifi_sm_event(sm, ESPOS_WIFI_EV_STA_DISCONNECTED, &(int) { ESPOS_WIFI_REASON_CONNECT_TIMEOUT });
         return;
     }
+    sm->connect_in_flight = true;
     portal_policy(sm);
     arm(sm, sm->cfg.connect_timeout_ms, false);
     notify(sm);
@@ -232,6 +233,7 @@ static void start_attempt(espos_wifi_sm_t *sm)
 static void attempt_failed(espos_wifi_sm_t *sm, int reason)
 {
     sm->st.reason = reason;
+    sm->connect_in_flight = false;
     if (sm->st.state == ESPOS_WIFI_ST_CONNECTED) {
         sm->st.disconnect_count++;
         sm->st.disconnected_since_ms = now(sm);
@@ -241,6 +243,16 @@ static void attempt_failed(espos_wifi_sm_t *sm, int reason)
     int next = sm->st.net_index + 1;
     if ((size_t)next < sm->cfg.net_count) {
         sm->st.net_index = next;
+        /* Between networks is the only gap in a round, and the portal deadline has
+         * to be honoured in it -- otherwise a device with several configured
+         * networks defers through EVERY attempt of the round, making the deferral
+         * bounded by the round rather than by one attempt.
+         *
+         * The flag, not the state: attempt_failed() does not change state, so it is
+         * still CONNECTING here even though no association is in flight. Inferring
+         * "in flight" from the state was wrong for exactly this gap. */
+        sm->connect_in_flight = false;
+        portal_policy(sm);
         start_attempt(sm);
         return;
     }
@@ -441,6 +453,7 @@ void espos_wifi_sm_event(espos_wifi_sm_t *sm, espos_wifi_event_t ev, const void 
         if (arg) {
             sm->st.link = *(const espos_wifi_link_t *)arg;
         }
+        sm->connect_in_flight = false;
         set_state(sm, ESPOS_WIFI_ST_OBTAINING_IP);
         /* Re-evaluate before arming: the association we deferred the portal for has
          * just finished, so a deadline that elapsed during it is due NOW. Without

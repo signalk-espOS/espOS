@@ -127,6 +127,11 @@ typedef struct espos_wifi_sm {
     bool timer_is_dhcp;          /* which timeout the armed timer represents */
     bool timer_is_portal;
     uint32_t portal_due_ms;      /* when the portal should come up (0 = not scheduled) */
+    /* An esp_wifi_connect() is outstanding. Distinct from state == CONNECTING,
+     * which stays set between the attempts of a round: the portal must not be
+     * raised inside an association (espOS #144) but must be raised in the gap
+     * between two of them. */
+    bool connect_in_flight;
     uint32_t state_due_ms;       /* deadline of the armed state timeout (0 = none) */
     uint32_t timer_due_ms;       /* deadline of the armed timer (0 = none); early fires are stale */
 } espos_wifi_sm_t;

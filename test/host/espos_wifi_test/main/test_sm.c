@@ -389,6 +389,26 @@ TEST_CASE("the portal is not raised while an association is in flight", "[wifi_s
                               "not even started and stopped again");
 }
 
+TEST_CASE("with several networks the portal is not deferred across the whole round", "[wifi_sm]")
+{
+    /* attempt_failed() moves straight to the next network without passing through
+     * backoff, so that gap is the only chance to honour the deadline in a round.
+     * Miss it and the deferral is bounded by the ROUND, not by one attempt. */
+    espos_wifi_cfg_t c = cfg_with("BoatA", "BoatB");
+    c.portal_after_ms = 5000;
+    c.connect_timeout_ms = 20000;
+    reset(&c);
+    espos_wifi_sm_event(&SM, ESPOS_WIFI_EV_START, NULL);
+    tick(9000);                             /* past the deadline, attempt 1 in flight */
+    TEST_ASSERT_FALSE(ST()->portal_active);
+
+    ev_disconnected(201);                   /* attempt 1 fails -> straight to BoatB */
+    TEST_ASSERT_EQUAL(ESPOS_WIFI_ST_CONNECTING, ST()->state);
+    TEST_ASSERT_EQUAL(1, ST()->net_index);
+    TEST_ASSERT_TRUE_MESSAGE(ST()->portal_active,
+                             "the gap between networks must honour the deadline");
+}
+
 TEST_CASE("a deferred portal comes up as soon as the attempt resolves", "[wifi_sm]")
 {
     /* Deferral must be bounded by the ATTEMPT, not by success: a device that never
