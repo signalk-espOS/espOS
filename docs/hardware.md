@@ -38,23 +38,24 @@ of `espos_start()`:
 
 | stage | internal RAM |
 |---|---|
-| HTTP server + `espos_net` | ~31 KB |
-| WiFi station | 38 KB |
-| SignalK client | 22 KB |
-| OTA | 10 KB |
-| **BLE (Bluedroid host + controller)** | **51 KB** |
-| **total** | **~152 KB of ~176 KB** |
+| HTTP server | 25.2 KB |
+| `espos_net` | 5.4 KB |
+| WiFi station | 37.5 KB |
+| SignalK client | 21.2 KB |
+| OTA | 9.6 KB |
+| **BLE (Bluedroid host + controller)** | **58.2 KB** |
+| **total** | **157.0 KB of the 171.5 KB free at `app_main`** |
 
-That leaves **14.8 KB** of internal RAM free — and of that, only **7.3 KB** is
-DMA-capable, which is the pool sockets and TLS draw from. So the HTTP requests the
-gateway needs start failing, and the [health watchdog](health.md) restarts the board
-(it alarms below 12 KB free, with good reason). The failure is not subtle: a device
-that scans happily for 30 seconds and then reboots, repeatedly.
+That leaves **14.5 KB**, and of it only **7.3 KB** is DMA-capable — the pool sockets
+and a TLS handshake draw from. So the HTTP posts the gateway depends on start
+failing, and the [health watchdog](health.md) restarts the board; it alarms below
+12 KB, with good reason. The failure is not subtle: a device that scans happily for
+about 30 seconds and then reboots, repeatedly.
 
-Both figures matter and they are different pools. `heap_caps_get_free_size()` over
-`MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT` is the 14.8 KB; the same call over
-`MALLOC_CAP_DMA` is the 7.3 KB. Quoting only the first makes the headroom look
-twice as large as what a TLS handshake can actually reach.
+Both figures are worth quoting because they are different pools:
+`heap_caps_get_free_size()` over `MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT` gives the
+14.5 KB, and the same call over `MALLOC_CAP_DMA` gives 7.3 KB. Quoting only the
+first makes the headroom look twice what a TLS handshake can actually reach.
 
 ### Why the usual escapes do not apply
 
