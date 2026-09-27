@@ -417,13 +417,44 @@ TEST_CASE("deferring does not spin the timer", "[wifi_sm]")
     c.connect_timeout_ms = 30000;
     reset(&c);
     espos_wifi_sm_event(&SM, ESPOS_WIFI_EV_START, NULL);
+    const int max_rearms = 10;
     int arms_before = F.arms;
-    tick(20000);                    /* 19 s past the deadline, still associating */
+    /* Successive expiries, not one long tick: a single tick() fires the timer at
+     * most once, so a 1 ms re-arm loop would sail past it. Walk the clock in small
+     * steps and stop as soon as the arm count says the loop is back, so a
+     * regression fails fast rather than running to the loop bound. */
+    for (int i = 0; i < 200 && (F.arms - arms_before) <= max_rearms; i++) {
+        tick(100);
+        if (ST()->state != ESPOS_WIFI_ST_CONNECTING) break;
+    }
     TEST_ASSERT_EQUAL(ESPOS_WIFI_ST_CONNECTING, ST()->state);
     TEST_ASSERT_FALSE(ST()->portal_active);
-    /* A handful of re-arms is fine; hundreds means the loop is back. */
-    TEST_ASSERT_TRUE_MESSAGE(F.arms - arms_before < 10,
+    TEST_ASSERT_TRUE_MESSAGE(F.arms - arms_before <= max_rearms,
                              "timer re-armed repeatedly: the deferral is spinning");
+}
+
+TEST_CASE("a portal deferred through the attempt comes up once DHCP starts", "[wifi_sm]")
+{
+    /* The deadline elapsed while associating, so it is due the moment the
+     * association finishes -- not dhcp_timeout_ms later. A device that associates
+     * but cannot get a lease is one an operator needs to reach. */
+    espos_wifi_cfg_t c = cfg_with("Boat", NULL);
+    c.portal_after_ms = 3000;
+    c.connect_timeout_ms = 20000;
+    c.dhcp_timeout_ms = 30000;
+    reset(&c);
+    espos_wifi_sm_event(&SM, ESPOS_WIFI_EV_START, NULL);
+    tick(6000);                                   /* past the deadline, still associating */
+    TEST_ASSERT_EQUAL(ESPOS_WIFI_ST_CONNECTING, ST()->state);
+    TEST_ASSERT_FALSE(ST()->portal_active);        /* deferred */
+
+    ev_connected("Boat");                          /* association done, DHCP begins */
+    TEST_ASSERT_EQUAL(ESPOS_WIFI_ST_OBTAINING_IP, ST()->state);
+    TEST_ASSERT_TRUE_MESSAGE(ST()->portal_active,
+                             "a portal deferred during the attempt is due once it ends");
+
+    ev_got_ip();                                   /* and goes away on success */
+    TEST_ASSERT_FALSE(ST()->portal_active);
 }
 
 TEST_CASE("obtaining_ip does not defer the portal", "[wifi_sm]")

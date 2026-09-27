@@ -442,6 +442,12 @@ void espos_wifi_sm_event(espos_wifi_sm_t *sm, espos_wifi_event_t ev, const void 
             sm->st.link = *(const espos_wifi_link_t *)arg;
         }
         set_state(sm, ESPOS_WIFI_ST_OBTAINING_IP);
+        /* Re-evaluate before arming: the association we deferred the portal for has
+         * just finished, so a deadline that elapsed during it is due NOW. Without
+         * this the portal stays deferred through the whole DHCP wait -- which is
+         * the opposite of what OBTAINING_IP is supposed to mean here, and leaves a
+         * device stuck on DHCP unreachable for dhcp_timeout_ms. */
+        portal_policy(sm);
         arm(sm, sm->cfg.dhcp_timeout_ms, true);
         notify(sm);
         return;
