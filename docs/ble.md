@@ -105,6 +105,15 @@ One backend covers both cases; only the controller bring-up differs.
 
 **Native Bluedroid** (ESP32, C3, S3, C6): the chip's own radio.
 
+**Not the ESP32-C5.** It has a native radio and the code builds, but the gateway
+cannot run there: BLE plus WiFi plus the SignalK client does not fit in its
+internal RAM, and the board scans for about 30 seconds and then reboots on the
+health watchdog. Measurements and why PSRAM does not rescue it are in
+[hardware.md](hardware.md#the-esp32-c5-cannot-host-the-ble-gateway). A C5 is a good
+WiFi/SignalK board; for a BLE bridge use a P4 — the target actually in daily use
+here — or a C6, S3 or ESP32, which build and are expected to work but have not been
+run on hardware.
+
 **ESP32-P4**: no radio at all. Bluedroid's HCI is routed at an ESP32-C6
 co-processor over esp_hosted's SDIO transport
 (`CONFIG_ESP_HOSTED_ENABLE_BT_BLUEDROID` + `..._HCI_VHCI`, with
@@ -176,10 +185,8 @@ I espos_skws: notification tlsMemory: warn (largest free internal block 5 KB,
 
 Where a module has PSRAM, that is the answer rather than reordering — the C5
 modules carry an 8 MB die (`Found 8MB PSRAM device`) that a default build leaves
-switched off. Note that `CONFIG_SPIRAM` changes the bootloader, so enabling it
-means one USB flash per device and cannot be rolled out over OTA, and on C5
-rev v1.0 IDF warns PSRAM contents are not encrypted, so TLS buffers should stay
-in internal RAM.
+switched off. Note that on C5 rev v1.0 IDF warns PSRAM contents are not
+encrypted, so TLS buffers should stay in internal RAM.
 
 ## Status and troubleshooting
 
