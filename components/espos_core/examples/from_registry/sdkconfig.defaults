@@ -30,8 +30,10 @@ CONFIG_SECURE_SIGNED_APPS_RSA_SCHEME=y
 CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES=y
 
 # The prologue sets this for its builds, so the same firmware behaves the same
-# either way. It matters only with ota.allow_insecure on: espos_ota then drops
-# the certificate bundle, and without this IDF refuses the download outright.
+# either way. IDF refuses a download it cannot verify unless this is set, and
+# espos_ota attaches no certificate bundle when ota.allow_insecure is on or when
+# the build has the bundle off (MBEDTLS_CERTIFICATE_BUNDLE). A plain-http image,
+# which is what a Signal K server's update mirror serves, then fails to start.
 # Plain-http image sources are acceptable because every image is signed.
 CONFIG_ESP_HTTPS_OTA_ALLOW_HTTP=y
 

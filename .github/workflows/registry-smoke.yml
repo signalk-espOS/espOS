@@ -28,6 +28,14 @@ on:
 permissions:
   contents: read
 
+# What this builds is a published version, not the checkout, so runs are
+# grouped by version: a release run and a manual one for the same version wait
+# for each other instead of building it twice, and a started run is never
+# cancelled -- it is the only evidence that release works.
+concurrency:
+  group: registry-smoke-${{ inputs.version || 'newest' }}
+  cancel-in-progress: false
+
 jobs:
   build:
     name: from_registry ${{ matrix.target }} (published)
