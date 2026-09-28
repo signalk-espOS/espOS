@@ -9,15 +9,12 @@ menu "espOS health"
             reserved for the life of the firmware). The set of conditions a
             firmware can raise is fixed at build time, so size this to what
             it actually raises; further keys are rejected with ESP_ERR_NO_MEM.
-            espOS itself uses up to four: lowMemory, taskStalled, netDown and
-            skLinkStalled.
-
-                The floor is 5, not 1: espOS itself raises `lowMemory`,
-                `memoryTrough`, `taskStalled`, `netDown` and `skLinkStalled`,
-                and a table too small to hold them would silently drop one --
-                including a fatal one, which is how a device stops restarting
-                on a condition that should restart it. Raise it for a
-                firmware that adds its own keys.
+            espOS itself uses five: lowMemory, memoryTrough, taskStalled,
+            netDown and skLinkStalled, which is why the minimum is 5 rather
+            than 1. A table too small to hold them drops one silently, and if
+            the dropped key is a fatal one the device stops restarting on a
+            condition that should restart it. Raise this for a firmware that
+            adds keys of its own.
 
     config ESPOS_HEALTH_MAX_SINKS
         int "Health sinks"
