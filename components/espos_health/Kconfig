@@ -92,9 +92,12 @@ menu "espOS health"
                 trough is what precedes an allocation failure. A Waveshare
                 ESP32-C5 running the BLE gateway measured 27604 B free after
                 27 hours with a low-water mark of 4924 B, and 148 B on a later
-                run. No tick saw either: each read a free size well above the
-                fatal floor while the board had been within a few hundred
-                bytes of nothing.
+                run. No tick came near either: each read a free size well
+                above the fatal floor. The mark is a sum of per-region
+                floors, so it does not prove the TOTAL ever got that low --
+                but the parts sum to it, so every internal region had been
+                within 148 B of exhaustion at its own worst moment, and an
+                allocation fails on a region, not on the total.
 
                 Default 10, below the 12 KB fatal floor: a device that got
                 close enough to restarting to be worth mentioning, but not

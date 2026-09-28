@@ -255,9 +255,12 @@ regions, each at whatever moment that region happened to be at its emptiest.
 Neither is reliably the larger. Read each as the answer to its own question.
 
 `min_internal_free` is what the `memoryTrough` health condition is raised from
-([health.md](health.md)), so it is the figure to read after seeing that warning —
-the trough it reports is over by the time anyone asks, and `free_heap` will look
-fine. It is the same measurement the health policy makes, not a similar one.
+([health.md](health.md)), so it is the figure to read after seeing that warning: the
+trough is over by the time anyone asks, and nothing live records that it happened. Read
+it *with* `free_heap` rather than instead of it — the pair is the point. A comfortable
+`free_heap` beside a tiny `min_internal_free` is a board that dips and recovers; both
+low is a board that is simply short of memory. It is the same measurement the health
+policy makes, not a similar one.
 
 `ui_storage` (M5) is true when the LittleFS UI partition is mounted.
 `config_storage_reset` is true when the NVS partition had to be erased at

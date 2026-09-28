@@ -126,14 +126,21 @@ resets, record contents.
 since boot. A device can be healthy by the first and alarming by the second, and that
 combination is the one worth knowing about: a Waveshare ESP32-C5 running the BLE
 gateway measured **27604 B free after 27 hours of uptime with a low-water mark of
-4924 B** — and on a later run, 148 B. No tick ever saw that: each one read a free size
-comfortably above the fatal floor, while the board had in fact been within a few hundred
-bytes of nothing.
+4924 B** — and on a later run, 148 B. No tick came anywhere near those figures; each
+read a free size comfortably above the fatal floor.
+
+That figure is not proof of how empty the board got *in total*: per the bound below it
+is a sum of per-region floors, so the worst simultaneous total was at least 148 B and
+may have been much more. What it does prove is sharper than a total would be. The
+per-region minima are non-negative and sum to 148 B, so **every** matching region must
+have been within 148 B of exhaustion at its own worst moment — and an allocation fails
+on the region it asks for, never on the total.
 
 (On that particular board `lowMemory` warns too, because 27604 B is below the default
 40 KB `heap_warn_kb`. The two are still saying different things — "there is not much
-free" versus "there was almost none" — and the trough is the only signal on a device
-whose *steady* state is healthy and which dips transiently, which is the general case.)
+free right now" versus "some region has been far tighter than this" — and the trough is
+the only signal on a device whose *steady* state is healthy and which dips
+transiently, which is the general case.)
 
 A 10 s poll of an instantaneous value cannot see a trough between two ticks, and a
 transient trough is what precedes an allocation failure. The marks were already being
@@ -168,8 +175,10 @@ suppression and fan out to every sink on every tick).
 The mark itself is read from `GET /api/v1/system/info`, as `min_internal_free`
 beside the whole-heap `min_free_heap` ([rest-api.md](rest-api.md)); the watchdog
 also logs it at `DEBUG` on every sample. That is the number to look at after the
-warning, because the trough it reports is over by the time anyone asks and the
-live `free_heap` will look fine.
+warning, because the trough is over by the time anyone asks and no live figure
+records that it happened. Read it beside `free_heap`, not instead of it: the C5
+above shows both can be low at once, and which of the two is low changes the
+diagnosis.
 
 Internal RAM is judged separately from the total because on a board with PSRAM
 it is the scarce pool — the radio, DMA and every task stack come from it, and
