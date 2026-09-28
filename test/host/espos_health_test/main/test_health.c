@@ -11,6 +11,7 @@
  * precisely the case espos_health exists for.
  */
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "espos_health.h"
@@ -48,6 +49,31 @@ static void other_sink(const char *key, espos_health_state_t state, const char *
     (void)message;
     (void)arg;
     s_other_n++;
+}
+
+/* Sleep for at least `ms` of real time.
+ *
+ * NOT a bare usleep(): the FreeRTOS simulator delivers its tick as a SIGNAL, so
+ * EINTR cuts the sleep short. Measured in this binary, usleep(20000) returns -1
+ * with EINTR after 8-10 ms every time, and on CI it woke earlier still -- under the
+ * 1 ms ttl a test was arming -- so the drill was not due and expire() correctly
+ * returned false while the test insisted it should not have (espOS #149).
+ *
+ * Looping on the clock cannot exit early however often the signal arrives, which
+ * makes the test depend on elapsed time rather than on a syscall running to
+ * completion. */
+static void sleep_at_least_ms(unsigned ms)
+{
+    struct timespec start;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+    for (;;) {
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        const uint64_t elapsed = (uint64_t)(now.tv_sec - start.tv_sec) * 1000 +
+                                 (uint64_t)(now.tv_nsec / 1000000) - (uint64_t)(start.tv_nsec / 1000000);
+        if (elapsed >= ms) return;
+        usleep(1000);
+    }
 }
 
 static void fresh(void)
@@ -352,7 +378,7 @@ TEST_CASE("the ttl clears a drill, and only once it is due", "[health]")
      * deadline is read from the component's own port; the wait is real but
      * bounded, and what is being checked is the arithmetic, not the delay. */
     TEST_ASSERT_EQUAL(ESP_OK, espos_health_report_test("test.buzzer", ESPOS_HEALTH_ALARM, "drill", 1));
-    usleep(20000);
+    sleep_at_least_ms(20);
     TEST_ASSERT_TRUE(espos_health_test_expire());
     TEST_ASSERT_EQUAL(ESPOS_HEALTH_NORMAL, espos_health_worst());
     /* Idempotent: nothing left armed, so the next policy tick -- or the next GET
@@ -369,7 +395,7 @@ TEST_CASE("clearing a drill disarms its ttl", "[health]")
     fresh();
     TEST_ASSERT_EQUAL(ESP_OK, espos_health_report_test("test.buzzer", ESPOS_HEALTH_ALARM, "drill", 1));
     TEST_ASSERT_EQUAL(ESP_OK, espos_health_report_test("test.buzzer", ESPOS_HEALTH_NORMAL, "", 0));
-    usleep(20000);
+    sleep_at_least_ms(20);
     /* Nothing to expire: an explicit clear is the normal mechanism, and a stale
      * deadline firing afterwards would re-report NORMAL to every sink for no
      * reason. */
@@ -472,7 +498,7 @@ TEST_CASE("expire clears the drill only once the report has gone out", "[health]
     fresh();
     espos_health_add_sink(recorder, NULL);
     TEST_ASSERT_EQUAL(ESP_OK, espos_health_report_test("test.buzzer", ESPOS_HEALTH_ALARM, "drill", 1));
-    usleep(20000);
+    sleep_at_least_ms(20);
 
     /* The invariant: the tracking is dropped only after the clearing report
      * succeeds. Were it dropped first, a failed report would leave the drill
