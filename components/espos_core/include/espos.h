@@ -117,7 +117,7 @@ const char *espos_board(void);
  * A binding generated from the headers records the value it was built
  * against and compares it with espos_abi_version() at run time.
  */
-#define ESPOS_ABI_VERSION 3
+#define ESPOS_ABI_VERSION 4
 
 /** ESPOS_ABI_VERSION of the espos_core actually linked, for code compiled
  * against another copy of the headers. Callable at any time, any task. */

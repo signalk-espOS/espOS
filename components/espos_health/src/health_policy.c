@@ -93,9 +93,9 @@ espos_health_state_t espos_health_policy_memory(const espos_health_policy_cfg_t 
  * free size on a tick, so a trough BETWEEN two ticks is invisible to them --
  * and a transient trough is exactly what precedes an allocation failure.
  * Measured on a Waveshare ESP32-C5 running the BLE gateway: 27604 B free after
- * 27 hours of uptime, with a low-water mark of 4924 B. Every tick saw a healthy
- * board; the board had in fact been within 5 KB of nothing, below the 8 KB
- * fragmentation alarm and near the 12 KB fatal floor (espOS #129). The port
+ * 27 hours of uptime, with a low-water mark of 4924 B -- and 148 B on a later
+ * run. No tick saw either: each read a free size well above the fatal floor while
+ * the board had been within a few hundred bytes of nothing (espOS #129). The port
  * already samples these marks -- they were written into the reset record and
  * read only after a restart, so the measurement existed and nothing decided on
  * it.

@@ -709,3 +709,29 @@ TEST_CASE("a zero trough threshold disables the check", "[health_policy]")
     TEST_ASSERT_EQUAL(ESPOS_HEALTH_NORMAL,
                       espos_health_policy_trough(&c, &h, msg, sizeof(msg)));
 }
+
+TEST_CASE("every built-in condition fits the table and reports", "[health_policy]")
+{
+    /* espOS raises five keys of its own. A table too small to hold them drops one
+     * with ESP_ERR_NO_MEM (espos_health.c) -- and if the dropped one is fatal, the
+     * device stops restarting on a condition that should restart it. The Kconfig
+     * floor is 5 for that reason; this pins that the built-ins really are five and
+     * that each one registers rather than being rejected. */
+    static const char *const builtins[] = {
+        "lowMemory",
+        "memoryTrough",
+        "taskStalled",
+        "netDown",
+        "skLinkStalled",
+    };
+    fresh(false);
+    for (size_t i = 0; i < sizeof(builtins) / sizeof(builtins[0]); i++) {
+        TEST_ASSERT_EQUAL_MESSAGE(ESP_OK,
+                                  espos_health_report(builtins[i], ESPOS_HEALTH_WARN, "x"),
+                                  builtins[i]);
+    }
+    /* And they are distinct keys, not one key reported five times. */
+    espos_health_condition_t out[8];
+    size_t n = espos_health_snapshot(out, 8);
+    TEST_ASSERT_EQUAL(5, n);
+}

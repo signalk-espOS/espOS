@@ -55,7 +55,11 @@ typedef struct {
     uint32_t internal_alarm_kb;      /* lowMemory fatal ALARM below this much internal RAM; 0 = off */
     uint32_t largest_block_alarm_kb; /* lowMemory fatal ALARM below this largest internal block; 0 = off */
     /* memoryTrough WARN when the low-water mark since boot fell below this much
-     * internal RAM; 0 = off. Reporting only -- never fatal, by construction. */
+     * internal RAM; 0 = off. Reporting only -- never fatal, by construction.
+     *
+     * Appended, not inserted: a mid-struct member shifts every later field for a
+     * caller built against the old header. Appending changes only sizeof, which is
+     * still an ABI break -- hence the ESPOS_ABI_VERSION bump -- but the narrow kind. */
     uint32_t internal_trough_warn_kb;
 } espos_health_policy_cfg_t;
 

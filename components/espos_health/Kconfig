@@ -3,7 +3,7 @@ menu "espOS health"
     config ESPOS_HEALTH_MAX_CONDITIONS
         int "Distinct condition keys"
         default 12
-        range 1 32
+        range 5 32
         help
             Slots for remembered conditions, one per key (~128 bytes each,
             reserved for the life of the firmware). The set of conditions a
@@ -11,6 +11,13 @@ menu "espOS health"
             it actually raises; further keys are rejected with ESP_ERR_NO_MEM.
             espOS itself uses up to four: lowMemory, taskStalled, netDown and
             skLinkStalled.
+
+                The floor is 5, not 1: espOS itself raises `lowMemory`,
+                `memoryTrough`, `taskStalled`, `netDown` and `skLinkStalled`,
+                and a table too small to hold them would silently drop one --
+                including a fatal one, which is how a device stops restarting
+                on a condition that should restart it. Raise it for a
+                firmware that adds its own keys.
 
     config ESPOS_HEALTH_MAX_SINKS
         int "Health sinks"
@@ -87,9 +94,10 @@ menu "espOS health"
                 BETWEEN two ticks is invisible to them -- and a transient
                 trough is what precedes an allocation failure. A Waveshare
                 ESP32-C5 running the BLE gateway measured 27604 B free after
-                27 hours with a low-water mark of 4924 B: every tick saw a
-                healthy board, while the board had been within 5 KB of
-                nothing.
+                27 hours with a low-water mark of 4924 B, and 148 B on a later
+                run. No tick saw either: each read a free size well above the
+                fatal floor while the board had been within a few hundred
+                bytes of nothing.
 
                 Default 10, below the 12 KB fatal floor: a device that got
                 close enough to restarting to be worth mentioning, but not

@@ -126,8 +126,14 @@ resets, record contents.
 since boot. A device can be healthy by the first and alarming by the second, and that
 combination is the one worth knowing about: a Waveshare ESP32-C5 running the BLE
 gateway measured **27604 B free after 27 hours of uptime with a low-water mark of
-4924 B** — every tick saw a healthy board, while the board had in fact been within 5 KB
-of nothing, below the fragmentation alarm floor and near the fatal one.
+4924 B** — and on a later run, 148 B. No tick ever saw that: each one read a free size
+comfortably above the fatal floor, while the board had in fact been within a few hundred
+bytes of nothing.
+
+(On that particular board `lowMemory` warns too, because 27604 B is below the default
+40 KB `heap_warn_kb`. The two are still saying different things — "there is not much
+free" versus "there was almost none" — and the trough is the only signal on a device
+whose *steady* state is healthy and which dips transiently, which is the general case.)
 
 A 10 s poll of an instantaneous value cannot see a trough between two ticks, and a
 transient trough is what precedes an allocation failure. The marks were already being
