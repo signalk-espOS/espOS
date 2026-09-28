@@ -280,8 +280,11 @@ standard library only, no IDF environment needed).
   in; a changed enum or macro value; a changed callback contract; a new
   include exception. Additive, no bump: a new function, macro or header; an
   enum value appended before its `_MAX` when no public struct is sized by
-  that `_MAX`. A bump is a changelog line of its own ("abi: 1 → 2, because
-  …").
+  that `_MAX`. A bump records its reason in the history comment beside the
+  constant in `espos.h` — that is where a reader holding an older binding
+  looks — and the PR carries a `!` in its type so release-please renders the
+  breaking-change line. (A per-commit changelog line does not work:
+  release-please groups by pull request, not by commit.)
 * **The check.** `python3 tools/check_public_headers.py` — exit 1 on a
   non-allowlisted include or a missing guard, exit 0 with the `CONFIG_`
   warnings (`--strict` makes those fatal too, for the day the backlog is
