@@ -127,11 +127,14 @@ espos_health_state_t espos_health_policy_trough(const espos_health_policy_cfg_t 
          * above; see espOS #124 for what it cost to learn.
          *
          * "low-water mark", not "fell below": heap_caps_get_minimum_free_size()
-         * SUMS each matching region's own minimum, and those minima need not
-         * have happened together, so the total may never have held this value at
-         * any one instant. It is a conservative floor -- no lower than the worst
-         * the device really saw -- which is the right direction for a warning,
-         * but the message must not claim a moment that may not have existed. */
+         * SUMS each matching region's own minimum, and those minima need not have
+         * happened together, so the total may never have held this value at any
+         * one instant. Summing them gives a LOWER bound on the worst simultaneous
+         * total -- no HIGHER than it, never a value the device is known to have
+         * reached. Two 100 KB regions that each dip to 10 KB at different times
+         * report 20 KB while the total never left 110 KB. Pessimistic is the safe
+         * direction for a warning, but the message must not claim a moment that
+         * may not have existed. */
         snprintf(buf, sizeof(buf), "internal RAM low-water mark below %u KB since boot",
                  (unsigned)cfg->internal_trough_warn_kb);
         m = buf;

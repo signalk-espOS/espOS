@@ -59,8 +59,9 @@ typedef struct {
      *
      * The mark is heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL), which SUMS
      * each matching region's own minimum. Those minima need not be simultaneous, so
-     * the figure is a conservative floor rather than a total that was ever observed
-     * at one instant -- fine for a warning, but do not read it as a snapshot.
+     * the sum is a LOWER bound on the worst simultaneous total -- no higher than it,
+     * and usually below it. It says the device never had LESS free than this, not
+     * that it ever had this little. Pessimistic, which is safe for a warning.
      *
      * Appended, not inserted: a mid-struct member shifts every later field for a
      * caller built against the old header. Appending changes only sizeof, which is
