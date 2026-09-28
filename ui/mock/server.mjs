@@ -306,7 +306,22 @@ export function startMock(port = 8484) {
   // stays in the map once seen, at "normal", which is what the device does -- a
   // condition keeps its table slot for the life of the boot.
   const drills = new Map();
+  // Deadlines live apart from the drill objects so they never appear in a response.
+  // The device clears a drill on the policy tick once its ttl is up; a mock that
+  // kept one raised for ever would teach the UI that drills are permanent.
+  const drillDeadlines = new Map();
+  const expireDrills = () => {
+    const now = Date.now();
+    for (const [k, due] of drillDeadlines) {
+      if (now >= due) {
+        const c = drills.get(k);
+        if (c) c.state = "normal";
+        drillDeadlines.delete(k);
+      }
+    }
+  };
   const healthBody = () => {
+    expireDrills();
     const builtins = [
       { key: "lowMemory", state: "normal", message: "", reboot_on_alarm: true },
       { key: "memoryTrough", state: "warn",
@@ -494,7 +509,11 @@ export function startMock(port = 8484) {
         }
         // One drill at a time: raising a second clears the first.
         for (const c of drills.values()) c.state = "normal";
+        drillDeadlines.clear();
         drills.set(b.key, { key: b.key, state: b.state, message: b.message ?? "", reboot_on_alarm: false });
+        if (b.state !== "normal") {
+          drillDeadlines.set(b.key, Date.now() + (b.ttl_s ?? 45) * 1000);
+        }
         return json(res, 200, healthBody());
       }
 

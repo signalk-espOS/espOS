@@ -336,6 +336,12 @@ esp_err_t espos_health_report_test(const char *key, espos_health_state_t state, 
     }
     if (s.test_armed && strcmp(s.test_key, key) != 0) {
         snprintf(previous, sizeof(previous), "%s", s.test_key);
+        /* Claimed HERE, in the lock we already hold, rather than after a failed
+         * clear: recording it then needs another lock(), and a lock() that also
+         * times out drops the key entirely while the log claims a retry. Claiming
+         * it up front cannot fail, so the slot always names whatever might still
+         * be raised. A successful clear releases it below. */
+        memcpy(s.test_pending_clear, previous, sizeof(s.test_pending_clear));
     }
     /* Armed in the SAME critical section that read the old state, before the
      * report rather than after it. Arming afterwards needs a second lock(), and a
@@ -370,27 +376,42 @@ esp_err_t espos_health_report_test(const char *key, espos_health_state_t state, 
      * real condition of the same name would carry. Structural, not a promise. */
     esp_err_t err = espos_health_report_ex(key, state, message ? message : "", 0);
     if (err != ESP_OK) {
-        /* Put the bookkeeping back. Should this lock() time out too, the state
-         * names a key that is not raised, so the worst the next tick does is
-         * report NORMAL for something already normal -- a no-op, not an orphan. */
+        /* Put the bookkeeping back, INCLUDING the pending claim: nothing was
+         * cleared, so the previous drill is still running and still owned. Leaving
+         * the claim set would have the next expiry pass clear a live drill, which
+         * is the opposite of what the slot is for.
+         *
+         * Should this lock() time out too, test_key names a key that is not raised,
+         * so the worst the next pass does is report NORMAL over NORMAL -- a no-op,
+         * not an orphan and not a drill cut short. */
         if (lock()) {
             memcpy(s.test_key, saved_key, sizeof(s.test_key));
             s.test_deadline_ms = saved_deadline;
             s.test_armed = saved_armed;
+            if (previous[0] && strcmp(s.test_pending_clear, previous) == 0) {
+                s.test_pending_clear[0] = '\0';
+            }
             unlock();
         }
         xSemaphoreGive(s.test_lock);
         return err;
     }
-    if (previous[0] && espos_health_report_ex(previous, ESPOS_HEALTH_NORMAL, "", 0) != ESP_OK) {
-        /* The superseded drill is still raised and test_key no longer names it.
-         * Park it so the next expiry pass clears it, rather than leaving an alarm
-         * that nothing owns. */
-        if (lock()) {
-            memcpy(s.test_pending_clear, previous, sizeof(s.test_pending_clear));
-            unlock();
+    if (previous[0]) {
+        if (espos_health_report_ex(previous, ESPOS_HEALTH_NORMAL, "", 0) == ESP_OK) {
+            /* Release the claim. Should this lock() time out, the slot names a key
+             * that is already normal, so the next flush reports NORMAL over NORMAL
+             * -- a no-op, which is the right way for this to fail. */
+            if (lock()) {
+                if (strcmp(s.test_pending_clear, previous) == 0) {
+                    s.test_pending_clear[0] = '\0';
+                }
+                unlock();
+            }
+        } else {
+            /* Still raised, and test_key no longer names it -- but the slot claimed
+             * above already does, so the next expiry pass will clear it. */
+            ESP_LOGW(TAG, "%s: could not clear superseded test condition; will retry", previous);
         }
-        ESP_LOGW(TAG, "%s: could not clear superseded test condition; will retry", previous);
     }
     xSemaphoreGive(s.test_lock);
     return ESP_OK;
