@@ -172,13 +172,14 @@ raised, which is correct and is why the message names the threshold rather than 
 (a message carrying the live figure would defeat `espos_health_report()`'s duplicate
 suppression and fan out to every sink on every tick).
 
-The mark itself is read from `GET /api/v1/system/info`, as `min_internal_free`
-beside the whole-heap `min_free_heap` ([rest-api.md](rest-api.md)); the watchdog
-also logs it at `DEBUG` on every sample. That is the number to look at after the
-warning, because the trough is over by the time anyone asks and no live figure
-records that it happened. Read it beside `free_heap`, not instead of it: the C5
-above shows both can be low at once, and which of the two is low changes the
-diagnosis.
+The mark itself is read from `GET /api/v1/system/info`, as `min_internal_free` beside
+the live `free_internal` ([rest-api.md](rest-api.md)); the watchdog also logs it at
+`DEBUG` on every sample. That is the number to look at after the warning, because the
+trough is over by the time anyone asks and no live figure records that it happened.
+Read it against `free_internal`, not against `free_heap` — on a PSRAM build `free_heap`
+counts PSRAM, so it can look healthy while internal RAM is still exhausted. A recovered
+`free_internal` beside a tiny mark is a board that dipped; both low is a board simply
+short of internal RAM, which is the C5 above.
 
 Internal RAM is judged separately from the total because on a board with PSRAM
 it is the scarce pool — the radio, DMA and every task stack come from it, and

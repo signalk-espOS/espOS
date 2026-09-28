@@ -185,7 +185,7 @@ already advertise.
   "app": "espos", "version": "0.1.0-3-gabc1234", "idf_version": "v6.0.2",
   "chip": "esp32c6", "chip_revision": 1, "cores": 1,
   "uptime_s": 42, "free_heap": 210000, "min_free_heap": 190000,
-  "min_internal_free": 121000,
+  "free_internal": 148000, "min_internal_free": 121000,
   "reset_reason": "software", "config_storage_reset": false,
   "schema_etag": "6acfba355e183b19", "ui_storage": true,
   "hardware": {
@@ -241,26 +241,31 @@ would be a hardcoded datasheet table espOS cannot verify.
 The whole object is absent on a device built before it existed, so a client
 should treat it and every member as optional.
 
-`min_free_heap` and `min_internal_free` are low-water marks since boot, not live
-figures. The first asks `MALLOC_CAP_DEFAULT` — what a plain `malloc()` may be
-given — and the second `MALLOC_CAP_INTERNAL`. Whether PSRAM is part of the first
-is a build question, not a hardware one: it joins the `malloc()` heap only when
-`CONFIG_SPIRAM_USE_MALLOC` says so, and `CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL`
-then decides how much still comes from internal RAM.
+`min_free_heap` and `min_internal_free` are low-water marks since boot; `free_heap` and
+`free_internal` are the live figures beside them. The whole-heap pair asks
+`MALLOC_CAP_DEFAULT` — what a plain `malloc()` may be given — and the internal pair
+`MALLOC_CAP_INTERNAL`. Whether PSRAM is part of the whole-heap pair is a build
+question, not a hardware one: it joins the `malloc()` heap only when
+`CONFIG_SPIRAM_USE_MALLOC` says so, and `CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL` then
+decides how much still comes from internal RAM.
 
-Do not compare the two. ESP-IDF's capability bits are independent flags rather
-than a hierarchy, and `heap_caps_get_minimum_free_size()` **sums each matching
-region's own minimum**, so each figure adds up a different, overlapping set of
-regions, each at whatever moment that region happened to be at its emptiest.
-Neither is reliably the larger. Read each as the answer to its own question.
+Compare within a pair, never across them. ESP-IDF's capability bits are independent
+flags rather than a hierarchy, and `heap_caps_get_minimum_free_size()` **sums each
+matching region's own minimum**, so the two low-water marks add up different,
+overlapping sets of regions, each at whatever moment that region happened to be at its
+emptiest. Neither is reliably the larger.
 
 `min_internal_free` is what the `memoryTrough` health condition is raised from
 ([health.md](health.md)), so it is the figure to read after seeing that warning: the
-trough is over by the time anyone asks, and nothing live records that it happened. Read
-it *with* `free_heap` rather than instead of it — the pair is the point. A comfortable
-`free_heap` beside a tiny `min_internal_free` is a board that dips and recovers; both
-low is a board that is simply short of memory. It is the same measurement the health
-policy makes, not a similar one.
+trough is over by the time anyone asks, and nothing live records that it happened.
+
+Compare it with **`free_internal`**, not with `free_heap`. The two internal figures are
+the same measurement — live and low-water — so a comfortable `free_internal` beside a
+tiny `min_internal_free` is a board that dipped and recovered, while both low is a board
+simply short of internal RAM. `free_heap` cannot stand in for that on a PSRAM build: it
+is `MALLOC_CAP_DEFAULT`, so it counts PSRAM too, and megabytes free there say nothing
+about whether internal RAM ever came back. `free_internal` and `min_internal_free` are
+the same measurements `espos_health` compares, not similar ones.
 
 `ui_storage` (M5) is true when the LittleFS UI partition is mounted.
 `config_storage_reset` is true when the NVS partition had to be erased at

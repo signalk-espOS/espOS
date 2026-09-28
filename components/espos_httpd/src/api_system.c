@@ -302,16 +302,22 @@ static esp_err_t info_get(httpd_req_t *req)
     cJSON_AddNumberToObject(j, "uptime_s", (double)uptime_s());
     cJSON_AddNumberToObject(j, "free_heap", esp_get_free_heap_size());
     cJSON_AddNumberToObject(j, "min_free_heap", esp_get_minimum_free_heap_size());
-    /* The internal-RAM low-water mark, beside the whole-heap one above. It is the
-     * value the memoryTrough condition is raised from (health.md), and before this
-     * it was readable only in `last_reset` AFTER a restart -- so on a live device
-     * the number behind the warning could not be looked up at all.
+    /* The internal pair, mirroring the whole-heap pair above: live, then low-water.
+     * min_internal_free is the value the memoryTrough condition is raised from
+     * (health.md), and before it existed the number behind that warning was readable
+     * only in `last_reset`, AFTER a restart. free_internal is here so the pair can be
+     * read without involving free_heap, which on a PSRAM build is MALLOC_CAP_DEFAULT
+     * and counts PSRAM -- megabytes free there say nothing about internal RAM.
      *
-     * Not a subset of min_free_heap and not comparable with it: MALLOC_CAP_* are
-     * independent flags, not a hierarchy, and heap_caps_get_minimum_free_size()
-     * SUMS each matching region's own minimum rather than taking a minimum over
-     * one pool. The two therefore add up different, overlapping region sets at
-     * unrelated moments. Reported as its own answer, never derived from the other. */
+     * Plain MALLOC_CAP_INTERNAL for both, deliberately NOT
+     * esp_get_free_internal_heap_size() (which narrows to 8BIT|DMA): they have to be
+     * the same cap set as each other and as espos_health's own sample, or the pair is
+     * two different measurements -- the very mistake documented just below.
+     *
+     * Neither is comparable with the whole-heap pair: MALLOC_CAP_* are independent
+     * flags, not a hierarchy, and heap_caps_get_minimum_free_size() SUMS each matching
+     * region's own minimum rather than taking a minimum over one pool. */
+    cJSON_AddNumberToObject(j, "free_internal", heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
     cJSON_AddNumberToObject(j, "min_internal_free",
                             heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL));
     cJSON_AddStringToObject(j, "reset_reason", reset_reason_str(esp_reset_reason()));
