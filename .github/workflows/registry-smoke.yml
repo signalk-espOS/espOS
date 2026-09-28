@@ -14,13 +14,13 @@ on:
   workflow_call:
     inputs:
       version:
-        description: "espOS version or tag to build, e.g. v0.12.0"
+        description: "espOS version to build, e.g. 0.12.0 (no v)"
         type: string
         required: true
   workflow_dispatch:
     inputs:
       version:
-        description: "espOS version to build (empty: the newest published)"
+        description: "espOS version to build, e.g. 0.12.0 (empty: the newest published)"
         required: false
   schedule:
     - cron: '17 4 * * 1'
@@ -31,7 +31,8 @@ permissions:
 # What this builds is a published version, not the checkout, so runs are
 # grouped by version: a release run and a manual one for the same version wait
 # for each other instead of building it twice, and a started run is never
-# cancelled -- it is the only evidence that release works.
+# cancelled -- it is the only evidence that release works. That only holds if
+# every caller spells a version the same way, so a leading v is refused below.
 concurrency:
   group: registry-smoke-${{ inputs.version || 'newest' }}
   cancel-in-progress: false
@@ -57,9 +58,10 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           # The action pastes `command` into a shell string, so the version is
-          # checked here before it reaches it.
-          if ! [[ "$VERSION" =~ ^(v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?)?$ ]]; then
-            echo "::error::'$VERSION' is not an espOS version"
+          # checked here before it reaches it -- and bare, so the concurrency
+          # group above cannot tell 0.12.0 and v0.12.0 apart as two releases.
+          if ! [[ "$VERSION" =~ ^([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?)?$ ]]; then
+            echo "::error::'$VERSION' is not an espOS version (X.Y.Z, without a v)"
             exit 1
           fi
           echo "version=$(cat .idf-version)" >> "$GITHUB_OUTPUT"
