@@ -15,6 +15,18 @@ pull request. The `[Unreleased]` block below was written by hand before the
 switch; its entries belong to the next feature release and are folded into
 that section when it is cut.
 
+## [0.12.0](https://github.com/signalk-espOS/espOS/compare/v0.11.0...v0.12.0) (2026-09-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* **health:** warn on how little RAM was free, not only how much is free now ([#147](https://github.com/signalk-espOS/espOS/issues/147))
+
+### Added
+
+* **health:** read the conditions back, and rehearse a fault ([#149](https://github.com/signalk-espOS/espOS/issues/149)) ([ea55514](https://github.com/signalk-espOS/espOS/commit/ea55514a0785ed76258536866ddf686a4171ee64))
+* **health:** warn on how little RAM was free, not only how much is free now ([#147](https://github.com/signalk-espOS/espOS/issues/147)) ([c4f56bb](https://github.com/signalk-espOS/espOS/commit/c4f56bbf653c615a5f294fa1deb6263d2053e321))
+
 ## [0.11.0](https://github.com/signalk-espOS/espOS/compare/v0.10.3...v0.11.0) (2026-09-27)
 
 
