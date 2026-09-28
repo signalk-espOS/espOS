@@ -54,6 +54,19 @@ typedef struct {
     uint32_t internal_warn_kb;       /* lowMemory WARN below this much internal RAM; 0 = off */
     uint32_t internal_alarm_kb;      /* lowMemory fatal ALARM below this much internal RAM; 0 = off */
     uint32_t largest_block_alarm_kb; /* lowMemory fatal ALARM below this largest internal block; 0 = off */
+    /* memoryTrough WARN when the internal-RAM low-water mark since boot is below
+     * this much; 0 = off. Reporting only -- never fatal, by construction.
+     *
+     * The mark is heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL), which SUMS
+     * each matching region's own minimum. Those minima need not be simultaneous, so
+     * the sum is a LOWER bound on the worst simultaneous total -- no higher than it,
+     * and usually below it. It says the device never had LESS free than this, not
+     * that it ever had this little. Pessimistic, which is safe for a warning.
+     *
+     * Appended, not inserted: a mid-struct member shifts every later field for a
+     * caller built against the old header. Appending changes only sizeof, which is
+     * still an ABI break -- hence the ESPOS_ABI_VERSION bump -- but the narrow kind. */
+    uint32_t internal_trough_warn_kb;
 } espos_health_policy_cfg_t;
 
 /* Everything the machine needs from the outside world. */
@@ -112,6 +125,16 @@ void espos_health_policy_kick(espos_health_policy_t *p, void *task);
  * The lowMemory rule on its own: state, message and flags for a heap reading.
  * Exposed for tests and for a consumer that wants the same thresholds.
  */
+/* Did this device come close to exhaustion at some point since boot?
+ *
+ * A different question from espos_health_policy_memory(), which asks about NOW.
+ * Answered from the low-water marks the port already samples, so it costs a
+ * comparison rather than a measurement. Returns WARN or NORMAL; never ALARM --
+ * see the note on the implementation for why this must not be fatal. */
+espos_health_state_t espos_health_policy_trough(const espos_health_policy_cfg_t *cfg,
+                                                const espos_health_heap_t *h, char *message,
+                                                size_t message_size);
+
 espos_health_state_t espos_health_policy_memory(const espos_health_policy_cfg_t *cfg, const espos_health_heap_t *heap,
                                                 char *message, size_t message_size, uint32_t *flags);
 

@@ -362,6 +362,14 @@ export function startMock(port = 8484) {
       if (r === "/system/info" && m === "GET") {
         return json(res, 200, { app: "espos", version: "0.5.0-mock", idf_version: "v6.0.2", chip: "esp32c6", chip_revision: 1, cores: 1,
           uptime_s: Math.round((Date.now() - boot) / 1000), free_heap: 214000 + Math.round(Math.random() * 3000), min_free_heap: 190000,
+          // The internal pair: live, then low-water. Deliberately unrelated to the
+          // whole-heap pair above -- the two ask different capability sets and each
+          // sums the regions matching it, so nothing guarantees an ordering between
+          // them, and a mock that made them equal would teach the UI a rule ESP-IDF
+          // does not honour even on this no-PSRAM C6. WITHIN the pair the ordering
+          // IS guaranteed (a region's minimum cannot exceed its current free size),
+          // so free_internal stays above min_internal_free here.
+          free_internal: 181000 + Math.round(Math.random() * 2000), min_internal_free: 176000,
           reset_reason: "software", config_storage_reset: false, schema_etag: etag, ui_storage: true,
           // A board that declared itself, so the Board row is exercised; a C6
           // has no PSRAM, which is the "no PSRAM" branch rather than a missing

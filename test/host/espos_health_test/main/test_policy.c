@@ -122,6 +122,7 @@ static const espos_health_policy_cfg_t CFG = {
     .internal_warn_kb = 20,
     .internal_alarm_kb = 12,
     .largest_block_alarm_kb = 8,
+    .internal_trough_warn_kb = 10,
 };
 
 /* A comfortable heap: nothing to warn about. */
@@ -631,4 +632,142 @@ TEST_CASE("a persisting condition yields an identical message", "[health][policy
     h.internal_free = 11 * 1024;
     espos_health_policy_memory(&CFG, &h, later, sizeof(later), &flags);
     TEST_ASSERT_TRUE(strcmp(first, later) != 0);
+}
+
+/* ---------------------------------------------------------------- memoryTrough */
+
+TEST_CASE("a healthy low-water mark reports nothing", "[health_policy]")
+{
+    char msg[ESPOS_HEALTH_MSG_MAX];
+    TEST_ASSERT_EQUAL(ESPOS_HEALTH_NORMAL,
+                      espos_health_policy_trough(&CFG, &HEALTHY, msg, sizeof(msg)));
+    TEST_ASSERT_EQUAL_STRING("", msg);
+}
+
+TEST_CASE("a device that dipped warns even while it now looks healthy", "[health_policy]")
+{
+    /* The case the live checks cannot see, and the reason this exists: measured
+     * on an ESP32-C5 at 27604 B free with a low-water mark of 4924 B after 27
+     * hours (espOS #129). Every tick saw a healthy board. */
+    espos_health_heap_t h = HEALTHY;             /* everything live is comfortable */
+    h.internal_min = 4924;                      /* ...but it was not, earlier */
+    char msg[ESPOS_HEALTH_MSG_MAX];
+    TEST_ASSERT_EQUAL(ESPOS_HEALTH_WARN,
+                      espos_health_policy_trough(&CFG, &h, msg, sizeof(msg)));
+    TEST_ASSERT_NOT_NULL(strstr(msg, "since boot"));
+
+    /* The live check must be NORMAL on the same reading, or this test would pass
+     * because both fired and prove nothing about the trough being the only signal.
+     *
+     * Note what this costs to arrange: the real C5 also sat at 27604 B total free,
+     * below the 40 KB heap_warn, so on that board lowMemory warns too. The trough
+     * is the only signal where a device dips transiently while its STEADY state is
+     * genuinely healthy -- which is the general case, and the C5 is the harsher
+     * one where both are true. */
+    uint32_t flags = 0;
+    char live[ESPOS_HEALTH_MSG_MAX];
+    TEST_ASSERT_EQUAL(ESPOS_HEALTH_NORMAL,
+                      espos_health_policy_memory(&CFG, &h, live, sizeof(live), &flags));
+}
+
+TEST_CASE("the tick reports memoryTrough, non-fatally, while lowMemory stays normal",
+          "[health][policy]")
+{
+    /* Everything above tests espos_health_policy_trough() directly, which proves the
+     * decision and nothing about the WIRING: a condition computed correctly and never
+     * handed to the report port is invisible on a device. This drives the real tick.
+     *
+     * It also pins the pair. The whole argument for a separate condition is that the
+     * trough can fire while the live check does not, so a test where both warn would
+     * demonstrate nothing. */
+    fresh(false);
+    tick();
+    /* Reported every tick even when there is nothing wrong -- the tick states the
+     * condition and lets the table dedup (espOS #124), so NORMAL here, not absent. */
+    const report_t *quiet = last_report("memoryTrough");
+    TEST_ASSERT_NOT_NULL(quiet);
+    TEST_ASSERT_EQUAL(ESPOS_HEALTH_NORMAL, quiet->state);
+
+    F.heap.internal_min = 4924; /* the measured C5 mark; live figures stay comfortable */
+    tick();
+
+    const report_t *t = last_report("memoryTrough");
+    TEST_ASSERT_NOT_NULL(t);
+    TEST_ASSERT_EQUAL(ESPOS_HEALTH_WARN, t->state);
+    /* Never fatal, by construction: a mark does not recover within a boot, so a fatal
+     * flag here would restart the device on every boot's first dip, for ever. */
+    TEST_ASSERT_EQUAL_UINT32(0, t->flags);
+
+    const report_t *l = last_report("lowMemory");
+    TEST_ASSERT_NOT_NULL(l);
+    TEST_ASSERT_EQUAL(ESPOS_HEALTH_NORMAL, l->state);
+
+    TEST_ASSERT_EQUAL_INT(0, F.restarts);
+    TEST_ASSERT_EQUAL_INT(0, F.stores);
+}
+
+TEST_CASE("the trough message names the threshold, not the mark", "[health_policy]")
+{
+    /* espos_health_report() suppresses a repeat only when state AND message match,
+     * so a message carrying the live figure fans out to every sink every tick --
+     * the churn that fragmented a board into a reboot loop (espOS #124). Two
+     * different marks must produce the SAME message. */
+    espos_health_heap_t a = HEALTHY, b = HEALTHY;
+    a.internal_min = 4924;
+    b.internal_min = 1024;
+    char ma[ESPOS_HEALTH_MSG_MAX], mb[ESPOS_HEALTH_MSG_MAX];
+    TEST_ASSERT_EQUAL(ESPOS_HEALTH_WARN, espos_health_policy_trough(&CFG, &a, ma, sizeof(ma)));
+    TEST_ASSERT_EQUAL(ESPOS_HEALTH_WARN, espos_health_policy_trough(&CFG, &b, mb, sizeof(mb)));
+    TEST_ASSERT_EQUAL_STRING(ma, mb);
+    TEST_ASSERT_NULL(strstr(ma, "4924"));
+}
+
+TEST_CASE("the trough check is never fatal", "[health_policy]")
+{
+    /* A low-water mark does not recover within a boot, so a fatal condition on it
+     * would reboot, see the same mark on the next boot's first dip, and reboot
+     * again. The signature has no flags argument at all -- this test pins the
+     * report site, which passes 0. */
+    espos_health_heap_t h = HEALTHY;
+    h.internal_min = 512;                       /* as bad as it gets */
+    char msg[ESPOS_HEALTH_MSG_MAX];
+    TEST_ASSERT_EQUAL(ESPOS_HEALTH_WARN,
+                      espos_health_policy_trough(&CFG, &h, msg, sizeof(msg)));
+}
+
+TEST_CASE("a zero trough threshold disables the check", "[health_policy]")
+{
+    espos_health_policy_cfg_t c = CFG;
+    c.internal_trough_warn_kb = 0;
+    espos_health_heap_t h = HEALTHY;
+    h.internal_min = 128;
+    char msg[ESPOS_HEALTH_MSG_MAX];
+    TEST_ASSERT_EQUAL(ESPOS_HEALTH_NORMAL,
+                      espos_health_policy_trough(&c, &h, msg, sizeof(msg)));
+}
+
+TEST_CASE("every built-in condition fits the table and reports", "[health_policy]")
+{
+    /* espOS raises five keys of its own. A table too small to hold them drops one
+     * with ESP_ERR_NO_MEM (espos_health.c) -- and if the dropped one is fatal, the
+     * device stops restarting on a condition that should restart it. The Kconfig
+     * floor is 5 for that reason; this pins that the built-ins really are five and
+     * that each one registers rather than being rejected. */
+    static const char *const builtins[] = {
+        "lowMemory",
+        "memoryTrough",
+        "taskStalled",
+        "netDown",
+        "skLinkStalled",
+    };
+    fresh(false);
+    for (size_t i = 0; i < sizeof(builtins) / sizeof(builtins[0]); i++) {
+        TEST_ASSERT_EQUAL_MESSAGE(ESP_OK,
+                                  espos_health_report(builtins[i], ESPOS_HEALTH_WARN, "x"),
+                                  builtins[i]);
+    }
+    /* And they are distinct keys, not one key reported five times. */
+    espos_health_condition_t out[8];
+    size_t n = espos_health_snapshot(out, 8);
+    TEST_ASSERT_EQUAL(5, n);
 }

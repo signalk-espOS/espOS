@@ -3,14 +3,18 @@ menu "espOS health"
     config ESPOS_HEALTH_MAX_CONDITIONS
         int "Distinct condition keys"
         default 12
-        range 1 32
+        range 5 32
         help
             Slots for remembered conditions, one per key (~128 bytes each,
             reserved for the life of the firmware). The set of conditions a
             firmware can raise is fixed at build time, so size this to what
             it actually raises; further keys are rejected with ESP_ERR_NO_MEM.
-            espOS itself uses up to four: lowMemory, taskStalled, netDown and
-            skLinkStalled.
+            espOS itself uses five: lowMemory, memoryTrough, taskStalled,
+            netDown and skLinkStalled, which is why the minimum is 5 rather
+            than 1. A table too small to hold them drops one silently, and if
+            the dropped key is a fatal one the device stops restarting on a
+            condition that should restart it. Raise this for a firmware that
+            adds keys of its own.
 
     config ESPOS_HEALTH_MAX_SINKS
         int "Health sinks"
@@ -74,6 +78,36 @@ menu "espOS health"
                 while esp-sr's wake pipeline allocates at start, settling
                 near 95 KB afterwards. A threshold above that trough would
                 restart the panel on every boot.
+
+        config ESPOS_HEALTH_INTERNAL_TROUGH_WARN_KB
+            int "memoryTrough: warn if the internal-RAM low-water mark is below (KB)"
+            default 10
+            range 0 4096
+            help
+                Warning only, never fatal, and reported as its own condition
+                (`memoryTrough`) rather than folded into `lowMemory`.
+
+                The checks above read the free size on a tick, so a trough
+                BETWEEN two ticks is invisible to them -- and a transient
+                trough is what precedes an allocation failure. A Waveshare
+                ESP32-C5 running the BLE gateway measured 27604 B free after
+                27 hours with a low-water mark of 4924 B, and 148 B on a later
+                run. No tick came near either: each read a free size well
+                above the fatal floor. The mark is a sum of per-region
+                floors, so it does not prove the TOTAL ever got that low --
+                but the parts sum to it, so every internal region had been
+                within 148 B of exhaustion at its own worst moment, and an
+                allocation fails on a region, not on the total.
+
+                Default 10, below the 12 KB fatal floor: a device that got
+                close enough to restarting to be worth mentioning, but not
+                so close that the live alarm would already have fired. Raise
+                it to hear about a smaller dip; 0 disables.
+
+                Never fatal by construction. A low-water mark does not
+                recover within a boot, so a fatal condition on it would
+                reboot, see the same mark on the next boot's first dip, and
+                reboot again.
 
         config ESPOS_HEALTH_LARGEST_BLOCK_ALARM_KB
             int "lowMemory: fatal alarm below largest free internal block (KB)"

@@ -189,8 +189,29 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(st, 200)
         self.assertEqual(hd.get("Content-Type"), "application/json")
         for k in ("app", "version", "idf_version", "chip", "uptime_s", "free_heap", "min_free_heap",
-                  "reset_reason", "config_storage_reset", "schema_etag"):
+                  "free_internal", "min_internal_free", "reset_reason",
+                  "config_storage_reset", "schema_etag"):
             self.assertIn(k, js, k)
+        # free_internal/min_internal_free are the live and low-water halves of one
+        # measurement, and min_internal_free is what memoryTrough is raised from;
+        # until they were added a device could not be asked for the number behind
+        # that warning, nor whether internal RAM had recovered.
+        # Deliberately NOT compared with free_heap/min_free_heap: the
+        # two ask different capability sets (INTERNAL vs DEFAULT), those bits are
+        # independent flags rather than a hierarchy, and
+        # heap_caps_get_minimum_free_size() sums each matching region's own
+        # minimum -- so neither figure is reliably the larger and an ordering
+        # assertion ACROSS the pairs would encode a guarantee ESP-IDF does not make.
+        #
+        # WITHIN a pair it is provable, so it is asserted: the low-water mark and the
+        # live figure sum over the same region set, and each region's minimum is at
+        # most its current free size, so min <= live term by term and therefore in
+        # total. (On the linux target every heap query returns one constant, so these
+        # hold with equality here -- they would still catch a swapped pair.)
+        self.assertIsInstance(js["min_internal_free"], int)
+        self.assertIsInstance(js["free_internal"], int)
+        self.assertLessEqual(js["min_free_heap"], js["free_heap"])
+        self.assertLessEqual(js["min_internal_free"], js["free_internal"])
         self.assertEqual(js["app"], "espos_httpd_test")
         self.assertIsInstance(js["uptime_s"], int)
         self.assertFalse(js["config_storage_reset"])

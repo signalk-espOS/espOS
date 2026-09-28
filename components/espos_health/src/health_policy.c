@@ -86,6 +86,67 @@ espos_health_state_t espos_health_policy_memory(const espos_health_policy_cfg_t 
     return st;
 }
 
+/* "This device got close to nothing at some point", which is not what
+ * espos_health_policy_memory() answers.
+ *
+ * WHY IT IS WORTH A SEPARATE CONDITION. The live checks read the instantaneous
+ * free size on a tick, so a trough BETWEEN two ticks is invisible to them --
+ * and a transient trough is exactly what precedes an allocation failure.
+ * Measured on a Waveshare ESP32-C5 running the BLE gateway: 27604 B free after
+ * 27 hours of uptime, with a low-water mark of 4924 B -- and 148 B on a later
+ * run. No tick came near either: each read a free size well above the fatal floor.
+ * The mark sums per-region floors, so it does not prove the TOTAL got that low --
+ * but since the parts sum to it, every region had been within 148 B of exhaustion
+ * at its own worst moment, and an allocation fails on a region (espOS #129). The port
+ * already samples these marks -- they were written into the reset record and
+ * read only after a restart, so the measurement existed and nothing decided on
+ * it.
+ *
+ * WHY IT IS NEVER FATAL. A low-water mark does not recover: once it has dipped,
+ * it reads that way for the life of the boot. A fatal condition on a value that
+ * cannot improve would reboot the device, observe the same mark on the next
+ * boot's first dip, and reboot again. It is a diagnostic -- it tells an operator
+ * where to look -- and the live ALARMs remain what actually restarts anything.
+ *
+ * Deliberately internal-RAM only. The total is the less interesting pool on any
+ * board with PSRAM, and a second sticky condition on it would mostly repeat
+ * this one. */
+espos_health_state_t espos_health_policy_trough(const espos_health_policy_cfg_t *cfg,
+                                                const espos_health_heap_t *h, char *message,
+                                                size_t message_size)
+{
+    espos_health_state_t st = ESPOS_HEALTH_NORMAL;
+    const char *m = "";
+    char buf[ESPOS_HEALTH_MSG_MAX];
+
+    if (cfg->internal_trough_warn_kb && h->internal_min < cfg->internal_trough_warn_kb * 1024u) {
+        st = ESPOS_HEALTH_WARN;
+        /* The THRESHOLD, not the mark -- espos_health_report() suppresses a
+         * repeat only when state AND message both match, and a message carrying
+         * the live figure would fan out to every sink on every tick. The mark
+         * itself is in GET /api/v1/system/info as `min_internal_free`, and in
+         * the watchdog's own heap log line. Same reasoning as the live checks
+         * above; see espOS #124 for what it cost to learn.
+         *
+         * "low-water mark", not "fell below": heap_caps_get_minimum_free_size()
+         * SUMS each matching region's own minimum, and those minima need not have
+         * happened together, so the total may never have held this value at any
+         * one instant. Summing them gives a LOWER bound on the worst simultaneous
+         * total -- no HIGHER than it, never a value the device is known to have
+         * reached. Two 100 KB regions that each dip to 10 KB at different times
+         * report 20 KB while the total never left 110 KB. Pessimistic is the safe
+         * direction for a warning, but the message must not claim a moment that
+         * may not have existed. */
+        snprintf(buf, sizeof(buf), "internal RAM low-water mark below %u KB since boot",
+                 (unsigned)cfg->internal_trough_warn_kb);
+        m = buf;
+    }
+    if (message && message_size) {
+        snprintf(message, message_size, "%s", m);
+    }
+    return st;
+}
+
 static void check_tasks(espos_health_policy_t *p, uint32_t now)
 {
     const espos_health_watched_t *stalled = NULL;
@@ -131,6 +192,14 @@ uint32_t espos_health_policy_tick(espos_health_policy_t *p)
     uint32_t flags = 0;
     espos_health_state_t st = espos_health_policy_memory(&p->cfg, &h, msg, sizeof(msg), &flags);
     p->port->report(p->ctx, "lowMemory", st, msg, flags);
+
+    /* Its own key, not folded into lowMemory: that check is an if/else chain
+     * returning one condition, so a trough would be masked whenever a live
+     * threshold fired -- which is precisely when it is most worth knowing that
+     * the device has been here before. Flags are 0: never fatal. */
+    char trough_msg[ESPOS_HEALTH_MSG_MAX];
+    espos_health_state_t tst = espos_health_policy_trough(&p->cfg, &h, trough_msg, sizeof(trough_msg));
+    p->port->report(p->ctx, "memoryTrough", tst, trough_msg, 0);
 
     /* Not before the first watch: a firmware that watches nothing should not
      * spend a condition slot (and a NORMAL notification) on taskStalled. */
