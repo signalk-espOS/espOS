@@ -142,6 +142,58 @@ bool espos_health_fatal_alarm(espos_health_condition_t *out);
 /** Forget every condition and sink (tests). */
 void espos_health_reset(void);
 
+/* ------------------------------------------------------- synthetic conditions */
+
+/**
+ * Keys a synthetic condition may use must start with this. A real condition
+ * cannot be impersonated, and a reader can tell at a glance that an ALARM is a
+ * drill -- which matters when the fan-out reaches a chartplotter.
+ */
+#define ESPOS_HEALTH_TEST_PREFIX "test."
+
+/** Longest ttl_ms accepted: a drill nobody clears must end on its own. */
+#define ESPOS_HEALTH_TEST_TTL_MAX_MS (300u * 1000u)
+
+/**
+ * Raise or clear a synthetic condition, for exercising the sinks a real fault
+ * would reach (buzzer, LED, SignalK notifications) without causing the fault.
+ *
+ * Reported through the same path as anything real, so a sink cannot tell the
+ * difference -- that is the point -- with two deliberate restrictions:
+ *
+ *  - flags are always 0, so this can never arm the reboot path no matter what a
+ *    real condition of the same name would carry. Structural, not a promise.
+ *  - `key` must start with ESPOS_HEALTH_TEST_PREFIX, else ESP_ERR_INVALID_ARG.
+ *
+ * At most ONE synthetic condition is active at a time: raising a second clears
+ * the first. A drill on a live boat should have a bounded blast radius, and a
+ * test script cannot leak fake alarms into the table by looping.
+ *
+ * @param state  ESPOS_HEALTH_NORMAL clears it (and disarms the ttl); WARN or
+ *               ALARM raises it.
+ * @param ttl_ms backstop for a test session that goes away, NOT the normal way
+ *               to clear -- call again with NORMAL for that. Required when
+ *               raising: 1..ESPOS_HEALTH_TEST_TTL_MAX_MS. Ignored when clearing.
+ * @return ESP_ERR_INVALID_ARG for a bad key, state or ttl; ESP_ERR_NO_MEM when
+ *         the condition table is full (CONFIG_ESPOS_HEALTH_MAX_CONDITIONS --
+ *         note a key keeps its slot for the life of the boot, so reuse one key).
+ */
+esp_err_t espos_health_report_test(const char *key, espos_health_state_t state, const char *message,
+                                   uint32_t ttl_ms);
+
+/**
+ * Clear the synthetic condition if its ttl has elapsed; otherwise do nothing.
+ * Cheap and idempotent.
+ *
+ * The policy tick calls this, so on a device with espos_health_policy_start()
+ * running the backstop fires within a tick. Nothing else drives it, so a caller
+ * that reads the conditions should call this first rather than assume a tick has
+ * happened -- GET /api/v1/health does.
+ *
+ * @return true if a synthetic condition was cleared by this call.
+ */
+bool espos_health_test_expire(void);
+
 /* ------------------------------------------------------------------ policy */
 
 /**

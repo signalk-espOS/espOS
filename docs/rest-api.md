@@ -387,6 +387,92 @@ moved since boot; `up_s` is seconds since it came up (0 when down); `ip6_ll`
 is `""` when the interface has no link-local IPv6 address. `/wifi/status`
 below is unchanged and keeps the WiFi-specific detail.
 
+## Health
+
+### `GET /health` — protected
+
+What the device currently thinks is wrong.
+
+```json
+{
+  "worst": "alarm",
+  "fatal": "lowMemory",
+  "conditions": [
+    {"key": "lowMemory", "state": "alarm", "message": "internal RAM below 12 KB", "reboot_on_alarm": true},
+    {"key": "memoryTrough", "state": "warn", "message": "internal RAM low-water mark below 10 KB since boot", "reboot_on_alarm": false},
+    {"key": "netDown", "state": "normal", "message": "", "reboot_on_alarm": false}
+  ]
+}
+```
+
+`worst` is the worst state of any condition — what a single status LED wants.
+`fatal` names the condition the policy would restart for, or `null`; it is the one
+thing a reader cannot derive from the list, because it depends on the flags a
+condition was raised with rather than on its state. `reboot_on_alarm` reports that
+flag per condition, rather than the raw `ESPOS_HEALTH_F_*` bitmask a client would
+then have to keep in step with the firmware.
+
+Conditions are listed oldest first, including those currently `normal`: a key keeps
+its slot for the life of the boot once raised, so the list is the history of what
+*has* gone wrong as much as what is wrong now. `truncated` appears with a count if
+there are more conditions than the response can carry (32).
+
+### `POST /health/test` — protected
+
+Raise a synthetic condition, so a hardware test can exercise the buzzer, LED and
+notification path a real fault would reach — on a boxed-up board, without causing
+the fault ([espOS #137](https://github.com/signalk-espOS/espOS/issues/137)).
+
+```json
+{"key": "test.buzzer", "state": "alarm", "message": "G4 drill", "ttl_s": 45}
+```
+
+Returns the same body as `GET /health`. Clear it with `{"key": "...", "state": "normal"}`.
+
+| field | |
+|---|---|
+| `key` | required; **must start with `test.`**, name something after it, under 24 bytes |
+| `state` | required; `normal` clears, `warn` or `alarm` raises |
+| `message` | optional string, under 96 bytes |
+| `ttl_s` | optional, 1–300 (fractions allowed), default **45**; a backstop, not the normal way to clear |
+
+A field that is present but of the wrong type is a `400`, not silently ignored, and
+so is an over-long `key` or `message` — the firmware refuses those rather than
+truncating them.
+
+The ttl is cleared by the policy tick, so a drill ends within one
+`CONFIG_ESPOS_HEALTH_POLICY_TICK_S` (default 10 s) of falling due rather than at the
+second: expect `ttl_s: 45` to clear somewhere in 45–55 s. `GET /health` drives expiry
+too, so a script polling it sees the clear sooner. To end a drill at a known moment,
+clear it explicitly.
+
+Three properties make this safe enough to ship enabled rather than hide behind a
+build flag, since the API key is the real gate either way:
+
+* **It cannot reboot the device.** Every built-in alarm carries
+  `ESPOS_HEALTH_F_REBOOT_ON_ALARM`, so triggering one to watch a buzzer ends the
+  observation. A synthetic condition is always reported with no flags, so it is
+  structurally incapable of arming that path — note `fatal` stays `null` while
+  `worst` reads `alarm`.
+* **It cannot impersonate a real condition.** The reserved `test.` prefix means a
+  drill can neither be mistaken for a genuine fault nor clobber a consumer's own
+  condition key.
+* **At most one drill is active at a time.** Raising a second clears the first, so a
+  script that loops cannot leave a trail of fake alarms on a live boat.
+
+The default `ttl_s` is 45 rather than 30 because a *repeating* alarm has to be
+watched for several cycles to be believed: an espOS consumer measured its own
+morse-code buzzer loop at 10–11 s per pass, so 30 s catches two cycles and not
+comfortably three. Out-of-range values are rejected rather than clamped — silently
+substituting a different timeout is how a test ends up proving the wrong thing.
+
+A drill is a real report, so it fans out to every sink, **including the SignalK
+notification path** — expect it on a chartplotter, and clear it when done.
+
+`507 Insufficient Storage` means the condition table is full
+(`CONFIG_ESPOS_HEALTH_MAX_CONDITIONS`, default 12). Reuse a key you have already
+used this boot rather than inventing one per run: a key keeps its slot.
+
 ## Time
 
 ### `GET /time` — protected

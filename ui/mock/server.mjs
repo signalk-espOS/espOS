@@ -302,6 +302,38 @@ export function startMock(port = 8484) {
     res.end(data);
   };
   const err = (res, status, code, message, extra = {}) => json(res, status, { error: code, message, ...extra });
+  // Health conditions. `drills` holds whatever POST /health/test has raised; a key
+  // stays in the map once seen, at "normal", which is what the device does -- a
+  // condition keeps its table slot for the life of the boot.
+  const drills = new Map();
+  // Deadlines live apart from the drill objects so they never appear in a response.
+  // The device clears a drill on the policy tick once its ttl is up; a mock that
+  // kept one raised for ever would teach the UI that drills are permanent.
+  const drillDeadlines = new Map();
+  const expireDrills = () => {
+    const now = Date.now();
+    for (const [k, due] of drillDeadlines) {
+      if (now >= due) {
+        const c = drills.get(k);
+        if (c) c.state = "normal";
+        drillDeadlines.delete(k);
+      }
+    }
+  };
+  const healthBody = () => {
+    expireDrills();
+    const builtins = [
+      { key: "lowMemory", state: "normal", message: "", reboot_on_alarm: true },
+      { key: "memoryTrough", state: "warn",
+        message: "internal RAM low-water mark below 10 KB since boot", reboot_on_alarm: false },
+      { key: "netDown", state: "normal", message: "", reboot_on_alarm: false },
+    ];
+    const conditions = [...builtins, ...drills.values()];
+    const rank = { normal: 0, warn: 1, alarm: 2 };
+    const worst = conditions.reduce((w, c) => (rank[c.state] > rank[w] ? c.state : w), "normal");
+    const fatal = conditions.find((c) => c.state === "alarm" && c.reboot_on_alarm);
+    return { worst, fatal: fatal ? fatal.key : null, conditions };
+  };
   const body = (req) => new Promise((resolve) => { let b = ""; req.on("data", (c) => (b += c)); req.on("end", () => resolve(b)); });
   const needJson = (req, res) => {
     if (!/^application\/json/.test(req.headers["content-type"] ?? "")) { err(res, 415, "unsupported_media_type", "Content-Type: application/json required"); return false; }
@@ -440,6 +472,51 @@ export function startMock(port = 8484) {
       // has only ever been seen in its happy state is a page whose warnings
       // have never been read: the edge pool is deliberately near full and a
       // few posts have been dropped.
+      // ---- health. The device's conditions, and the drill endpoint that lets a
+      // hardware test exercise a buzzer/LED without causing a real fault. A
+      // deliberately mixed set: one fatal alarm, one non-fatal warning and one
+      // condition sitting at normal, because a key keeps its slot once raised.
+      if (r === "/health" && m === "GET") return json(res, 200, healthBody());
+      if (r === "/health/test" && m === "POST") {
+        if (!needJson(req, res)) return;
+        let b;
+        try { b = JSON.parse((await body(req)) || "{}"); } catch { b = null; }
+        if (!b || typeof b !== "object") return err(res, 400, "bad_request", "not JSON");
+        if (typeof b.key !== "string" || typeof b.state !== "string") {
+          return err(res, 400, "validation", "key and state are required strings");
+        }
+        if (!b.key.startsWith("test.") || b.key === "test.") {
+          return err(res, 400, "validation", 'key must start with "test." and name something');
+        }
+        if (!["normal", "warn", "alarm"].includes(b.state)) {
+          return err(res, 400, "validation", "state must be normal, warn or alarm");
+        }
+        if (b.message !== undefined && b.message !== null && typeof b.message !== "string") {
+          return err(res, 400, "validation", "message must be a string");
+        }
+        if (b.key.length >= 24 || (b.message ?? "").length >= 96) {
+          return err(res, 400, "validation", "key must be under 24 bytes and message under 96");
+        }
+        if (b.ttl_s !== undefined && b.ttl_s !== null) {
+          if (typeof b.ttl_s !== "number") return err(res, 400, "validation", "ttl_s must be a number");
+          if (b.ttl_s < 1 || b.ttl_s > 300) return err(res, 400, "validation", "ttl_s must be 1..300");
+        }
+        // The table filling is the one failure a well-formed request still meets,
+        // and the UI has to tell the difference between that and a server fault.
+        if (b.key === "test.noslot") {
+          return err(res, 507, "no_slot",
+                     "the condition table is full; reuse a test key or raise CONFIG_ESPOS_HEALTH_MAX_CONDITIONS");
+        }
+        // One drill at a time: raising a second clears the first.
+        for (const c of drills.values()) c.state = "normal";
+        drillDeadlines.clear();
+        drills.set(b.key, { key: b.key, state: b.state, message: b.message ?? "", reboot_on_alarm: false });
+        if (b.state !== "normal") {
+          drillDeadlines.set(b.key, Date.now() + (b.ttl_s ?? 45) * 1000);
+        }
+        return json(res, 200, healthBody());
+      }
+
       if (r === "/flow" && m === "GET") return json(res, 200, {
         running: true,
         loop: { posts: 18240, dropped: 3, timers_fired: 9120, timers_live: 4,
