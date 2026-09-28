@@ -8,7 +8,9 @@
 ## staying a valid standalone project outside it.
 ##
 ## espos_sk pulls the rest of the core in as its own dependencies; espos_core
-## is named because main calls espos_start().
+## is named because main calls espos_start(). espos_ota is named because
+## nothing else pulls it in, and a firmware without it can never be updated
+## over the air: espos_start() starts it whenever it is part of the build.
 dependencies:
   idf: ">=6.0.0,<6.1.0"
   signalk-espos/espos_core:
@@ -21,6 +23,11 @@ dependencies:
     version: "^0.11.0"
     # x-release-please-end
     override_path: "../../../../espos_sk"
+  signalk-espos/espos_ota:
+    # x-release-please-start-version
+    version: "^0.11.0"
+    # x-release-please-end
+    override_path: "../../../../espos_ota"
 
   ## The ESP32-P4 has no radio: WiFi is an ESP32-C6 co-processor over SDIO
   ## (esp_hosted) behind the esp_wifi_remote shim, which gives it the same

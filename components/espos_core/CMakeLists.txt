@@ -91,17 +91,32 @@ if(_have_power)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE ESPOS_HAVE_POWER=1)
 endif()
 
-# espOS's own version, as distinct from the application's PROJECT_VER: in the
-# tree it is version.txt two levels up; a copy installed from the component
-# registry has no such file and carries the version in its manifest instead.
-set(espos_version_file "${CMAKE_CURRENT_LIST_DIR}/../../version.txt")
-if(EXISTS "${espos_version_file}")
-    file(READ "${espos_version_file}" espos_version)
-    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${espos_version_file}")
+# espOS's own version, as distinct from the application's PROJECT_VER.
+#
+# In an espOS checkout -- this repository, or an espos/ submodule -- it is
+# version.txt at the root, two levels up. A copy installed from the component
+# registry sits at <app>/managed_components/<name>/, where two levels up is the
+# APPLICATION, whose own version.txt must not be read: it is the wrong version,
+# and IDF lists that file as a configure dependency too, so listing it again
+# fails the generate step ("version.txt is defined as an output multiple
+# times"). cmake/espos_project.cmake marks a checkout because no component
+# archive ships cmake/.
+#
+# An installed copy gets its version from the component manager
+# (COMPONENT_VERSION). The manifest is the fallback for a build with the manager
+# off; the manager rewrites it on packing with the version unquoted.
+get_filename_component(espos_root "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
+if(EXISTS "${espos_root}/cmake/espos_project.cmake" AND EXISTS "${espos_root}/version.txt")
+    file(READ "${espos_root}/version.txt" espos_version)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${espos_root}/version.txt")
 else()
-    file(READ "${CMAKE_CURRENT_LIST_DIR}/idf_component.yml" espos_manifest)
-    string(REGEX MATCH "\nversion: \"([^\"]+)\"" _ "${espos_manifest}")
-    set(espos_version "${CMAKE_MATCH_1}")
+    idf_component_get_property(espos_version ${COMPONENT_NAME} COMPONENT_VERSION)
+    if(NOT espos_version)
+        file(STRINGS "${CMAKE_CURRENT_LIST_DIR}/idf_component.yml" espos_version_line
+             REGEX "^version:" LIMIT_COUNT 1)
+        string(REGEX REPLACE "^version:[ \t]*[\"']?([^\"' \t#]+).*$" "\\1"
+               espos_version "${espos_version_line}")
+    endif()
 endif()
 string(STRIP "${espos_version}" espos_version)
 if(NOT espos_version)

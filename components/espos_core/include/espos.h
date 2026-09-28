@@ -91,8 +91,8 @@ esp_err_t espos_init(void);
  * config store to be up (espos_init()); ESP_ERR_INVALID_STATE otherwise. Idempotent. */
 esp_err_t espos_start_network(void);
 
-/** espOS's own version ("0.7.0"): version.txt at build time, or the
- * component manifest's version for a registry-installed copy. Not the
+/** espOS's own version ("0.7.0"): the checkout's version.txt at build time,
+ * or the version the component manager installed for a registry copy. Not the
  * application's version — that is PROJECT_VER, on the boot banner. */
 const char *espos_version(void);
 

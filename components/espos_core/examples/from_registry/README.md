@@ -3,7 +3,7 @@
 The same application as [`minimal`](../minimal/), built the way a project
 outside this repository builds: **espOS installed from the component registry**,
 nothing on disk but this directory. The C is deliberately identical — what the
-example demonstrates is the four files around it.
+example demonstrates is the files around it.
 
 Use this one as the starting point for your own firmware. Use `minimal` when you
 are working inside an espOS checkout, where the prologue does all of this for
@@ -78,25 +78,26 @@ updated over the air again.
 
 ## Starting your own project from this
 
-Four things, and `espos_core`'s configure-time lint names each one with the
-consequence if you skip it — delete any of them and the build tells you what to
-put back:
+`idf.py create-project-from-example "signalk-espos/espos_core:from_registry"`
+gives you all of this. What each part is for, in case you start elsewhere:
 
 1. **`main/idf_component.yml`** names espOS. `espos_sk` pulls the rest of the
-   core in as its own dependencies:
+   core in as its own dependencies; `espos_ota` has to be named, because nothing
+   else pulls it in and a firmware without it can never be updated over the air:
 
    ```yaml
    dependencies:
      idf: ">=6.0.0,<6.1.0"
-     signalk-espos/espos_core: "^0.9.0"
-     signalk-espos/espos_sk: "^0.9.0"
+     signalk-espos/espos_core: "^0.11.0"  # x-release-please-version
+     signalk-espos/espos_sk: "^0.11.0"  # x-release-please-version
+     signalk-espos/espos_ota: "^0.11.0"  # x-release-please-version
    ```
 
    Keep the `^`: espOS is pre-1.0, where a minor bump does the work a major
    will do later. The components release in lockstep — one version of any works
-   with the same version of every other. (This example additionally carries
-   `override_path`, so espOS's own CI builds it against the tree it ships in
-   rather than a published release. Delete those lines in your project.)
+   with the same version of every other. (The file in this directory also
+   carries `override_path`, so espOS's own CI builds it against the tree it
+   ships in. The registry removes those lines from the copy you download.)
 
 2. **A root `CMakeLists.txt`** — plain IDF, plus the UI partition:
 
@@ -125,7 +126,21 @@ put back:
    above it. The one that is easy to miss is `CONFIG_ESPTOOLPY_FLASHSIZE_*`,
    which must match the table you picked: a 4 MB table on the 2 MB default runs
    past the end of the chip and the flash fails partway through writing it.
-   espos_core's lint sums the table and says so before you get there.
+   espos_core's lint sums the table and says so before you get there — for 2–4
+   it names each missing piece with the consequence, so delete one and the build
+   tells you what to put back.
+
+5. **`version.txt`** — your firmware's version, which the device reports and an
+   update is compared against. Without it IDF falls back to `git describe`, and
+   to `1` outside a repository. release-please's `simple` release type keeps it
+   current if you let it.
+
+6. **`.idf-version`** — the ESP-IDF version you build with (`v6.0.3`), one line.
+   espOS's reusable firmware workflow reads it to pick the build image.
+
+7. **`.gitignore`** — keeps the build output, `managed_components/` and, above
+   all, `secure_boot_signing_key.pem` out of git. Commit `dependencies.lock`: it
+   is what makes the next build use the same components.
 
 ## What the monitor shows
 

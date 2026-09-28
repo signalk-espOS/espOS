@@ -1,0 +1,11 @@
+# Build output and what IDF generates from sdkconfig.defaults.
+build/
+sdkconfig
+sdkconfig.old
+# Downloaded by the component manager from dependencies.lock. The lock itself
+# IS committed: it is what makes the next build use the same components.
+managed_components/
+# The signing key. Committing it lets anyone sign firmware your devices accept.
+*.pem
+# idf.py monitor's log files.
+log/
