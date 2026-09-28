@@ -159,7 +159,7 @@ device never had *less*. It can only overstate how bad things got, which is the 
 direction for a warning — a board this fires on deserves a look even if the number
 itself was never on the clock. It is also why the message says "low-water mark below
 N KB" rather than claiming memory "fell below" N KB, and why the number is worth
-reading beside `free_heap` rather than instead of it.
+reading beside the live `free_internal` rather than instead of it.
 
 **`memoryTrough` is never fatal**, by construction rather than by configuration. A
 low-water mark does not recover within a boot: a fatal condition on it would restart the
