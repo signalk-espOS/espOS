@@ -122,8 +122,9 @@ espos_health_state_t espos_health_policy_trough(const espos_health_policy_cfg_t 
         /* The THRESHOLD, not the mark -- espos_health_report() suppresses a
          * repeat only when state AND message both match, and a message carrying
          * the live figure would fan out to every sink on every tick. The mark
-         * itself is in the log line and in /api/v1/system/info. Same reasoning as
-         * the live checks above; see espOS #124 for what it cost to learn. */
+         * itself is in GET /api/v1/system/info as `min_internal_free`, and in
+         * the watchdog's own heap log line. Same reasoning as the live checks
+         * above; see espOS #124 for what it cost to learn. */
         snprintf(buf, sizeof(buf), "internal RAM fell below %u KB since boot",
                  (unsigned)cfg->internal_trough_warn_kb);
         m = buf;

@@ -151,6 +151,12 @@ raised, which is correct and is why the message names the threshold rather than 
 (a message carrying the live figure would defeat `espos_health_report()`'s duplicate
 suppression and fan out to every sink on every tick).
 
+The mark itself is read from `GET /api/v1/system/info`, as `min_internal_free`
+beside the whole-heap `min_free_heap` ([rest-api.md](rest-api.md)); the watchdog
+also logs it at `DEBUG` on every sample. That is the number to look at after the
+warning, because the trough it reports is over by the time anyone asks and the
+live `free_heap` will look fine.
+
 Internal RAM is judged separately from the total because on a board with PSRAM
 it is the scarce pool — the radio, DMA and every task stack come from it, and
 tens of megabytes free overall hide its exhaustion. The alarm thresholds sit

@@ -185,6 +185,7 @@ already advertise.
   "app": "espos", "version": "0.1.0-3-gabc1234", "idf_version": "v6.0.2",
   "chip": "esp32c6", "chip_revision": 1, "cores": 1,
   "uptime_s": 42, "free_heap": 210000, "min_free_heap": 190000,
+  "min_internal_free": 121000,
   "reset_reason": "software", "config_storage_reset": false,
   "schema_etag": "6acfba355e183b19", "ui_storage": true,
   "hardware": {
@@ -239,6 +240,22 @@ would be a hardcoded datasheet table espOS cannot verify.
 
 The whole object is absent on a device built before it existed, so a client
 should treat it and every member as optional.
+
+`min_free_heap` and `min_internal_free` are low-water marks since boot, not live
+figures. The first asks `MALLOC_CAP_DEFAULT` — what a plain `malloc()` may be
+given, which on a board with PSRAM includes PSRAM — and the second
+`MALLOC_CAP_INTERNAL`. Do not compare them: ESP-IDF's capability bits are
+independent flags rather than a hierarchy, and `heap_caps_get_minimum_free_size()`
+**sums each matching region's own minimum**, so the two figures add up different,
+overlapping sets of regions, each at whatever moment that region happened to be
+at its emptiest. Neither is reliably the larger, and on a board with no PSRAM they
+are not necessarily equal either. Read each as the answer to its own question.
+
+`min_internal_free` is what the `memoryTrough` health condition is raised from
+([health.md](health.md)), so it is the figure to read after seeing that warning —
+the trough it reports is over by the time anyone asks, and `free_heap` will look
+fine. It is the same measurement the health policy makes, not a similar one.
+
 `ui_storage` (M5) is true when the LittleFS UI partition is mounted.
 `config_storage_reset` is true when the NVS partition had to be erased at
 boot (corrupt/incompatible) and every value is a default.
