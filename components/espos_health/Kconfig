@@ -75,6 +75,32 @@ menu "espOS health"
                 near 95 KB afterwards. A threshold above that trough would
                 restart the panel on every boot.
 
+        config ESPOS_HEALTH_INTERNAL_TROUGH_WARN_KB
+            int "memoryTrough: warn if internal RAM ever fell below (KB)"
+            default 10
+            range 0 4096
+            help
+                Warning only, never fatal, and reported as its own condition
+                (`memoryTrough`) rather than folded into `lowMemory`.
+
+                The checks above read the free size on a tick, so a trough
+                BETWEEN two ticks is invisible to them -- and a transient
+                trough is what precedes an allocation failure. A Waveshare
+                ESP32-C5 running the BLE gateway measured 27604 B free after
+                27 hours with a low-water mark of 4924 B: every tick saw a
+                healthy board, while the board had been within 5 KB of
+                nothing.
+
+                Default 10, below the 12 KB fatal floor: a device that got
+                close enough to restarting to be worth mentioning, but not
+                so close that the live alarm would already have fired. Raise
+                it to hear about a smaller dip; 0 disables.
+
+                Never fatal by construction. A low-water mark does not
+                recover within a boot, so a fatal condition on it would
+                reboot, see the same mark on the next boot's first dip, and
+                reboot again.
+
         config ESPOS_HEALTH_LARGEST_BLOCK_ALARM_KB
             int "lowMemory: fatal alarm below largest free internal block (KB)"
             default 8

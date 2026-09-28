@@ -130,6 +130,7 @@ static void ensure_policy(void)
         .internal_warn_kb = CONFIG_ESPOS_HEALTH_INTERNAL_WARN_KB,
         .internal_alarm_kb = CONFIG_ESPOS_HEALTH_INTERNAL_ALARM_KB,
         .largest_block_alarm_kb = CONFIG_ESPOS_HEALTH_LARGEST_BLOCK_ALARM_KB,
+        .internal_trough_warn_kb = CONFIG_ESPOS_HEALTH_INTERNAL_TROUGH_WARN_KB,
     };
     espos_health_policy_init(&s.policy, &PORT, NULL, &cfg);
     s.policy_ready = true;

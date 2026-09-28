@@ -78,7 +78,8 @@ also gated by `CONFIG_ESPOS_CORE_HEALTH_WATCHDOG`); by hand it is
 `espos_health_policy_start()`. Every **tick** (`CONFIG_ESPOS_HEALTH_POLICY_TICK_S`,
 10 s) it:
 
-1. reads the heap and raises or clears **`lowMemory`**;
+1. reads the heap and raises or clears **`lowMemory`** (what is free *now*) and
+   **`memoryTrough`** (how little was free at the worst point since boot);
 2. checks the watched tasks and raises or clears **`taskStalled`**;
 3. asks the table whether any condition raised with
    `ESPOS_HEALTH_F_REBOOT_ON_ALARM` is in `ALARM`. If so that is a **strike**;
@@ -114,9 +115,35 @@ resets, record contents.
 |---|---|---|---|---|
 | `lowMemory` | the policy tick | `WARN` | no | total free heap below `CONFIG_ESPOS_HEALTH_HEAP_WARN_KB` (40) or free internal RAM below `CONFIG_ESPOS_HEALTH_INTERNAL_WARN_KB` (20) |
 | `lowMemory` | the policy tick | `ALARM` | **yes** | free internal RAM below `CONFIG_ESPOS_HEALTH_INTERNAL_ALARM_KB` (12) or the largest free internal block below `CONFIG_ESPOS_HEALTH_LARGEST_BLOCK_ALARM_KB` (8) |
+| `memoryTrough` | the policy tick | `WARN` | no (never) | the low-water mark of free internal RAM since boot is below `CONFIG_ESPOS_HEALTH_INTERNAL_TROUGH_WARN_KB` (10) |
 | `taskStalled` | the policy tick | `ALARM` | **yes** | a task registered with `espos_health_watch_task()` has not called `espos_health_kick()` for its timeout |
 | `netDown` | `espos_core` | `WARN` | no | `ESPOS_EVENT_NETWORK_DOWN`; cleared on `NETWORK_UP` |
 | `skLinkStalled` | `espos_sk` | `ALARM` | **yes** | WiFi reports connected, the stream has worked once this boot, yet it has been down for `sk.stall_s` (300 s, min 60) |
+
+### `lowMemory` and `memoryTrough` answer different questions
+
+`lowMemory` reads the free size on the tick. `memoryTrough` reads the low-water mark
+since boot. A device can be healthy by the first and alarming by the second, and that
+combination is the one worth knowing about: a Waveshare ESP32-C5 running the BLE
+gateway measured **27604 B free after 27 hours of uptime with a low-water mark of
+4924 B** — every tick saw a healthy board, while the board had in fact been within 5 KB
+of nothing, below the fragmentation alarm floor and near the fatal one.
+
+A 10 s poll of an instantaneous value cannot see a trough between two ticks, and a
+transient trough is what precedes an allocation failure. The marks were already being
+sampled — they went into the reset record and were read only after a restart — so this
+costs a comparison rather than a measurement.
+
+**`memoryTrough` is never fatal**, by construction rather than by configuration. A
+low-water mark does not recover within a boot: a fatal condition on it would restart the
+device, observe the same mark on the next boot's first dip, and restart again. It is a
+diagnostic that tells an operator where to look; the `lowMemory` alarms remain what
+actually restarts anything.
+
+It follows that the condition is **sticky for the life of a boot** — once raised it stays
+raised, which is correct and is why the message names the threshold rather than the mark
+(a message carrying the live figure would defeat `espos_health_report()`'s duplicate
+suppression and fan out to every sink on every tick).
 
 Internal RAM is judged separately from the total because on a board with PSRAM
 it is the scarce pool — the radio, DMA and every task stack come from it, and
@@ -227,8 +254,8 @@ is keeping the policy and raising `sk.stall_s`.
 ## Sizing
 
 `CONFIG_ESPOS_HEALTH_MAX_CONDITIONS` (default 12) is the number of distinct
-keys; espOS itself uses up to four (`lowMemory`, `taskStalled`, `netDown`,
-`skLinkStalled`). `CONFIG_ESPOS_HEALTH_MAX_SINKS` (default 4) is the number of
+keys; espOS itself uses up to five (`lowMemory`, `memoryTrough`, `taskStalled`,
+`netDown`, `skLinkStalled`). `CONFIG_ESPOS_HEALTH_MAX_SINKS` (default 4) is the number of
 consumers. Both are fixed tables — the set of conditions a firmware can raise
 is decided at build time. Reporting a key beyond the limit returns
 `ESP_ERR_NO_MEM` and logs; it never grows silently.
