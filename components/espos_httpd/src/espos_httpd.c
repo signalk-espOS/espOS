@@ -252,6 +252,7 @@ esp_err_t espos_httpd_start(void)
     ESP_ERROR_CHECK(espos_httpd_register_system_api());
     ESP_ERROR_CHECK(espos_httpd_register_logs_api());
     ESP_ERROR_CHECK(espos_httpd_register_coredump_api());
+    ESP_ERROR_CHECK(espos_httpd_register_health_api());
     ESP_ERROR_CHECK(espos_httpd_register_static());
     ESP_ERROR_CHECK(espos_httpd_register_sse());
     ESP_ERROR_CHECK(espos_httpd_register_auth_api());

@@ -13,6 +13,7 @@ esp_err_t espos_httpd_static_serve(httpd_req_t *req);
 bool espos_httpd_static_mounted(void);
 esp_err_t espos_httpd_register_logs_api(void);
 esp_err_t espos_httpd_register_coredump_api(void);
+esp_err_t espos_httpd_register_health_api(void);
 esp_err_t espos_httpd_register_sse(void);
 void espos_httpd_sse_shutdown(void);
 esp_err_t espos_httpd_register_auth_api(void);

@@ -158,6 +158,15 @@ static void take_record(void)
 static void tick(void *arg)
 {
     (void)arg;
+    /* Before the policy, and outside this file's lock: a synthetic condition
+     * whose ttl has run out should stop being reported at the first opportunity,
+     * and expiring it fans out to sinks that must not run under our lock.
+     *
+     * Here rather than inside espos_health_policy_tick() because the policy
+     * reaches the world only through its injected port, while the drill lives in
+     * espos_health.c's real table -- calling it from there would reach past the
+     * port a host test has substituted. */
+    espos_health_test_expire();
     if (!lock()) return;
     uint32_t strikes = espos_health_policy_tick(&s.policy);
     if (strikes && !s.policy.restarting) {

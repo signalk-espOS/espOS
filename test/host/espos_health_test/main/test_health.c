@@ -11,6 +11,7 @@
  * precisely the case espos_health exists for.
  */
 #include <string.h>
+#include <unistd.h>
 
 #include "espos_health.h"
 #include "unity.h"
@@ -247,4 +248,230 @@ TEST_CASE("state_str names the three levels", "[health]")
     TEST_ASSERT_EQUAL_STRING("normal", espos_health_state_str(ESPOS_HEALTH_NORMAL));
     TEST_ASSERT_EQUAL_STRING("warn", espos_health_state_str(ESPOS_HEALTH_WARN));
     TEST_ASSERT_EQUAL_STRING("alarm", espos_health_state_str(ESPOS_HEALTH_ALARM));
+}
+
+/* ------------------------------------------------- synthetic conditions (#137) */
+
+/* Find a condition in the table by key, or NULL. */
+static const espos_health_condition_t *find_cond(espos_health_condition_t *buf, size_t n, const char *key)
+{
+    for (size_t i = 0; i < n; i++) {
+        if (strcmp(buf[i].key, key) == 0) return &buf[i];
+    }
+    return NULL;
+}
+
+TEST_CASE("a synthetic condition needs the reserved prefix and a name after it", "[health]")
+{
+    fresh();
+    /* Without the prefix a drill could impersonate a real fault -- and worse,
+     * could collide with a consumer's own key and clobber its state. */
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG,
+                      espos_health_report_test("relayExpander", ESPOS_HEALTH_ALARM, "x", 1000));
+    /* The prefix alone names nothing; "test." as a condition reads as a bug. */
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, espos_health_report_test("test.", ESPOS_HEALTH_ALARM, "x", 1000));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, espos_health_report_test(NULL, ESPOS_HEALTH_ALARM, "x", 1000));
+    /* Nothing reached the table. */
+    TEST_ASSERT_EQUAL(0, espos_health_snapshot(NULL, 0));
+
+    TEST_ASSERT_EQUAL(ESP_OK, espos_health_report_test("test.buzzer", ESPOS_HEALTH_ALARM, "drill", 1000));
+    TEST_ASSERT_EQUAL(1, espos_health_snapshot(NULL, 0));
+}
+
+TEST_CASE("a synthetic ALARM cannot arm the reboot path", "[health]")
+{
+    fresh();
+    /* The whole point of #137: every built-in alarm carries
+     * ESPOS_HEALTH_F_REBOOT_ON_ALARM, so triggering one to watch a buzzer ends
+     * the observation. A drill must reach the sinks and not the restart. */
+    TEST_ASSERT_EQUAL(ESP_OK, espos_health_report_test("test.buzzer", ESPOS_HEALTH_ALARM, "drill", 60000));
+
+    espos_health_condition_t buf[8];
+    size_t n = espos_health_snapshot(buf, 8);
+    const espos_health_condition_t *c = find_cond(buf, n, "test.buzzer");
+    TEST_ASSERT_NOT_NULL(c);
+    TEST_ASSERT_EQUAL(ESPOS_HEALTH_ALARM, c->state);
+    TEST_ASSERT_EQUAL_UINT32(0, c->flags);
+
+    /* Visible to a status LED as the worst state, yet not fatal -- the pair of
+     * facts a hardware test needs in order to assert anything. */
+    TEST_ASSERT_EQUAL(ESPOS_HEALTH_ALARM, espos_health_worst());
+    TEST_ASSERT_FALSE(espos_health_fatal_alarm(NULL));
+}
+
+TEST_CASE("a synthetic condition reaches the sinks like a real one", "[health]")
+{
+    fresh();
+    espos_health_add_sink(recorder, NULL);
+    TEST_ASSERT_EQUAL(ESP_OK, espos_health_report_test("test.buzzer", ESPOS_HEALTH_ALARM, "drill", 60000));
+    /* A buzzer hangs off a sink, so this is the property the endpoint exists to
+     * exercise. A sink deliberately cannot tell a drill from the real thing. */
+    TEST_ASSERT_EQUAL(1, s_n);
+    TEST_ASSERT_EQUAL_STRING("test.buzzer", s_calls[0].key);
+    TEST_ASSERT_EQUAL(ESPOS_HEALTH_ALARM, s_calls[0].state);
+    TEST_ASSERT_EQUAL_STRING("drill", s_calls[0].message);
+}
+
+TEST_CASE("raising a second drill clears the first", "[health]")
+{
+    fresh();
+    TEST_ASSERT_EQUAL(ESP_OK, espos_health_report_test("test.one", ESPOS_HEALTH_ALARM, "a", 60000));
+    TEST_ASSERT_EQUAL(ESP_OK, espos_health_report_test("test.two", ESPOS_HEALTH_ALARM, "b", 60000));
+
+    espos_health_condition_t buf[8];
+    size_t n = espos_health_snapshot(buf, 8);
+    /* One at a time, so a script that loops cannot leave a trail of fake alarms
+     * on a live boat. Both keys keep their table slots -- that is the cost of a
+     * new key and why a test should reuse one. */
+    TEST_ASSERT_EQUAL(ESPOS_HEALTH_NORMAL, find_cond(buf, n, "test.one")->state);
+    TEST_ASSERT_EQUAL(ESPOS_HEALTH_ALARM, find_cond(buf, n, "test.two")->state);
+}
+
+TEST_CASE("a drill's ttl must be present and sane when raising", "[health]")
+{
+    fresh();
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, espos_health_report_test("test.x", ESPOS_HEALTH_ALARM, "", 0));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG,
+                      espos_health_report_test("test.x", ESPOS_HEALTH_ALARM, "", ESPOS_HEALTH_TEST_TTL_MAX_MS + 1));
+    TEST_ASSERT_EQUAL(ESP_OK,
+                      espos_health_report_test("test.x", ESPOS_HEALTH_ALARM, "", ESPOS_HEALTH_TEST_TTL_MAX_MS));
+    /* Clearing needs no ttl: it is the normal way to end a drill. */
+    TEST_ASSERT_EQUAL(ESP_OK, espos_health_report_test("test.x", ESPOS_HEALTH_NORMAL, "", 0));
+}
+
+TEST_CASE("the ttl clears a drill, and only once it is due", "[health]")
+{
+    fresh();
+    espos_health_add_sink(recorder, NULL);
+    TEST_ASSERT_EQUAL(ESP_OK, espos_health_report_test("test.buzzer", ESPOS_HEALTH_ALARM, "drill", 60000));
+    /* Not due for a minute: the backstop must not cut an observation short. */
+    TEST_ASSERT_FALSE(espos_health_test_expire());
+    TEST_ASSERT_EQUAL(ESPOS_HEALTH_ALARM, espos_health_worst());
+
+    /* Due almost immediately. 1 ms rather than a faked clock because the
+     * deadline is read from the component's own port; the wait is real but
+     * bounded, and what is being checked is the arithmetic, not the delay. */
+    TEST_ASSERT_EQUAL(ESP_OK, espos_health_report_test("test.buzzer", ESPOS_HEALTH_ALARM, "drill", 1));
+    usleep(20000);
+    TEST_ASSERT_TRUE(espos_health_test_expire());
+    TEST_ASSERT_EQUAL(ESPOS_HEALTH_NORMAL, espos_health_worst());
+    /* Idempotent: nothing left armed, so the next policy tick -- or the next GET
+     * that drives expiry -- does not re-report a clear that already happened. */
+    TEST_ASSERT_FALSE(espos_health_test_expire());
+
+    /* The clear reached the sinks, which is how a buzzer stops. */
+    TEST_ASSERT_EQUAL(ESPOS_HEALTH_NORMAL, s_calls[s_n - 1].state);
+    TEST_ASSERT_EQUAL_STRING("test.buzzer", s_calls[s_n - 1].key);
+}
+
+TEST_CASE("clearing a drill disarms its ttl", "[health]")
+{
+    fresh();
+    TEST_ASSERT_EQUAL(ESP_OK, espos_health_report_test("test.buzzer", ESPOS_HEALTH_ALARM, "drill", 1));
+    TEST_ASSERT_EQUAL(ESP_OK, espos_health_report_test("test.buzzer", ESPOS_HEALTH_NORMAL, "", 0));
+    usleep(20000);
+    /* Nothing to expire: an explicit clear is the normal mechanism, and a stale
+     * deadline firing afterwards would re-report NORMAL to every sink for no
+     * reason. */
+    TEST_ASSERT_FALSE(espos_health_test_expire());
+}
+
+TEST_CASE("a rejected drill leaves the running one alone", "[health]")
+{
+    fresh();
+    TEST_ASSERT_EQUAL(ESP_OK, espos_health_report_test("test.running", ESPOS_HEALTH_ALARM, "watch me", 60000));
+
+    /* Every rejection path, each attempted while a drill is live. The first
+     * version of this cleared the previous drill BEFORE reporting the new one, so
+     * a malformed request silently ended an observation somebody was in the
+     * middle of -- a side effect no caller asked for. */
+    char too_long_msg[ESPOS_HEALTH_MSG_MAX + 1];
+    memset(too_long_msg, 'm', sizeof(too_long_msg) - 1);
+    too_long_msg[sizeof(too_long_msg) - 1] = '\0';
+    char too_long_key[ESPOS_HEALTH_KEY_MAX + 8];
+    snprintf(too_long_key, sizeof(too_long_key), "%skkkkkkkkkkkkkkkkkkkkkkkk", ESPOS_HEALTH_TEST_PREFIX);
+
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, espos_health_report_test("nope", ESPOS_HEALTH_ALARM, "", 1000));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, espos_health_report_test("test.other", ESPOS_HEALTH_ALARM, "", 0));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_SIZE,
+                      espos_health_report_test("test.other", ESPOS_HEALTH_ALARM, too_long_msg, 1000));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_SIZE,
+                      espos_health_report_test(too_long_key, ESPOS_HEALTH_ALARM, "", 1000));
+
+    /* Still running, still the one that was raised -- and still ARMED, which is
+     * the other half: the arming is now done before the report so that a failure
+     * rolls it back in memory. A drill left raised with nothing tracking it would
+     * be an alarm no ttl could ever clear. */
+    espos_health_condition_t buf[8];
+    size_t n = espos_health_snapshot(buf, 8);
+    const espos_health_condition_t *c = find_cond(buf, n, "test.running");
+    TEST_ASSERT_NOT_NULL(c);
+    TEST_ASSERT_EQUAL(ESPOS_HEALTH_ALARM, c->state);
+    TEST_ASSERT_EQUAL_STRING("watch me", c->message);
+    TEST_ASSERT_EQUAL(ESPOS_HEALTH_ALARM, espos_health_worst());
+    /* And its ttl is intact, so the backstop still applies. */
+    TEST_ASSERT_FALSE(espos_health_test_expire());
+    TEST_ASSERT_EQUAL(ESPOS_HEALTH_ALARM, espos_health_worst());
+}
+
+TEST_CASE("a drill refused for want of a table slot rolls the arming back", "[health]")
+{
+    fresh();
+    TEST_ASSERT_EQUAL(ESP_OK, espos_health_report_test("test.running", ESPOS_HEALTH_ALARM, "watch me", 60000));
+
+    /* Fill the condition table so the next NEW key cannot be admitted. This is
+     * the failure that survives every up-front check, and the one that used to
+     * leave the previous drill cleared with nothing raised in its place. */
+    char k[ESPOS_HEALTH_KEY_MAX];
+    esp_err_t fill = ESP_OK;
+    for (int i = 0; fill == ESP_OK && i < CONFIG_ESPOS_HEALTH_MAX_CONDITIONS + 2; i++) {
+        snprintf(k, sizeof(k), "filler%d", i);
+        fill = espos_health_report(k, ESPOS_HEALTH_NORMAL, "");
+    }
+    TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, fill);
+
+    TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, espos_health_report_test("test.other", ESPOS_HEALTH_ALARM, "", 60000));
+
+    /* The running drill survived, raised and still tracked. */
+    espos_health_condition_t buf[CONFIG_ESPOS_HEALTH_MAX_CONDITIONS];
+    size_t n = espos_health_snapshot(buf, sizeof(buf) / sizeof(buf[0]));
+    const espos_health_condition_t *c = find_cond(buf, n, "test.running");
+    TEST_ASSERT_NOT_NULL(c);
+    TEST_ASSERT_EQUAL(ESPOS_HEALTH_ALARM, c->state);
+    /* Armed: not due yet, so expire leaves it alone rather than finding nothing
+     * to track. A stale arming would have made this a no-op for the wrong reason,
+     * so the drill is then cleared explicitly and expire checked again. */
+    TEST_ASSERT_FALSE(espos_health_test_expire());
+    TEST_ASSERT_EQUAL(ESPOS_HEALTH_ALARM, espos_health_worst());
+    TEST_ASSERT_EQUAL(ESP_OK, espos_health_report_test("test.running", ESPOS_HEALTH_NORMAL, "", 0));
+    TEST_ASSERT_EQUAL(ESPOS_HEALTH_NORMAL, espos_health_worst());
+}
+
+TEST_CASE("the longest legal key and message are accepted", "[health]")
+{
+    fresh();
+    /* The other side of the bound the test above rejects: KEY_MAX and MSG_MAX
+     * are sizes including the NUL, so one less is legal. Without this the size
+     * checks would pass just as well if they refused everything. */
+    char key[ESPOS_HEALTH_KEY_MAX];
+    memset(key, 'k', sizeof(key) - 1);
+    key[sizeof(key) - 1] = '\0';
+    memcpy(key, ESPOS_HEALTH_TEST_PREFIX, strlen(ESPOS_HEALTH_TEST_PREFIX));
+    char msg[ESPOS_HEALTH_MSG_MAX];
+    memset(msg, 'm', sizeof(msg) - 1);
+    msg[sizeof(msg) - 1] = '\0';
+
+    TEST_ASSERT_EQUAL(ESP_OK, espos_health_report_test(key, ESPOS_HEALTH_WARN, msg, 1000));
+    espos_health_condition_t buf[8];
+    size_t n = espos_health_snapshot(buf, 8);
+    const espos_health_condition_t *c = find_cond(buf, n, key);
+    TEST_ASSERT_NOT_NULL(c);
+    TEST_ASSERT_EQUAL_STRING(msg, c->message);
+}
+
+TEST_CASE("expire is a no-op when no drill was ever raised", "[health]")
+{
+    fresh();
+    TEST_ASSERT_FALSE(espos_health_test_expire());
+    TEST_ASSERT_EQUAL(0, espos_health_snapshot(NULL, 0));
 }
