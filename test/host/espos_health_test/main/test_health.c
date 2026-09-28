@@ -69,9 +69,15 @@ static void sleep_at_least_ms(unsigned ms)
     for (;;) {
         struct timespec now;
         clock_gettime(CLOCK_MONOTONIC, &now);
-        const uint64_t elapsed = (uint64_t)(now.tv_sec - start.tv_sec) * 1000 +
-                                 (uint64_t)(now.tv_nsec / 1000000) - (uint64_t)(start.tv_nsec / 1000000);
-        if (elapsed >= ms) return;
+        /* The delta in nanoseconds FIRST, then one truncation. Truncating each
+         * timestamp to milliseconds and subtracting overstates the gap by up to a
+         * millisecond -- start at 1.999 ms and wake at 21.000 ms and it reports 20
+         * for a real 19 -- which would let this helper return early, the one thing
+         * it exists to prevent. */
+        const int64_t elapsed = ((int64_t)(now.tv_sec - start.tv_sec) * 1000000000LL + (int64_t)now.tv_nsec -
+                                 (int64_t)start.tv_nsec) /
+                                1000000LL;
+        if (elapsed >= (int64_t)ms) return;
         usleep(1000);
     }
 }
