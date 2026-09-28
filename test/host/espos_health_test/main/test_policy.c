@@ -670,6 +670,42 @@ TEST_CASE("a device that dipped warns even while it now looks healthy", "[health
                       espos_health_policy_memory(&CFG, &h, live, sizeof(live), &flags));
 }
 
+TEST_CASE("the tick reports memoryTrough, non-fatally, while lowMemory stays normal",
+          "[health][policy]")
+{
+    /* Everything above tests espos_health_policy_trough() directly, which proves the
+     * decision and nothing about the WIRING: a condition computed correctly and never
+     * handed to the report port is invisible on a device. This drives the real tick.
+     *
+     * It also pins the pair. The whole argument for a separate condition is that the
+     * trough can fire while the live check does not, so a test where both warn would
+     * demonstrate nothing. */
+    fresh(false);
+    tick();
+    /* Reported every tick even when there is nothing wrong -- the tick states the
+     * condition and lets the table dedup (espOS #124), so NORMAL here, not absent. */
+    const report_t *quiet = last_report("memoryTrough");
+    TEST_ASSERT_NOT_NULL(quiet);
+    TEST_ASSERT_EQUAL(ESPOS_HEALTH_NORMAL, quiet->state);
+
+    F.heap.internal_min = 4924; /* the measured C5 mark; live figures stay comfortable */
+    tick();
+
+    const report_t *t = last_report("memoryTrough");
+    TEST_ASSERT_NOT_NULL(t);
+    TEST_ASSERT_EQUAL(ESPOS_HEALTH_WARN, t->state);
+    /* Never fatal, by construction: a mark does not recover within a boot, so a fatal
+     * flag here would restart the device on every boot's first dip, for ever. */
+    TEST_ASSERT_EQUAL_UINT32(0, t->flags);
+
+    const report_t *l = last_report("lowMemory");
+    TEST_ASSERT_NOT_NULL(l);
+    TEST_ASSERT_EQUAL(ESPOS_HEALTH_NORMAL, l->state);
+
+    TEST_ASSERT_EQUAL_INT(0, F.restarts);
+    TEST_ASSERT_EQUAL_INT(0, F.stores);
+}
+
 TEST_CASE("the trough message names the threshold, not the mark", "[health_policy]")
 {
     /* espos_health_report() suppresses a repeat only when state AND message match,

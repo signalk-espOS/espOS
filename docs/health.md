@@ -140,6 +140,15 @@ transient trough is what precedes an allocation failure. The marks were already 
 sampled — they went into the reset record and were read only after a restart — so this
 costs a comparison rather than a measurement.
 
+**The mark is a conservative floor, not a snapshot.**
+`heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL)` **sums each matching region's
+own minimum**, and those minima need not have happened at the same moment, so the
+total may never have held that value at any single instant. It is therefore never
+*higher* than the worst the device really saw, which is the right direction for a
+warning — but read it as "it got at least this bad somewhere", not as a reading taken
+at one point in time. This is also why the condition's message says "low-water mark
+below N KB" rather than claiming the figure "fell below" N KB.
+
 **`memoryTrough` is never fatal**, by construction rather than by configuration. A
 low-water mark does not recover within a boot: a fatal condition on it would restart the
 device, observe the same mark on the next boot's first dip, and restart again. It is a

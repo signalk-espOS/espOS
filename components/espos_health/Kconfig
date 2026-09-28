@@ -80,7 +80,7 @@ menu "espOS health"
                 restart the panel on every boot.
 
         config ESPOS_HEALTH_INTERNAL_TROUGH_WARN_KB
-            int "memoryTrough: warn if internal RAM ever fell below (KB)"
+            int "memoryTrough: warn if the internal-RAM low-water mark is below (KB)"
             default 10
             range 0 4096
             help

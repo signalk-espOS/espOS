@@ -54,8 +54,13 @@ typedef struct {
     uint32_t internal_warn_kb;       /* lowMemory WARN below this much internal RAM; 0 = off */
     uint32_t internal_alarm_kb;      /* lowMemory fatal ALARM below this much internal RAM; 0 = off */
     uint32_t largest_block_alarm_kb; /* lowMemory fatal ALARM below this largest internal block; 0 = off */
-    /* memoryTrough WARN when the low-water mark since boot fell below this much
-     * internal RAM; 0 = off. Reporting only -- never fatal, by construction.
+    /* memoryTrough WARN when the internal-RAM low-water mark since boot is below
+     * this much; 0 = off. Reporting only -- never fatal, by construction.
+     *
+     * The mark is heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL), which SUMS
+     * each matching region's own minimum. Those minima need not be simultaneous, so
+     * the figure is a conservative floor rather than a total that was ever observed
+     * at one instant -- fine for a warning, but do not read it as a snapshot.
      *
      * Appended, not inserted: a mid-struct member shifts every later field for a
      * caller built against the old header. Appending changes only sizeof, which is

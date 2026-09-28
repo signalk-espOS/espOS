@@ -272,12 +272,13 @@ standard library only, no IDF environment needed).
   from `CONFIG_ESPOS_WIFI_MAX_NETWORKS`) and, in the C++-only components,
   `candump_tcp_server.h`, `twai_receiver.h` and `wyoming_satellite.h`
   (a default port or queue depth taken from Kconfig).
-* **`ESPOS_ABI_VERSION`** (`espos.h`, currently 4; `espos_abi_version()`
-  returns the value the linked `espos_core` was built with) is bumped by any
-  change to a public header that is not purely additive: a removal or rename;
-  a changed signature; any change to a struct's members — an appended member
-  changes `sizeof`, which a caller compiled against the old header has baked
-  in; a changed enum or macro value; a changed callback contract; a new
+* **`ESPOS_ABI_VERSION`** (`espos.h`, which also carries the history of what
+  changed at each value; `espos_abi_version()` returns the value the linked
+  `espos_core` was built with) is bumped by any change to a public header that
+  is not purely additive: a removal or rename; a changed signature; any change
+  to a struct's members — an appended member changes `sizeof`, which a caller
+  compiled against the old header has baked in; a changed enum or macro value;
+  a changed callback contract; a new
   include exception. Additive, no bump: a new function, macro or header; an
   enum value appended before its `_MAX` when no public struct is sized by
   that `_MAX`. A bump records its reason in the history comment beside the

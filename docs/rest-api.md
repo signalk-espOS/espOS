@@ -243,13 +243,16 @@ should treat it and every member as optional.
 
 `min_free_heap` and `min_internal_free` are low-water marks since boot, not live
 figures. The first asks `MALLOC_CAP_DEFAULT` — what a plain `malloc()` may be
-given, which on a board with PSRAM includes PSRAM — and the second
-`MALLOC_CAP_INTERNAL`. Do not compare them: ESP-IDF's capability bits are
-independent flags rather than a hierarchy, and `heap_caps_get_minimum_free_size()`
-**sums each matching region's own minimum**, so the two figures add up different,
-overlapping sets of regions, each at whatever moment that region happened to be
-at its emptiest. Neither is reliably the larger, and on a board with no PSRAM they
-are not necessarily equal either. Read each as the answer to its own question.
+given — and the second `MALLOC_CAP_INTERNAL`. Whether PSRAM is part of the first
+is a build question, not a hardware one: it joins the `malloc()` heap only when
+`CONFIG_SPIRAM_USE_MALLOC` says so, and `CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL`
+then decides how much still comes from internal RAM.
+
+Do not compare the two. ESP-IDF's capability bits are independent flags rather
+than a hierarchy, and `heap_caps_get_minimum_free_size()` **sums each matching
+region's own minimum**, so each figure adds up a different, overlapping set of
+regions, each at whatever moment that region happened to be at its emptiest.
+Neither is reliably the larger. Read each as the answer to its own question.
 
 `min_internal_free` is what the `memoryTrough` health condition is raised from
 ([health.md](health.md)), so it is the figure to read after seeing that warning —

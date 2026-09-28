@@ -124,8 +124,15 @@ espos_health_state_t espos_health_policy_trough(const espos_health_policy_cfg_t 
          * the live figure would fan out to every sink on every tick. The mark
          * itself is in GET /api/v1/system/info as `min_internal_free`, and in
          * the watchdog's own heap log line. Same reasoning as the live checks
-         * above; see espOS #124 for what it cost to learn. */
-        snprintf(buf, sizeof(buf), "internal RAM fell below %u KB since boot",
+         * above; see espOS #124 for what it cost to learn.
+         *
+         * "low-water mark", not "fell below": heap_caps_get_minimum_free_size()
+         * SUMS each matching region's own minimum, and those minima need not
+         * have happened together, so the total may never have held this value at
+         * any one instant. It is a conservative floor -- no lower than the worst
+         * the device really saw -- which is the right direction for a warning,
+         * but the message must not claim a moment that may not have existed. */
+        snprintf(buf, sizeof(buf), "internal RAM low-water mark below %u KB since boot",
                  (unsigned)cfg->internal_trough_warn_kb);
         m = buf;
     }
