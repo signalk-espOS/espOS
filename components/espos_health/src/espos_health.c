@@ -41,6 +41,12 @@ static struct {
     char test_key[ESPOS_HEALTH_KEY_MAX];
     uint32_t test_deadline_ms;
     bool test_armed;
+    /* A superseded drill whose clearing report did not get through. Retried on
+     * every expiry pass, because a key left raised that test_key no longer names
+     * is an alarm nothing would ever clear -- the one failure this bookkeeping
+     * exists to prevent, and report_ex() can fail on a lock timeout like anything
+     * else. One slot: a transition that would need a second is refused. */
+    char test_pending_clear[ESPOS_HEALTH_KEY_MAX];
     /* Serialises a whole drill transition, which spans several report_ex() calls
      * and so cannot be done under `lock` -- that one must not be held across a
      * sink. LOCK ORDER: test_lock first, then `lock`, never the reverse. */
@@ -255,6 +261,30 @@ bool espos_health_fatal_alarm(espos_health_condition_t *out)
 
 /* ------------------------------------------------------- synthetic conditions */
 
+/* Retry the clearing report for a superseded drill. Caller holds test_lock.
+ * Returns true when nothing is outstanding. */
+static bool flush_pending_clear(void)
+{
+    char due[ESPOS_HEALTH_KEY_MAX];
+    if (!lock()) return false;
+    memcpy(due, s.test_pending_clear, sizeof(due));
+    unlock();
+    if (!due[0]) {
+        return true;
+    }
+    if (espos_health_report_ex(due, ESPOS_HEALTH_NORMAL, "", 0) != ESP_OK) {
+        return false; /* still outstanding; the next pass tries again */
+    }
+    if (!lock()) return false;
+    /* Only if it is still the same key: nothing else may write this slot while we
+     * hold test_lock, so this is belt and braces rather than a real race. */
+    if (strcmp(s.test_pending_clear, due) == 0) {
+        s.test_pending_clear[0] = '\0';
+    }
+    unlock();
+    return true;
+}
+
 esp_err_t espos_health_report_test(const char *key, espos_health_state_t state, const char *message,
                                    uint32_t ttl_ms)
 {
@@ -288,6 +318,14 @@ esp_err_t espos_health_report_test(const char *key, espos_health_state_t state, 
      * each clear the other's drill and then both arm, leaving one key raised that
      * s.test_key no longer names -- a fake alarm no ttl will ever clear. */
     if (!s.test_lock || xSemaphoreTake(s.test_lock, pdMS_TO_TICKS(200)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+
+    /* One pending slot, so an outstanding clear must go out before a transition
+     * that could create another. Refusing is right: the alternative is a second
+     * untracked key raised on a live boat. */
+    if (!flush_pending_clear()) {
+        xSemaphoreGive(s.test_lock);
         return ESP_ERR_TIMEOUT;
     }
 
@@ -344,8 +382,15 @@ esp_err_t espos_health_report_test(const char *key, espos_health_state_t state, 
         xSemaphoreGive(s.test_lock);
         return err;
     }
-    if (previous[0]) {
-        espos_health_report_ex(previous, ESPOS_HEALTH_NORMAL, "", 0);
+    if (previous[0] && espos_health_report_ex(previous, ESPOS_HEALTH_NORMAL, "", 0) != ESP_OK) {
+        /* The superseded drill is still raised and test_key no longer names it.
+         * Park it so the next expiry pass clears it, rather than leaving an alarm
+         * that nothing owns. */
+        if (lock()) {
+            memcpy(s.test_pending_clear, previous, sizeof(s.test_pending_clear));
+            unlock();
+        }
+        ESP_LOGW(TAG, "%s: could not clear superseded test condition; will retry", previous);
     }
     xSemaphoreGive(s.test_lock);
     return ESP_OK;
@@ -359,6 +404,11 @@ bool espos_health_test_expire(void)
     if (!s.test_lock || xSemaphoreTake(s.test_lock, pdMS_TO_TICKS(200)) != pdTRUE) {
         return false;
     }
+    /* An earlier superseded drill first: it is already raised and owned by nobody.
+     * Its success does not gate the rest -- an old orphan that still will not
+     * clear is no reason to leave a currently-due drill raised as well. */
+    (void)flush_pending_clear();
+
     char due[ESPOS_HEALTH_KEY_MAX] = { 0 };
     if (!lock()) {
         xSemaphoreGive(s.test_lock);
@@ -369,18 +419,33 @@ bool espos_health_test_expire(void)
      * a drill started just before the wrap. The difference is correct across it. */
     if (s.test_armed && (int32_t)(espos_health_port_now_ms() - s.test_deadline_ms) >= 0) {
         snprintf(due, sizeof(due), "%s", s.test_key);
-        s.test_armed = false;
-        s.test_key[0] = '\0';
     }
     unlock();
     if (!due[0]) {
         xSemaphoreGive(s.test_lock);
         return false;
     }
-    /* Outside `lock`: the fan-out calls sinks, which may do anything. Still
-     * inside test_lock, so no drill can be armed mid-clear. */
+
+    /* Report BEFORE forgetting it. Clearing the bookkeeping first and then failing
+     * to report would leave the drill raised with nothing tracking it -- an alarm
+     * no later pass would retry, which is the failure this whole slot exists to
+     * prevent. Outside `lock`, because the fan-out calls sinks; still inside
+     * test_lock, so no drill can be armed mid-clear. */
+    if (espos_health_report_ex(due, ESPOS_HEALTH_NORMAL, "", 0) != ESP_OK) {
+        ESP_LOGW(TAG, "%s: could not clear expired test condition; will retry", due);
+        xSemaphoreGive(s.test_lock);
+        return false;
+    }
     ESP_LOGI(TAG, "%s: test condition expired", due);
-    espos_health_report_ex(due, ESPOS_HEALTH_NORMAL, "", 0);
+    if (lock()) {
+        /* Still the same drill: report_test cannot have run (test_lock is held),
+         * so this only guards against a key that was cleared explicitly. */
+        if (s.test_armed && strcmp(s.test_key, due) == 0) {
+            s.test_armed = false;
+            s.test_key[0] = '\0';
+        }
+        unlock();
+    }
     xSemaphoreGive(s.test_lock);
     return true;
 }
@@ -392,5 +457,6 @@ void espos_health_reset(void)
     s.sink_n = 0;
     s.test_armed = false;
     s.test_key[0] = '\0';
+    s.test_pending_clear[0] = '\0';
     unlock();
 }

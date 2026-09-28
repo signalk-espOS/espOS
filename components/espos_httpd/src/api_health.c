@@ -14,15 +14,26 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "sdkconfig.h"
+
 #include "cJSON.h"
 
 #include "espos_health.h"
 #include "espos_httpd.h"
 #include "espos_httpd_priv.h"
 
-/* Enough for CONFIG_ESPOS_HEALTH_MAX_CONDITIONS; snapshot() reports the true
- * count, so a table grown past this is noticed rather than silently truncated. */
-#define SNAPSHOT_MAX 32
+/* Exactly the table, rather than a magic 32: the fixed upper bound of
+ * CONFIG_ESPOS_HEALTH_MAX_CONDITIONS is 32, and sizing to the configured value
+ * keeps a default build's snapshot at 12 x 128 B rather than 4 KB. snapshot()
+ * still reports the true count, so a table grown past this is noticed rather than
+ * silently truncated.
+ *
+ * On the stack deliberately, not the heap. The httpd task stack has a 32 KB floor
+ * (espos_httpd.c), so this is already reserved and costs nothing at run time,
+ * whereas a malloc here could fail in exactly the low-memory conditions this
+ * endpoint exists to report on -- an answer of "out of memory" to the question
+ * "how is your memory?" is the one answer it must not give. */
+#define SNAPSHOT_MAX CONFIG_ESPOS_HEALTH_MAX_CONDITIONS
 
 static esp_err_t health_get(httpd_req_t *req)
 {

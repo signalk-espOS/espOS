@@ -381,10 +381,10 @@ TEST_CASE("a rejected drill leaves the running one alone", "[health]")
     fresh();
     TEST_ASSERT_EQUAL(ESP_OK, espos_health_report_test("test.running", ESPOS_HEALTH_ALARM, "watch me", 60000));
 
-    /* Every rejection path, each attempted while a drill is live. The first
-     * version of this cleared the previous drill BEFORE reporting the new one, so
-     * a malformed request silently ended an observation somebody was in the
-     * middle of -- a side effect no caller asked for. */
+    /* The invariant: a rejected report changes nothing. The active drill stays
+     * raised, keeps its message, and keeps its expiry tracking -- a caller's bad
+     * request must not end an observation somebody else is in the middle of.
+     * Every rejection path is tried while a drill is live. */
     char too_long_msg[ESPOS_HEALTH_MSG_MAX + 1];
     memset(too_long_msg, 'm', sizeof(too_long_msg) - 1);
     too_long_msg[sizeof(too_long_msg) - 1] = '\0';
@@ -398,10 +398,8 @@ TEST_CASE("a rejected drill leaves the running one alone", "[health]")
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_SIZE,
                       espos_health_report_test(too_long_key, ESPOS_HEALTH_ALARM, "", 1000));
 
-    /* Still running, still the one that was raised -- and still ARMED, which is
-     * the other half: the arming is now done before the report so that a failure
-     * rolls it back in memory. A drill left raised with nothing tracking it would
-     * be an alarm no ttl could ever clear. */
+    /* Raised, unchanged, and still ARMED. The arming matters as much as the state:
+     * a drill raised with nothing tracking it is an alarm no ttl can ever clear. */
     espos_health_condition_t buf[8];
     size_t n = espos_health_snapshot(buf, 8);
     const espos_health_condition_t *c = find_cond(buf, n, "test.running");
@@ -419,9 +417,9 @@ TEST_CASE("a drill refused for want of a table slot rolls the arming back", "[he
     fresh();
     TEST_ASSERT_EQUAL(ESP_OK, espos_health_report_test("test.running", ESPOS_HEALTH_ALARM, "watch me", 60000));
 
-    /* Fill the condition table so the next NEW key cannot be admitted. This is
-     * the failure that survives every up-front check, and the one that used to
-     * leave the previous drill cleared with nothing raised in its place. */
+    /* Fill the condition table so the next NEW key cannot be admitted: the one
+     * failure a well-formed request still meets, and so the only one that can
+     * exercise the rollback rather than an early return. */
     char k[ESPOS_HEALTH_KEY_MAX];
     esp_err_t fill = ESP_OK;
     for (int i = 0; fill == ESP_OK && i < CONFIG_ESPOS_HEALTH_MAX_CONDITIONS + 2; i++) {
@@ -467,6 +465,27 @@ TEST_CASE("the longest legal key and message are accepted", "[health]")
     const espos_health_condition_t *c = find_cond(buf, n, key);
     TEST_ASSERT_NOT_NULL(c);
     TEST_ASSERT_EQUAL_STRING(msg, c->message);
+}
+
+TEST_CASE("expire clears the drill only once the report has gone out", "[health]")
+{
+    fresh();
+    espos_health_add_sink(recorder, NULL);
+    TEST_ASSERT_EQUAL(ESP_OK, espos_health_report_test("test.buzzer", ESPOS_HEALTH_ALARM, "drill", 1));
+    usleep(20000);
+
+    /* The invariant: the tracking is dropped only after the clearing report
+     * succeeds. Were it dropped first, a failed report would leave the drill
+     * raised and unowned, and no later pass would retry it. */
+    TEST_ASSERT_TRUE(espos_health_test_expire());
+    TEST_ASSERT_EQUAL(ESPOS_HEALTH_NORMAL, espos_health_worst());
+    TEST_ASSERT_EQUAL(ESPOS_HEALTH_NORMAL, s_calls[s_n - 1].state);
+    TEST_ASSERT_EQUAL_STRING("test.buzzer", s_calls[s_n - 1].key);
+
+    /* Dropped now, so a second pass has nothing to do and does not re-report. */
+    const size_t calls = s_n;
+    TEST_ASSERT_FALSE(espos_health_test_expire());
+    TEST_ASSERT_EQUAL(calls, s_n);
 }
 
 TEST_CASE("expire is a no-op when no drill was ever raised", "[health]")
