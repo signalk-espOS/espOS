@@ -426,6 +426,122 @@ class ApiTests(unittest.TestCase):
             st, _, _, _ = req("GET", "/api/v1/system/info")
             self.assertEqual(st, 200)
 
+    # ---- health (espOS #137)
+    def test_11_health_get(self):
+        st, hd, _, js = req("GET", "/api/v1/health")
+        self.assertEqual(st, 200)
+        self.assertEqual(hd.get("Content-Type"), "application/json")
+        # Before this endpoint the conditions were unreadable: they reached the
+        # outside world only as SignalK notifications, so "why is the LED red"
+        # needed the device's log.
+        for k in ("worst", "fatal", "conditions"):
+            self.assertIn(k, js, k)
+        self.assertIn(js["worst"], ("normal", "warn", "alarm"))
+        self.assertIsInstance(js["conditions"], list)
+        for c in js["conditions"]:
+            for k in ("key", "state", "message", "reboot_on_alarm"):
+                self.assertIn(k, c, k)
+            self.assertIsInstance(c["reboot_on_alarm"], bool)
+
+    def test_12_health_test_drill_is_never_fatal(self):
+        """A drill must reach the sinks without being able to reboot the board."""
+        st, _, _, js = req("POST", "/api/v1/health/test",
+                           {"key": "test.buzzer", "state": "alarm", "message": "G4", "ttl_s": 60})
+        self.assertEqual(st, 200)
+        self.assertEqual(js["worst"], "alarm")
+        # The property the whole issue turns on: every built-in alarm carries
+        # ESPOS_HEALTH_F_REBOOT_ON_ALARM, so raising one to watch a buzzer ends
+        # the observation. This one is structurally incapable of it.
+        self.assertIsNone(js["fatal"])
+        drill = [c for c in js["conditions"] if c["key"] == "test.buzzer"]
+        self.assertEqual(len(drill), 1)
+        self.assertEqual(drill[0]["state"], "alarm")
+        self.assertEqual(drill[0]["message"], "G4")
+        self.assertFalse(drill[0]["reboot_on_alarm"])
+
+        # And an explicit clear is the normal way to end it.
+        st, _, _, js = req("POST", "/api/v1/health/test",
+                           {"key": "test.buzzer", "state": "normal"})
+        self.assertEqual(st, 200)
+        drill = [c for c in js["conditions"] if c["key"] == "test.buzzer"]
+        self.assertEqual(drill[0]["state"], "normal")
+        self.assertEqual(js["worst"], "normal")
+
+    def test_13_health_test_validation(self):
+        # Unprefixed keys are refused, so a drill cannot impersonate a real
+        # fault or clobber a consumer's own condition.
+        for body, why in (
+            ({"key": "relayExpander", "state": "alarm", "ttl_s": 5}, "no reserved prefix"),
+            ({"key": "test.", "state": "alarm", "ttl_s": 5}, "prefix names nothing"),
+            ({"key": "test.x", "state": "broken", "ttl_s": 5}, "bad state"),
+            ({"key": "test.x"}, "no state"),
+            ({"state": "alarm"}, "no key"),
+            # Rejected rather than clamped: silently substituting a different ttl
+            # is how a test ends up proving the wrong thing.
+            ({"key": "test.x", "state": "alarm", "ttl_s": 0}, "ttl too small"),
+            ({"key": "test.x", "state": "alarm", "ttl_s": 301}, "ttl too large"),
+            ({"key": "test.x", "state": "alarm", "ttl_s": "45"}, "ttl not a number"),
+            # Present but the wrong type: silently substituting "" would hide a
+            # caller's mistake, and ttl_s above is already strict about this.
+            ({"key": "test.x", "state": "alarm", "message": 42}, "message not a string"),
+            # espos_health refuses an over-long key or message rather than
+            # truncating, and that is the caller's error to fix -- a 400, not the
+            # 500 that esp_err_to_name() would have produced.
+            ({"key": "test.x", "state": "alarm", "message": "m" * 96}, "message too long"),
+            ({"key": "test." + "k" * 24, "state": "alarm"}, "key too long"),
+        ):
+            st, _, _, js = req("POST", "/api/v1/health/test", body)
+            self.assertEqual(st, 400, why)
+            self.assertEqual(js.get("error"), "validation", why)
+
+        # The other side of each bound, or the rejections above would pass just as
+        # well against a handler that refused everything. ESPOS_HEALTH_MSG_MAX is
+        # 96 and KEY_MAX 24, both exclusive of the NUL, so 95 and 23 are legal.
+        longest = {"key": "test." + "k" * 18, "state": "alarm", "message": "m" * 95, "ttl_s": 300}
+        self.assertEqual(len(longest["key"]), 23)
+        st, _, _, js = req("POST", "/api/v1/health/test", longest)
+        self.assertEqual(st, 200)
+        accepted = [c for c in js["conditions"] if c["key"] == longest["key"]]
+        self.assertEqual(len(accepted), 1)
+        self.assertEqual(accepted[0]["message"], longest["message"])
+        req("POST", "/api/v1/health/test", {"key": longest["key"], "state": "normal"})
+
+        # None of the rejected attempts reached the table, and nothing is raised.
+        # Note the assertion is not "no test.* keys exist": a key keeps its slot
+        # for the life of the boot once seen, so an earlier test's cleared drill
+        # is still listed as normal. That is the documented cost of a new key.
+        st, _, _, js = req("GET", "/api/v1/health")
+        self.assertEqual([c["key"] for c in js["conditions"] if c["key"] == "test.x"], [])
+        self.assertEqual([c["key"] for c in js["conditions"] if c["state"] != "normal"], [])
+
+    def test_14_health_test_one_drill_at_a_time(self):
+        st, _, _, _ = req("POST", "/api/v1/health/test",
+                          {"key": "test.one", "state": "alarm", "ttl_s": 60})
+        self.assertEqual(st, 200)
+        st, _, _, js = req("POST", "/api/v1/health/test",
+                           {"key": "test.two", "state": "alarm", "ttl_s": 60})
+        self.assertEqual(st, 200)
+        by_key = {c["key"]: c for c in js["conditions"]}
+        # Bounded blast radius: a script that loops cannot leave a trail of fake
+        # alarms on a live boat.
+        self.assertEqual(by_key["test.one"]["state"], "normal")
+        self.assertEqual(by_key["test.two"]["state"], "alarm")
+        req("POST", "/api/v1/health/test", {"key": "test.two", "state": "normal"})
+
+    def test_15_health_test_ttl_expires(self):
+        st, _, _, js = req("POST", "/api/v1/health/test",
+                           {"key": "test.buzzer", "state": "alarm", "ttl_s": 1})
+        self.assertEqual(st, 200)
+        self.assertEqual(js["worst"], "alarm")
+        # The backstop for a test session that goes away. GET drives it too, so
+        # this holds even though the policy tick does not run on this target.
+        time.sleep(1.2)
+        st, _, _, js = req("GET", "/api/v1/health")
+        self.assertEqual(st, 200)
+        self.assertEqual(js["worst"], "normal")
+        drill = [c for c in js["conditions"] if c["key"] == "test.buzzer"]
+        self.assertEqual(drill[0]["state"], "normal")
+
 
 # ------------------------------------------------------------ authentication
 

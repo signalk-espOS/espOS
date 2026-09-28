@@ -10,7 +10,7 @@ if(NOT target STREQUAL "linux")
                           spi_flash esp_hw_support heap)
 endif()
 idf_component_register(
-    SRCS src/espos_httpd.c src/api_config.c src/api_system.c src/api_logs.c src/api_coredump.c src/static.c src/sse.c
+    SRCS src/espos_httpd.c src/api_config.c src/api_system.c src/api_logs.c src/api_coredump.c src/api_health.c src/static.c src/sse.c
          src/auth.c src/auth_policy.c
     INCLUDE_DIRS include
     REQUIRES esp_http_server espos_config

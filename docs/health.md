@@ -287,11 +287,46 @@ strikes are simply never counted. For a device where a restart would be worse
 than the condition — a display mid-passage — that is a legitimate choice; so
 is keeping the policy and raising `sk.stall_s`.
 
+## Reading it back, and rehearsing a fault
+
+`GET /api/v1/health` lists the conditions with the worst state and which one (if
+any) the policy would restart for; `POST /api/v1/health/test` raises a synthetic
+one. Both are in [rest-api.md](rest-api.md#health).
+
+The test endpoint exists because **every built-in alarm is fatal**: both `lowMemory`
+variants and `taskStalled` carry `ESPOS_HEALTH_F_REBOOT_ON_ALARM`, so there is no built-in
+condition a person can hold in ALARM long enough to watch a buzzer repeat —
+triggering one ends the observation. That made a hardware test like "confirm the
+alarm buzzer repeats and the LED goes red" impossible to run on a boxed-up board
+without a genuine fault to hand (espOS #137).
+
+`espos_health_report_test()` reports through the same path as anything real — a
+sink deliberately cannot tell the difference, which is the point — with flags
+always `0`, so it is *structurally* incapable of arming the reboot path rather than
+merely trying not to. Keys must start with `test.`, at most one drill is active at
+a time, and a `ttl_s` (optional, 1–300, **default 45**) ends a drill whose test
+session went away. A drill reaches every sink including the SignalK notifications,
+so it is visible on a chartplotter while it lasts.
+
+The ttl is a backstop, not a stopwatch. It is driven by the policy tick, so a drill
+whose ttl has elapsed is cleared within one `CONFIG_ESPOS_HEALTH_POLICY_TICK_S`
+(default **10 s**, up to 60) — expect `ttl_s: 45` to clear somewhere in 45–55 s, not
+at 45. `GET /api/v1/health` also drives expiry, so a reader is never told about a
+drill that has already timed out, and a test script polling the endpoint sees it go
+sooner than the tick would manage. That is also what makes the endpoint correct on a
+build with the watchdog disabled, where nothing ticks at all.
+
+For a drill that must end at a known moment, clear it explicitly with
+`state: "normal"` — which is what the ttl is a backstop *for*.
+
 ## Sizing
 
 `CONFIG_ESPOS_HEALTH_MAX_CONDITIONS` (default 12) is the number of distinct
 keys; espOS itself uses up to five (`lowMemory`, `memoryTrough`, `taskStalled`,
-`netDown`, `skLinkStalled`). `CONFIG_ESPOS_HEALTH_MAX_SINKS` (default 4) is the number of
+`netDown`, `skLinkStalled`), plus one slot per distinct `test.` key a drill has
+used — and a key keeps its slot for the life of the boot, so a test script should
+reuse one rather than invent one per run.
+`CONFIG_ESPOS_HEALTH_MAX_SINKS` (default 4) is the number of
 consumers. Both are fixed tables — the set of conditions a firmware can raise
 is decided at build time. Reporting a key beyond the limit returns
 `ESP_ERR_NO_MEM` and logs; it never grows silently.
