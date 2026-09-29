@@ -253,6 +253,10 @@ jobs:
           fi
           IFS=';' read -ra files <<< "$DEFAULTS"
           for f in "${files[@]}"; do
+            # Inside the project only: no absolute path, no way out of it.
+            case "/$f/" in
+              //*|*/../*) echo "::error::sdkconfig_defaults: '$f' must be a path inside the project"; exit 1 ;;
+            esac
             [ -f "$f" ] || { echo "::error::sdkconfig_defaults: no file '$f'"; exit 1; }
           done
           echo "command=idf.py -D SDKCONFIG_DEFAULTS=\"sdkconfig.defaults;$DEFAULTS\" build" \

@@ -74,6 +74,7 @@ class WindowTest(unittest.TestCase):
             rel("v1.3.0", draft=True),
             rel("v1.2.0-rc1", pre=True),
             rel("nightly"),
+            rel("1.2.5"),
             rel("v1.1.0"),
         ]
         self.assertEqual(window(releases, "v1.1.0"), ["v1.1.0"])

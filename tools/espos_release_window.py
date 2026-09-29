@@ -36,11 +36,12 @@ from typing import Iterable
 KEEP_STABLE = 3
 KEEP_PRERELEASE = 2
 
-PLAIN_TAG = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
+PLAIN_TAG = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 
 
 def version_key(tag: str) -> tuple[int, int, int] | None:
-    """(major, minor, patch) for a plain vX.Y.Z tag, None for anything else."""
+    """(major, minor, patch) for a vX.Y.Z tag, None for anything else --
+    including X.Y.Z without the v, which release-firmware.yml never publishes."""
     m = PLAIN_TAG.match(tag)
     return (int(m.group(1)), int(m.group(2)), int(m.group(3))) if m else None
 

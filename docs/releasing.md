@@ -371,8 +371,13 @@ names (`signalk-espOS/registry`, README):
   }
 ```
 
-A project with board variants names the segment `(?<board>[a-z0-9]+)` and
-gives each board its `assetSegment`.
+A project with board variants captures the segment as `board` and gives each
+board its `assetSegment` (`7b`, `x7` in the example above):
+
+```json
+    "ota":    "^my-firmware-(?<board>[a-z0-9]+)-v(?<version>[0-9]+\\.[0-9]+\\.[0-9]+)-ota\\.bin$",
+    "merged": "^my-firmware-(?<board>[a-z0-9]+)-v(?<version>[0-9]+\\.[0-9]+\\.[0-9]+)-merged\\.bin$"
+```
 
 Unsigned releases, `--require` and the IDF pin work as in `build-firmware.yml`
 below, which this workflow calls once per build.

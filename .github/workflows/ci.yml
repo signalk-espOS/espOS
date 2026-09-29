@@ -64,9 +64,9 @@ jobs:
           python-version: "3.12"
       - run: python3 -m unittest discover -s components/espos_config/tools -p 'test_*.py' -v
 
-  # Other repositories call the reusable firmware workflows at @main, so a
-  # syntax error there breaks every one of their releases at once, reported
-  # against the caller's line rather than ours (#123). The release tools the
+  # Other repositories call the reusable firmware workflows, so a syntax error
+  # there breaks every one of their releases at once, reported against the
+  # caller's line rather than ours (#123). The release tools the
   # workflows run are tested here too: their tests drive a local bare
   # repository through the failure modes the mirror has to survive.
   workflows:

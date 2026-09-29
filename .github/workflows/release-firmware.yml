@@ -159,6 +159,9 @@ jobs:
               defaults = b.get("sdkconfig_defaults", "")
               if defaults and not re.fullmatch(r"[A-Za-z0-9._/-]+(;[A-Za-z0-9._/-]+)*", defaults):
                   fail(f"sdkconfig_defaults '{defaults}' is not a ;-separated list of paths")
+              for part in filter(None, defaults.split(";")):
+                  if part.startswith("/") or ".." in part.split("/"):
+                      fail(f"sdkconfig_defaults '{part}' must be a path inside the project")
               matrix.append({"target": target, "segment": segment, "defaults": defaults})
 
           print(f"mode={'release' if tag else 'backfill'}")
