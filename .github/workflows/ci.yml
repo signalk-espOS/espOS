@@ -64,6 +64,27 @@ jobs:
           python-version: "3.12"
       - run: python3 -m unittest discover -s components/espos_config/tools -p 'test_*.py' -v
 
+  # Other repositories call the reusable firmware workflows at @main, so a
+  # syntax error there breaks every one of their releases at once, reported
+  # against the caller's line rather than ours (#123). The release tools the
+  # workflows run are tested here too: their tests drive a local bare
+  # repository through the failure modes the mirror has to survive.
+  workflows:
+    name: workflows and release tools
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: actionlint (config in .github/actionlint.yaml)
+        uses: docker://rhysd/actionlint:1.7.12
+        with:
+          args: -color
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: release window and mirror tools
+        run: python3 -m unittest discover -s tools -p 'test_*.py' -v
+
   # Prose names CONFIG_ESPOS_* knobs the compiler never sees, so a renamed or
   # never-landed symbol leaves the docs pointing at nothing (signalk.md once
   # documented CONFIG_ESPOS_SK_MAX_NOTIFY). Compares docs against components/*/Kconfig.

@@ -97,6 +97,23 @@ on:
           the caller's line number rather than this one.
         type: string
         default: "firmware"
+      ref:
+        description: >-
+          Commit to build, usually the release tag. Empty builds the ref the
+          caller runs on -- right for a release driven by release-please,
+          wrong for a re-run or backfill of an older tag, which would build
+          today's code and label it with the old version.
+        type: string
+        default: ""
+      sdkconfig_defaults:
+        description: >-
+          Extra sdkconfig defaults files, `;`-separated and relative to the
+          project, applied after sdkconfig.defaults -- how one project builds
+          one image per board variant. Passed as SDKCONFIG_DEFAULTS, which a
+          project without espOS's prologue honours; a project with the
+          prologue selects variants through sdkconfig.local instead.
+        type: string
+        default: ""
     secrets:
       signing_key:
         description: >-
@@ -120,6 +137,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ inputs.ref }}
           submodules: ${{ inputs.submodules }}
           # The version baked into the image comes from `git describe`, and
           # checkout's default depth of 1 fetches no tags -- not in this
@@ -137,12 +155,30 @@ jobs:
           # a workflow whose every step could push.
           persist-credentials: false
 
+      # espOS's own tools, from the commit this workflow runs at. A project
+      # that has espOS as a submodule carries them under espos/, but one that
+      # installs espOS from the component registry has no copy at all -- the
+      # merge tool is not part of any component.
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .espos-workflow
+          sparse-checkout: tools
+          persist-credentials: false
+
       # The pin lives in the repository, not here, so a consumer that has not
       # moved to a new IDF is not moved by an espOS change.
       - name: read pinned IDF version
         id: idf
         run: |
-          v="$(cat .idf-version 2>/dev/null || cat espos/.idf-version)"
+          v="$(cat .idf-version 2>/dev/null || cat espos/.idf-version 2>/dev/null || true)"
+          if [ -z "$v" ]; then
+            echo "::error::No .idf-version. Add one at the project root naming the" \
+                 "ESP-IDF release you build with, e.g. v6.0.3 (the from_registry" \
+                 "example ships one)."
+            exit 1
+          fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
           echo "building with ESP-IDF $v"
 
@@ -186,11 +222,47 @@ jobs:
           # CMake failure after the build has already run for six minutes.
           openssl rsa -in secure_boot_signing_key.pem -noout -check
 
+      # A throwaway key for a build that is not a signed release: CI on a
+      # push or PR, and the unsigned opt-out above. espOS's prologue makes one
+      # itself, but a project on the component registry has no prologue, and
+      # IDF then stops the build on the missing key. openssl rather than
+      # espsecure: it is on the runner and its spelling does not change
+      # between esptool versions.
+      - name: throwaway signing key for an unsigned build
+        if: >-
+          steps.signing.outputs.unsigned == 'true' ||
+          (github.event_name != 'release' && inputs.tag == '')
+        run: |
+          [ -f secure_boot_signing_key.pem ] ||
+            openssl genrsa -out secure_boot_signing_key.pem 3072
+
+      # Board variants, checked here because the value is pasted into the
+      # build command below.
+      - name: build command
+        id: cmd
+        env:
+          DEFAULTS: ${{ inputs.sdkconfig_defaults }}
+        run: |
+          if [ -z "$DEFAULTS" ]; then
+            echo "command=idf.py build" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! [[ "$DEFAULTS" =~ ^[A-Za-z0-9._/-]+(\;[A-Za-z0-9._/-]+)*$ ]]; then
+            echo "::error::refusing sdkconfig_defaults '$DEFAULTS'"
+            exit 1
+          fi
+          IFS=';' read -ra files <<< "$DEFAULTS"
+          for f in "${files[@]}"; do
+            [ -f "$f" ] || { echo "::error::sdkconfig_defaults: no file '$f'"; exit 1; }
+          done
+          echo "command=idf.py -D SDKCONFIG_DEFAULTS=\"sdkconfig.defaults;$DEFAULTS\" build" \
+            >> "$GITHUB_OUTPUT"
+
       - uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: ${{ steps.idf.outputs.version }}
           target: ${{ inputs.target }}
-          command: idf.py build
+          command: ${{ steps.cmd.outputs.command }}
 
       - name: merge the flash images
         env:
@@ -199,6 +271,7 @@ jobs:
           pip install --quiet "esptool==${{ inputs.esptool }}"
           merge="tools/espos_merge_firmware.py"
           [ -f "$merge" ] || merge="espos/tools/espos_merge_firmware.py"
+          [ -f "$merge" ] || merge=".espos-workflow/tools/espos_merge_firmware.py"
           args=""
           for r in $REQUIRE; do args="$args --require $r"; done
           # shellcheck disable=SC2086

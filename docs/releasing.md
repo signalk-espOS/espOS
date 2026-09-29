@@ -275,6 +275,108 @@ component needs at build time — `espos_config`'s generator under `tools/`,
 `espos_httpd`'s `www/index.html`, the `config/*.json` descriptors — lives
 inside the component directory for exactly this reason.
 
+## Releasing a firmware
+
+`.github/workflows/release-firmware.yml` is the whole release of a firmware
+built on espOS: it builds every target and board, attaches the images to the
+GitHub release, and mirrors them where a browser can read them, so the hosted
+flasher and the Signal K plugin can install the release. With release-please
+driving the version, a project's entire release workflow is this:
+
+```yaml
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.rp.outputs.release_created }}
+      tag_name: ${{ steps.rp.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v5
+        id: rp
+        with:
+          release-type: simple   # keeps version.txt, which the device reports
+
+  firmware:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    permissions:
+      contents: write
+    uses: signalk-espOS/espOS/.github/workflows/release-firmware.yml@v0.12.1 # x-release-please-version
+    with:
+      name: my-firmware
+      builds: '[{"target": "esp32c6"}, {"target": "esp32"}]'
+      tag: ${{ needs.release-please.outputs.tag_name }}
+    secrets:
+      signing_key: ${{ secrets.SIGNING_KEY_PEM }}
+```
+
+Pin a release tag, not `@main`: the workflow receives your signing key. The
+key is passed by name because `secrets: inherit` does not reach a workflow in
+another organisation.
+
+**What it produces.** Per build, `<name>-<board>-<tag>-merged.bin` for a cable
+and `<name>-<board>-<tag>-ota.bin` for an update, where `<board>` is the
+build's `board`, or its target when it names none. **Tags must be plain
+`vX.Y.Z`**; a beta is such a tag with GitHub's *prerelease* flag set. A suffix
+like `-rc1` is refused, because the registry reads it as part of the file
+name.
+
+**Board variants.** Two images for one chip, each with its own defaults file:
+
+```yaml
+      builds: >-
+        [{"target": "esp32p4", "board": "7b", "sdkconfig_defaults": "sdkconfig.board.7b"},
+         {"target": "esp32p4", "board": "x7", "sdkconfig_defaults": "sdkconfig.board.x7"}]
+```
+
+The files are applied after `sdkconfig.defaults` through `SDKCONFIG_DEFAULTS`,
+which a project without the prologue honours.
+
+**The mirror.** GitHub serves release downloads without the CORS header a web
+page needs, so the images are also published to a `release-assets` branch of
+the same repository, as `<tag>/<file>`, where raw.githubusercontent.com serves
+them with it. The branch is one commit, rewritten on every publish, and keeps
+exactly what the flasher can offer: the three newest stable releases and up to
+two prereleases newer than them. Older directories are pruned; the releases
+stay the archive. The push is leased, so it never overwrites a branch that
+moved, and if anything after it fails the publish is rolled back, leased
+against this run's own commit so a later release is never discarded
+(`tools/espos_mirror_release_assets.sh`, `tools/espos_release_window.py`).
+
+**Older releases** that predate the mirror are added without rebuilding:
+
+```yaml
+    with:
+      name: my-firmware
+      builds: '[{"target": "esp32c6"}]'
+      backfill: v0.2.0 v0.3.0
+```
+
+**In the registry**, the entry declares the mirror and a pattern for these
+names (`signalk-espOS/registry`, README):
+
+```json
+  "webAssetsBranch": "release-assets",
+  "assets": {
+    "ota":    "^my-firmware-[a-z0-9]+-v(?<version>[0-9]+\\.[0-9]+\\.[0-9]+)-ota\\.bin$",
+    "merged": "^my-firmware-[a-z0-9]+-v(?<version>[0-9]+\\.[0-9]+\\.[0-9]+)-merged\\.bin$"
+  }
+```
+
+A project with board variants names the segment `(?<board>[a-z0-9]+)` and
+gives each board its `assetSegment`.
+
+Unsigned releases, `--require` and the IDF pin work as in `build-firmware.yml`
+below, which this workflow calls once per build.
+
 ## Building a consumer's firmware
 
 `.github/workflows/build-firmware.yml` is reusable: a firmware built on espOS
@@ -375,8 +477,8 @@ There is no template repository to keep in step. A release is the starting
 point either way:
 
 ```sh
-# from the registry -- no clone, no submodule
-idf.py create-project-from-example "signalk-espos/espos_core^0.10.0:from_registry"
+# from the registry -- no clone, no submodule; the newest release
+idf.py create-project-from-example "signalk-espos/espos_core:from_registry"
 
 # or in the tree, if you are working on espOS itself
 git clone https://github.com/signalk-espOS/espOS.git
