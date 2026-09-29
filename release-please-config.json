@@ -27,6 +27,7 @@
         { "type": "generic", "path": "components/espos_core/examples/from_registry/main/idf_component.yml" },
         { "type": "generic", "path": "components/espos_core/examples/from_registry/README.md" },
         { "type": "generic", "path": "docs/releasing.md" },
+        { "type": "generic", "path": ".github/workflows/release-firmware.yml" },
         { "type": "generic", "path": "components/espos_devices/idf_component.yml" },
         { "type": "generic", "path": "components/espos_eth/idf_component.yml" },
         { "type": "generic", "path": "components/espos_event/idf_component.yml" },

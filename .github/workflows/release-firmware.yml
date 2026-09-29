@@ -8,7 +8,7 @@
 #
 #   jobs:
 #     firmware:
-#       uses: signalk-espOS/espOS/.github/workflows/release-firmware.yml@v0.13.0
+#       uses: signalk-espOS/espOS/.github/workflows/release-firmware.yml@v0.12.1 # x-release-please-version
 #       permissions:
 #         contents: write
 #       with:
@@ -335,19 +335,50 @@ jobs:
           } > "$RUNNER_TEMP/notes.md"
           gh release edit "$TAGS" --repo "$REPO" --notes-file "$RUNNER_TEMP/notes.md"
 
+      # After the mirror, so a release never carries images without a
+      # browser-readable copy: if this fails, the rollback below removes the
+      # mirror's publish again. What the release held before is recorded, so a
+      # failure halfway can take back exactly the images this run added -- a
+      # release with one board's images and not the other's would be indexed
+      # as it stands.
       - name: attach the images to the release
         if: needs.plan.outputs.mode == 'release'
-        run: gh release upload "$TAGS" --repo "$REPO" --clobber dist/*.bin
+        run: |
+          set -euo pipefail
+          # What the release held before this run. A re-run replaces those
+          # images, and a failed re-run must not delete a set an earlier run
+          # attached completely.
+          gh release view "$TAGS" --repo "$REPO" --json assets --jq '.assets[].name' \
+            > "$RUNNER_TEMP/assets-before"
+          for f in dist/*.bin; do
+            gh release upload "$TAGS" --repo "$REPO" --clobber "$f"
+          done
 
-      # Any failure or cancellation after the mirror pushed: the branch would
-      # advertise images for a release that has none. The undo is leased
-      # against this run's own commit, so a later publish is never discarded.
-      - name: roll the mirror back if anything after it failed
+      # Any failure or cancellation after the mirror pushed or the attach began:
+      # the branch would advertise images for a release that has none, or the
+      # release would hold part of a set. The mirror's undo is leased against
+      # this run's own commit, so a later publish is never discarded; only
+      # images the release did not have before this run are removed.
+      - name: roll back if anything after the mirror failed
         if: failure() || cancelled()
         env:
           TOKEN: ${{ github.token }}
         run: |
-          [ -f .espos-workflow/tools/espos_mirror_release_assets.sh ] || exit 0
-          bash .espos-workflow/tools/espos_mirror_release_assets.sh rollback \
-            --remote "https://x-access-token:${TOKEN}@github.com/${REPO}.git" \
-            --branch "$BRANCH"
+          if [ -f .espos-workflow/tools/espos_mirror_release_assets.sh ]; then
+            bash .espos-workflow/tools/espos_mirror_release_assets.sh rollback \
+              --remote "https://x-access-token:${TOKEN}@github.com/${REPO}.git" \
+              --branch "$BRANCH"
+          fi
+          [ -f "$RUNNER_TEMP/assets-before" ] || exit 0
+          now=$(gh release view "$TAGS" --repo "$REPO" --json assets --jq '.assets[].name')
+          for f in dist/*.bin; do
+            name=$(basename "$f")
+            grep -qxF -- "$name" "$RUNNER_TEMP/assets-before" && continue
+            grep -qxF -- "$name" <<< "$now" || continue
+            if gh release delete-asset "$TAGS" "$name" --repo "$REPO" --yes; then
+              echo "removed $name, attached by this failed run"
+            else
+              echo "::warning::could not remove $name from $TAGS; delete it by hand" \
+                   "or re-run this release"
+            fi
+          done
