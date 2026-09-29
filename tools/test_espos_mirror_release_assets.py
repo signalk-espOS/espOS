@@ -129,6 +129,25 @@ class MirrorTest(unittest.TestCase):
         self.publish("b", ["v1.0.0"], ["v1.3.0"])
         self.assertEqual(self.dirs(), ["v1.0.0", "v1.3.0"])
 
+    def test_relative_paths_as_the_workflow_passes_them(self):
+        # release-firmware.yml passes `--staged staged --keep keep` relative to
+        # the workspace, and the script works from another directory. A keep
+        # list that stopped resolving there pruned every other release.
+        self.publish("a", ["v1.0.0", "v1.1.0"], ["v1.1.0", "v1.0.0"])
+        ws = self.tmp / "ws"
+        (ws / "staged" / "v1.2.0").mkdir(parents=True)
+        (ws / "staged" / "v1.2.0" / "fw-esp32-v1.2.0-merged.bin").write_bytes(b"x")
+        (ws / "keep").write_text("v1.2.0\nv1.1.0\nv1.0.0\n")
+        proc = subprocess.run(
+            ["bash", str(SCRIPT), "publish", "--remote", self.remote,
+             "--state", str(self.tmp / "ws-state"),
+             "--staged", "staged", "--keep", "keep"],
+            cwd=ws, capture_output=True, text=True, env=self.env,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertNotIn("pruning", proc.stdout)
+        self.assertEqual(self.dirs(), ["v1.0.0", "v1.1.0", "v1.2.0"])
+
     def test_refuses_a_tag_that_is_not_plain(self):
         proc = self.publish("a", ["v1.0.0-rc1"], ["v1.0.0-rc1"], ok=False)
         self.assertIn("vX.Y.Z", proc.stderr)

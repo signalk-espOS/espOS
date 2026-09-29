@@ -81,8 +81,16 @@ valid_tag() {
 
 publish() {
     [ -d "$staged" ] || die "--staged '$staged' is not a directory"
-    [ -f "$keep_file" ] || die "--keep '$keep_file' does not exist"
+    [ -r "$keep_file" ] || die "--keep '$keep_file' cannot be read"
+    # Absolute before anything changes directory: every path below is read
+    # from inside the work tree. A relative --keep that stopped resolving made
+    # every tag look unlisted, and each publish pruned all the others.
     staged=$(cd "$staged" && pwd)
+    keep_file=$(realpath -- "$keep_file")
+    if [ -n "$readme" ]; then
+        [ -r "$readme" ] || die "--readme '$readme' cannot be read"
+        readme=$(realpath -- "$readme")
+    fi
 
     local tags=() t
     while IFS= read -r t; do
@@ -148,10 +156,14 @@ publish() {
         done
         # Prune what the flasher can no longer offer. Only top-level
         # directories that are not dotfiles, and never a tag being published.
+        # The keep list is read into memory once: a grep per directory reports
+        # an unreadable file exactly like an unlisted tag.
+        local keep=() k
+        mapfile -t keep < "$keep_file"
         while IFS= read -r d; do
-            if grep -qxF -- "$d" "$keep_file" || printf '%s\n' "${tags[@]}" | grep -qxF -- "$d"; then
-                continue
-            fi
+            for k in "${keep[@]}" "${tags[@]}"; do
+                [ "$k" = "$d" ] && continue 2
+            done
             echo "pruning $d"
             rm -rf -- "$d"
         done < <(find . -mindepth 1 -maxdepth 1 -type d -not -name '.*' -printf '%f\n' | sort -V)
