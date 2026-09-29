@@ -30,6 +30,7 @@ jobs:
     outputs:
       release_created: ${{ steps.rp.outputs.release_created }}
       tag_name: ${{ steps.rp.outputs.tag_name }}
+      version: ${{ steps.rp.outputs.version }}
     steps:
       - uses: googleapis/release-please-action@v5
         id: rp
@@ -57,3 +58,14 @@ jobs:
       tag: ${{ needs.release-please.outputs.tag_name }}
       dry_run: false
     secrets: inherit
+
+  # Build the example as a newcomer downloads it, from the release just
+  # published: the one check that sees what the registry actually serves.
+  registry-smoke:
+    needs: [release-please, publish]
+    if: needs.release-please.outputs.release_created == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/registry-smoke.yml
+    with:
+      version: ${{ needs.release-please.outputs.version }}

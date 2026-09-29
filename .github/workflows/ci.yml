@@ -195,6 +195,15 @@ jobs:
           # The action wraps the command in single quotes itself; anything
           # non-trivial lives in a script so the quoting stays out of YAML.
           command: scripts/check_manifests.sh
+      # A copy installed from the registry reads espOS's version from its own
+      # manifest, which the component manager rewrites on packing. Check the
+      # components' real pattern against the archives just packed.
+      - name: registry copies can read espOS's version
+        run: python3 scripts/check_packed_version.py
+      # from_registry is a standalone project with its own IDF pin, which
+      # build-firmware.yml reads for it; it must move with the tree's.
+      - name: from_registry pins the same ESP-IDF as the tree
+        run: cmp .idf-version components/espos_core/examples/from_registry/.idf-version
       # Checked on every PR, not only at release: a dependency cycle or a
       # component depending on one that no longer exists makes the publish
       # workflow fail AFTER the tag exists, and a registry version cannot be

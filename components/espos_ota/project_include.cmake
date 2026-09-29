@@ -28,7 +28,8 @@ if(NOT COMMAND espos_signing_key_watch)
 # PREVIOUS key: no source changed, nothing re-links, and the build log looks
 # entirely normal.
 #
-# Call it after project() from the consumer's root CMakeLists.txt. KEY
+# A project does not call it: it runs by itself below whenever espos_ota is in
+# a build without the prologue, and the prologue runs it otherwise. KEY
 # defaults to what IDF itself signs with -- CONFIG_SECURE_BOOT_SIGNING_KEY,
 # resolved against the project directory, which is the value that actually
 # decides the signature.

@@ -1,0 +1,73 @@
+# Build the from_registry example the way a newcomer gets it: downloaded from
+# the Espressif Component Registry at a published version into an empty
+# directory (scripts/registry_smoke.sh). ci.yml builds the same example from
+# this tree, which is what a PR changes; this builds what was actually
+# published, which is what everyone else gets.
+#
+# Runs after every release (called from release-please.yml once publish.yml has
+# uploaded), weekly for the newest version -- IDF, esp_hosted, mdns and littlefs
+# move underneath it -- and by hand for any version. After a release a failure
+# cannot be undone, only superseded: yank the version and release a fix.
+name: registry smoke
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "espOS version to build, e.g. 0.12.0 (no v)"
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "espOS version to build, e.g. 0.12.0 (empty: the newest published)"
+        required: false
+  schedule:
+    - cron: '17 4 * * 1'
+
+permissions:
+  contents: read
+
+# What this builds is a published version, not the checkout, so runs are
+# grouped by version: a release run and a manual one for the same version wait
+# for each other instead of building it twice, and a started run is never
+# cancelled -- it is the only evidence that release works. That only holds if
+# every caller spells a version the same way, so a leading v is refused below.
+concurrency:
+  group: registry-smoke-${{ inputs.version || 'newest' }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: from_registry ${{ matrix.target }} (published)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # The two targets ci.yml builds this example for.
+        target: [esp32c6, esp32]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: read pinned IDF version and the version to build
+        id: idf
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          # The action pastes `command` into a shell string, so the version is
+          # checked here before it reaches it -- and bare, so the concurrency
+          # group above cannot tell 0.12.0 and v0.12.0 apart as two releases.
+          if ! [[ "$VERSION" =~ ^([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?)?$ ]]; then
+            echo "::error::'$VERSION' is not an espOS version (X.Y.Z, without a v)"
+            exit 1
+          fi
+          echo "version=$(cat .idf-version)" >> "$GITHUB_OUTPUT"
+          echo "espos=$VERSION" >> "$GITHUB_OUTPUT"
+      - uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: ${{ steps.idf.outputs.version }}
+          target: ${{ matrix.target }}
+          command: scripts/registry_smoke.sh "${{ steps.idf.outputs.espos }}" ${{ matrix.target }}

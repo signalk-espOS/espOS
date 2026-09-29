@@ -38,17 +38,23 @@ espos_config_add_descriptor(config/net.json)
 # component registry. The same lookup espos_core makes for its banner,
 # repeated here rather than shared: espos_net must not depend on espos_core,
 # and a cmake/ helper would not travel with a registry copy of this component.
-set(_espos_net_version_file "${CMAKE_CURRENT_LIST_DIR}/../../version.txt")
-if(EXISTS "${_espos_net_version_file}")
-    file(READ "${_espos_net_version_file}" _espos_net_espos_version)
+# See espos_core/CMakeLists.txt for why a checkout is recognised by
+# cmake/espos_project.cmake, and not by version.txt two levels up alone.
+get_filename_component(_espos_net_root "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
+if(EXISTS "${_espos_net_root}/cmake/espos_project.cmake" AND EXISTS "${_espos_net_root}/version.txt")
+    file(READ "${_espos_net_root}/version.txt" _espos_net_espos_version)
     # No CMAKE_CONFIGURE_DEPENDS on the file here: espos_core already adds
     # one, and the Ninja generator writes a phony edge per directory that
     # lists a file, so a second listing fails the generate step with
     # "version.txt is defined as an output multiple times".
 else()
-    file(READ "${CMAKE_CURRENT_LIST_DIR}/idf_component.yml" _espos_net_manifest)
-    string(REGEX MATCH "\nversion: \"([^\"]+)\"" _ "${_espos_net_manifest}")
-    set(_espos_net_espos_version "${CMAKE_MATCH_1}")
+    idf_component_get_property(_espos_net_espos_version ${COMPONENT_NAME} COMPONENT_VERSION)
+    if(NOT _espos_net_espos_version)
+        file(STRINGS "${CMAKE_CURRENT_LIST_DIR}/idf_component.yml" _espos_net_version_line
+             REGEX "^version:" LIMIT_COUNT 1)
+        string(REGEX REPLACE "^version:[ \t]*[\"']?([^\"' \t#]+).*$" "\\1"
+               _espos_net_espos_version "${_espos_net_version_line}")
+    endif()
 endif()
 string(STRIP "${_espos_net_espos_version}" _espos_net_espos_version)
 if(NOT _espos_net_espos_version)
