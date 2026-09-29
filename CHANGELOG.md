@@ -15,6 +15,13 @@ pull request. The `[Unreleased]` block below was written by hand before the
 switch; its entries belong to the next feature release and are folded into
 that section when it is cut.
 
+## [0.12.1](https://github.com/signalk-espOS/espOS/compare/v0.12.0...v0.12.1) (2026-09-29)
+
+
+### Fixed
+
+* make the from_registry path release-ready ([#150](https://github.com/signalk-espOS/espOS/issues/150)) ([15e35c2](https://github.com/signalk-espOS/espOS/commit/15e35c229710848b8f7baa5cf634a23fa8695448))
+
 ## [0.12.0](https://github.com/signalk-espOS/espOS/compare/v0.11.0...v0.12.0) (2026-09-28)
 
 
