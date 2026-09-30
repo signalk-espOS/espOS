@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Generic settings editor rendered from the JSON Schema (GET /config/schema).
 import { useEffect, useMemo, useState } from "preact/hooks";
-import { get, put, post, useStore, configChangeStore, errText, randomKey, toDisplay, fromDisplay, type ConfigDoc, type ConfigSchema, type JsonSchemaProp, type PutResult } from "../api";
+import { get, put, post, useStore, configChangeStore, errText, randomKey, text, toDisplay, fromDisplay, type ConfigDoc, type ConfigSchema, type JsonSchemaProp, type PutResult } from "../api";
 import { Msg, useAsync } from "../app";
 
 const SENTINEL = "********";
@@ -21,7 +21,12 @@ export function ConfigPage() {
 
   const load = () => get<ConfigDoc>("/config").then(setCfg, (e: unknown) => setMsg(errText(e)));
   useEffect(() => { void load(); }, []);
-  useEffect(() => { if (remote) void load(); }, [remote?.n]);       // someone else changed something → refresh (edits kept)
+  // someone else changed something → refresh (edits kept). Keyed on the change
+  // counter and not on `remote` itself: the counter is what says "this is a new
+  // change", while the object's identity moves for reasons that are not one.
+  // `load` is rebuilt every render, so listing it would reload on every render.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (remote) void load(); }, [remote?.n]);
 
   const nsList = useMemo(() => Object.keys(schema.data?.properties ?? {}), [schema.data]);
   useEffect(() => { if (!ns && nsList[0]) setNs(nsList[0]); }, [nsList, ns]);
@@ -125,7 +130,7 @@ export function ConfigPage() {
             </nav>
           )}
           {fields.map(([k, p]) => (
-            <Field key={k} ns={ns} k={k} p={p} value={edits[ns]?.[k] !== undefined ? edits[ns]![k] : cfg[ns]?.[k]} dirty={edits[ns]?.[k] !== undefined}
+            <Field key={k} ns={ns} k={k} p={p} value={edits[ns]?.[k] !== undefined ? edits[ns][k] : cfg[ns]?.[k]} dirty={edits[ns]?.[k] !== undefined}
               error={errPath === `${ns}.${k}` ? msg : ""} onChange={(v) => edit(ns, k, v)} />
           ))}
           <div class="sticky-actions">
@@ -154,15 +159,15 @@ function Field({ ns, k, p, value, dirty, error, onChange }: { ns: string; k: str
   if (ro) {
     // Shown, never editable: the device refuses the write anyway, so offering
     // the control would only produce a save that fails.
-    ctl = <span class="mono" id={id}>{shown === null || shown === undefined || shown === "" ? "—" : String(shown)}</span>;
+    ctl = <span class="mono" id={id}>{shown === null || shown === undefined || shown === "" ? "—" : text(shown)}</span>;
   } else if (p["x-espos-format"] === "table") {
     ctl = <TableEditor id={id} p={p} value={value} onChange={onChange} />;
   } else if (p.type === "boolean") {
     ctl = <input id={id} type="checkbox" checked={!!value} onChange={(e) => onChange((e.target as HTMLInputElement).checked)} />;
   } else if (p.enum) {
-    ctl = <select id={id} value={String(value ?? "")} onChange={(e) => onChange((e.target as HTMLSelectElement).value)}>{p.enum.map((o) => <option key={o} value={o}>{o}</option>)}</select>;
+    ctl = <select id={id} value={text(value)} onChange={(e) => onChange((e.target as HTMLSelectElement).value)}>{p.enum.map((o) => <option key={o} value={o}>{o}</option>)}</select>;
   } else if (p.type === "integer" || p.type === "number") {
-    ctl = <input id={id} type="number" value={shown === null || shown === undefined ? "" : String(shown)}
+    ctl = <input id={id} type="number" value={shown === null || shown === undefined ? "" : text(shown)}
       min={toDisplay(p, p.minimum) as number | undefined} max={toDisplay(p, p.maximum) as number | undefined} step="any"
       onInput={(e) => { const s = (e.target as HTMLInputElement).value; send(s === "" ? null : Number(s)); }} />;
   } else if (secret) {
@@ -170,14 +175,14 @@ function Field({ ns, k, p, value, dirty, error, onChange }: { ns: string; k: str
     // reused; it is shown once, in full, so it can be written down.
     ctl = <SecretInput id={id} set={value === SENTINEL} generate={ns === "httpd" && k === "api_key"} onChange={onChange} />;
   } else {
-    ctl = <input id={id} type="text" value={String(value ?? "")} maxLength={p.maxLength} pattern={p.pattern} placeholder={blob ? "base64" : ""} onInput={(e) => onChange((e.target as HTMLInputElement).value)} />;
+    ctl = <input id={id} type="text" value={text(value)} maxLength={p.maxLength} pattern={p.pattern} placeholder={blob ? "base64" : ""} onInput={(e) => onChange((e.target as HTMLInputElement).value)} />;
   }
   const limits: string[] = [];
   const round = (v: unknown) => (typeof v === "number" ? Math.round(v * 1e4) / 1e4 : v);
   // The range is stated in whatever unit the field is typed in, or a value
   // shown in degrees would carry a limit in radians.
   if (p.minimum !== undefined || p.maximum !== undefined) {
-    limits.push(`${p.minimum === undefined ? "…" : round(toDisplay(p, p.minimum))} – ${p.maximum === undefined ? "…" : round(toDisplay(p, p.maximum))}`);
+    limits.push(`${p.minimum === undefined ? "…" : text(round(toDisplay(p, p.minimum)))} – ${p.maximum === undefined ? "…" : text(round(toDisplay(p, p.maximum)))}`);
   }
   if (p.maxLength !== undefined && p.type === "string" && !p.enum && p["x-espos-format"] !== "table") limits.push(`≤ ${p.maxLength} chars`);
   if (p["x-espos-format"] === "table") limits.push(`≤ ${p.maxLength ?? 3999} bytes of JSON`);

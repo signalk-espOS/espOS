@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { defineConfig, type Plugin } from "vite";
 import preact from "@preact/preset-vite";
+import checker from "vite-plugin-checker";
 import { startMock } from "./mock/server.mjs";
 
 // `npm run dev` talks to ESPOS_API (a device or the host harness) when set,
@@ -40,14 +41,26 @@ function stripCrossorigin() {
 }
 
 export default defineConfig({
-  plugins: [preact(), mockPlugin(), stripCrossorigin()],
+  plugins: [
+    preact(),
+    /* Type errors in the dev overlay, which `npm run dev` otherwise never
+     * showed: Vite strips types without checking them, so a mistake stayed
+     * invisible until someone ran `npm run build`.
+     *
+     * Dev only. `npm run build` already runs `tsc --noEmit` first, and that is
+     * the better gate -- it fails in seconds, before Vite spends time bundling
+     * something that cannot ship. Letting the plugin check the build as well
+     * would run tsc twice per CI build for no extra safety. */
+    checker({ typescript: true, enableBuild: false }),
+    mockPlugin(),
+    stripCrossorigin(),
+  ],
   build: {
     outDir: "dist",
     emptyOutDir: true,
     sourcemap: false,
     target: "es2020",
     cssCodeSplit: false,
-    rollupOptions: { output: { manualChunks: undefined } },
   },
   server: {
     port: 5173,

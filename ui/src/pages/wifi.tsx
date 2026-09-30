@@ -73,7 +73,7 @@ export function WifiPage() {
               <input type="password" placeholder="Password (empty = open)" value={join.psk} onInput={(e) => setJoin({ ...join, psk: (e.target as HTMLInputElement).value })} />
             </div>
             <div class="row">
-              <label>slot <select value={join.slot} onChange={(e) => setJoin({ ...join, slot: Number((e.target as HTMLSelectElement).value) })}>{SLOTS.map((i) => <option key={i} value={i}>{i + 1}{nets[i]?.ssid ? ` (${nets[i]!.ssid})` : " (free)"}</option>)}</select></label>
+              <label>slot <select value={join.slot} onChange={(e) => setJoin({ ...join, slot: Number((e.target as HTMLSelectElement).value) })}>{SLOTS.map((i) => <option key={i} value={i}>{i + 1}{nets[i]?.ssid ? ` (${nets[i].ssid})` : " (free)"}</option>)}</select></label>
               <button class="primary" type="submit">Save &amp; connect</button>
               <button type="button" onClick={doScan} disabled={scanning}>{scanning ? "Scanning…" : "Scan"}</button>
             </div>
