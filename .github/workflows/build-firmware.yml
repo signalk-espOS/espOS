@@ -97,6 +97,23 @@ on:
           the caller's line number rather than this one.
         type: string
         default: "firmware"
+      ref:
+        description: >-
+          Commit to build, usually the release tag. Empty builds the ref the
+          caller runs on -- right for a release driven by release-please,
+          wrong for a re-run or backfill of an older tag, which would build
+          today's code and label it with the old version.
+        type: string
+        default: ""
+      sdkconfig_defaults:
+        description: >-
+          Extra sdkconfig defaults files, `;`-separated and relative to the
+          project, applied after sdkconfig.defaults -- how one project builds
+          one image per board variant. Passed as SDKCONFIG_DEFAULTS, which a
+          project without espOS's prologue honours; a project with the
+          prologue selects variants through sdkconfig.local instead.
+        type: string
+        default: ""
     secrets:
       signing_key:
         description: >-
@@ -120,6 +137,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ inputs.ref }}
           submodules: ${{ inputs.submodules }}
           # The version baked into the image comes from `git describe`, and
           # checkout's default depth of 1 fetches no tags -- not in this
@@ -137,27 +155,79 @@ jobs:
           # a workflow whose every step could push.
           persist-credentials: false
 
+      # espOS's own tools, from the commit this workflow runs at. A project
+      # that has espOS as a submodule carries them under espos/, but one that
+      # installs espOS from the component registry has no copy at all -- the
+      # merge tool is not part of any component.
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .espos-workflow
+          sparse-checkout: tools
+          persist-credentials: false
+
       # The pin lives in the repository, not here, so a consumer that has not
       # moved to a new IDF is not moved by an espOS change.
       - name: read pinned IDF version
         id: idf
         run: |
-          v="$(cat .idf-version 2>/dev/null || cat espos/.idf-version)"
+          v="$(cat .idf-version 2>/dev/null || cat espos/.idf-version 2>/dev/null || true)"
+          if [ -z "$v" ]; then
+            echo "::error::No .idf-version. Add one at the project root naming the" \
+                 "ESP-IDF release you build with, e.g. v6.0.3 (the from_registry" \
+                 "example ships one)."
+            exit 1
+          fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
           echo "building with ESP-IDF $v"
 
-      # inputs.tag counts as a release: without this a workflow_call skipped
-      # the whole step, no key was restored, and the release went out signed
-      # with the per-run throwaway -- installable over USB and then refusing
-      # every future OTA, on the boat, months later. That is the exact failure
-      # this file's header warns about, and it would have shipped silently.
+      # This condition must track the artifact upload below: every event that
+      # publishes an image is an event whose image somebody flashes.
+      #
+      # inputs.tag counts as a release: without it a workflow_call skipped the
+      # whole step, no key was restored, and the release went out signed with a
+      # throwaway -- installable over USB and then refusing every future OTA, on
+      # the boat, months later.
+      #
+      # workflow_dispatch counts too, and that is not hypothetical. This file is
+      # workflow_call only, so `github.event_name` is the CALLER's event: a
+      # consumer whose dispatch-triggered workflow calls this one without a tag
+      # uploaded an artifact signed with a key that existed only inside that run.
+      # espos-p4-cockpit did exactly that to build the images its bump PRs call
+      # "the ones to test-flash", and a panel flashed with one refused every
+      # later OTA (ESP_ERR_OTA_VALIDATE_FAILED) until somebody brought a cable.
+      #
+      # `pull_request` is deliberately NOT here, and must not be added: a
+      # same-repository PR does receive secrets and can alter the workflow that
+      # reads them, so that would hand the signing key to anything anyone opens a
+      # PR with. The key cannot be rotated cheaply -- every device already
+      # flashed with it stops accepting OTAs the day it changes. The upload
+      # condition has no PR leg either; keep them that way together.
       - name: restore the signing key
         id: signing
-        if: github.event_name == 'release' || inputs.tag != ''
+        if: >-
+          github.event_name == 'release' ||
+          github.event_name == 'workflow_dispatch' ||
+          inputs.tag != ''
         env:
           KEY: ${{ secrets.signing_key }}
           ALLOW_UNSIGNED: ${{ vars.ESPOS_ALLOW_UNSIGNED_RELEASE }}
+          # A release must not go out unsigned by accident; a dispatch may, since
+          # a fork dispatching a build has no access to the secret at all.
+          IS_RELEASE: ${{ github.event_name == 'release' || inputs.tag != '' }}
         run: |
+          if [ -z "$KEY" ] && [ "$IS_RELEASE" != "true" ]; then
+            # Warn rather than fail: a fork dispatching this wants a binary, and
+            # hard-failing would take that away. Loud, because the artifact is
+            # the thing somebody is about to put on a panel.
+            echo "::warning::No signing key for this dispatched build: it will" \
+                 "be signed with a throwaway. It boots over USB, and a panel" \
+                 "flashed with it will reject EVERY later OTA. Do not" \
+                 "test-flash it to a device you intend to update over the air."
+            echo "unsigned=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ -z "$KEY" ] && [ "$ALLOW_UNSIGNED" = "true" ]; then
             # The opt-out, for a fork that wants a flashable binary and runs
             # no OTA fleet. CMake generates a throwaway key, so this release
@@ -186,11 +256,54 @@ jobs:
           # CMake failure after the build has already run for six minutes.
           openssl rsa -in secure_boot_signing_key.pem -noout -check
 
+      # A throwaway key for a build that is not a signed release: CI on a
+      # push or PR, and the unsigned opt-out above. espOS's prologue makes one
+      # itself, but a project on the component registry has no prologue, and
+      # IDF then stops the build on the missing key. openssl rather than
+      # espsecure: it is on the runner and its spelling does not change
+      # between esptool versions.
+      - name: throwaway signing key for an unsigned build
+        # Asked of the signing step rather than re-derived from the event: those
+        # two spellings drifting apart is what this PR's review was about. Either
+        # the step ran and reported it had no key, or it did not run at all.
+        if: >-
+          steps.signing.outputs.unsigned == 'true' ||
+          steps.signing.outcome != 'success'
+        run: |
+          [ -f secure_boot_signing_key.pem ] ||
+            openssl genrsa -out secure_boot_signing_key.pem 3072
+
+      # Board variants, checked here because the value is pasted into the
+      # build command below.
+      - name: build command
+        id: cmd
+        env:
+          DEFAULTS: ${{ inputs.sdkconfig_defaults }}
+        run: |
+          if [ -z "$DEFAULTS" ]; then
+            echo "command=idf.py build" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! [[ "$DEFAULTS" =~ ^[A-Za-z0-9._/-]+(\;[A-Za-z0-9._/-]+)*$ ]]; then
+            echo "::error::refusing sdkconfig_defaults '$DEFAULTS'"
+            exit 1
+          fi
+          IFS=';' read -ra files <<< "$DEFAULTS"
+          for f in "${files[@]}"; do
+            # Inside the project only: no absolute path, no way out of it.
+            case "/$f/" in
+              //*|*/../*) echo "::error::sdkconfig_defaults: '$f' must be a path inside the project"; exit 1 ;;
+            esac
+            [ -f "$f" ] || { echo "::error::sdkconfig_defaults: no file '$f'"; exit 1; }
+          done
+          echo "command=idf.py -D SDKCONFIG_DEFAULTS=\"sdkconfig.defaults;$DEFAULTS\" build" \
+            >> "$GITHUB_OUTPUT"
+
       - uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: ${{ steps.idf.outputs.version }}
           target: ${{ inputs.target }}
-          command: idf.py build
+          command: ${{ steps.cmd.outputs.command }}
 
       - name: merge the flash images
         env:
@@ -199,6 +312,7 @@ jobs:
           pip install --quiet "esptool==${{ inputs.esptool }}"
           merge="tools/espos_merge_firmware.py"
           [ -f "$merge" ] || merge="espos/tools/espos_merge_firmware.py"
+          [ -f "$merge" ] || merge=".espos-workflow/tools/espos_merge_firmware.py"
           args=""
           for r in $REQUIRE; do args="$args --require $r"; done
           # shellcheck disable=SC2086

@@ -1,0 +1,14 @@
+# SPDX-FileCopyrightText: 2026 Dirk Wahrheit
+# SPDX-License-Identifier: Apache-2.0
+#
+# job.workflow_repository and job.workflow_sha are documented GitHub.com
+# contexts (the repository and commit of the workflow file defining the job;
+# not on GitHub Enterprise Server) that actionlint does not know yet. The
+# reusable firmware workflows use them to fetch espOS's own tools at the
+# commit they run at, which a project on the component registry has no copy
+# of. Remove this once actionlint knows them.
+paths:
+  .github/workflows/**/*.yml:
+    ignore:
+      - 'property "workflow_repository" is not defined in object type'
+      - 'property "workflow_sha" is not defined in object type'

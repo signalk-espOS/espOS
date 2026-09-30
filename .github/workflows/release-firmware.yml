@@ -1,0 +1,387 @@
+# SPDX-FileCopyrightText: 2026 Dirk Wahrheit
+# SPDX-License-Identifier: Apache-2.0
+#
+# Release a firmware built on espOS: build every target and board, attach the
+# images to the GitHub release, and mirror them where a browser can read them,
+# so the hosted flasher and the Signal K plugin can install the release. The
+# whole release workflow of a project becomes:
+#
+#   jobs:
+#     firmware:
+#       uses: signalk-espOS/espOS/.github/workflows/release-firmware.yml@v0.12.1 # x-release-please-version
+#       permissions:
+#         contents: write
+#       with:
+#         name: my-firmware
+#         builds: '[{"target": "esp32c6"}, {"target": "esp32"}]'
+#         tag: ${{ needs.release-please.outputs.tag_name }}
+#       secrets:
+#         signing_key: ${{ secrets.SIGNING_KEY_PEM }}
+#
+# Called once the release exists: release-please creates it with the workflow
+# token, which starts no other workflow, so its caller passes the tag.
+# `secrets: inherit` does not reach a workflow in another organisation, so the
+# key is passed by name.
+#
+# Assets are <name>-<segment>-<tag>-merged.bin and -ota.bin, one pair per
+# build; the segment is the build's board, or its target when it names none.
+# Tags must be plain vX.Y.Z. A beta is such a tag with GitHub's prerelease
+# flag: a suffix like -rc1 is read by the registry as part of the file name.
+#
+# The mirror is a branch of the same repository (release-assets), because
+# GitHub serves release downloads without the CORS header a web page needs and
+# raw.githubusercontent.com sends it. It keeps what the flasher can offer --
+# the three newest stable releases and up to two prereleases newer than them --
+# and every other directory is pruned; the releases themselves stay the
+# archive. The publishing is tools/espos_mirror_release_assets.sh: a leased
+# push that never overwrites a branch that moved, and a rollback that undoes
+# only this run's publish if anything after it fails.
+#
+# Older releases that predate the mirror are added with `backfill`: their
+# existing images are copied, nothing is rebuilt.
+name: release-firmware
+
+on:
+  workflow_call:
+    inputs:
+      name:
+        description: >-
+          Asset name prefix, e.g. my-firmware. Assets are
+          <name>-<segment>-<tag>-merged.bin and -ota.bin.
+        type: string
+        required: true
+      builds:
+        description: >-
+          JSON array, one object per image: {"target": "esp32c6"}, plus for a
+          board variant "board" (the asset segment, lowercase letters and
+          digits) and "sdkconfig_defaults" (the variant's defaults file).
+        type: string
+        required: true
+      tag:
+        description: "The release to build and publish, vX.Y.Z. The release must exist."
+        type: string
+        default: ""
+      backfill:
+        description: >-
+          Instead of a build: space-separated existing releases (vX.Y.Z) whose
+          attached images are copied to the mirror as they are.
+        type: string
+        default: ""
+      require:
+        description: >-
+          Space-separated partitions the merged image must contain, e.g.
+          storage for the web UI.
+        type: string
+        default: "storage"
+      mirror_branch:
+        description: "Branch the browser-readable copies live on."
+        type: string
+        default: "release-assets"
+      esptool:
+        description: "esptool version for the merge"
+        type: string
+        default: "4.8.1"
+    secrets:
+      signing_key:
+        description: >-
+          PEM of the app-signing key. Required for a release unless the
+          repository variable ESPOS_ALLOW_UNSIGNED_RELEASE is true.
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      mode: ${{ steps.plan.outputs.mode }}
+      tag: ${{ steps.plan.outputs.tag }}
+      tags: ${{ steps.plan.outputs.tags }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - name: check the inputs and plan the builds
+        id: plan
+        env:
+          NAME: ${{ inputs.name }}
+          BUILDS: ${{ inputs.builds }}
+          TAG: ${{ inputs.tag }}
+          BACKFILL: ${{ inputs.backfill }}
+          BRANCH: ${{ inputs.mirror_branch }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os, re, sys
+
+          def fail(msg):
+              print(f"::error::{msg}", file=sys.stderr)
+              sys.exit(1)
+
+          TARGETS = {"esp32", "esp32s2", "esp32s3", "esp32c2", "esp32c3", "esp32c5",
+                     "esp32c6", "esp32c61", "esp32h2", "esp32p4"}
+          PLAIN = re.compile(r"^v[0-9]+\.[0-9]+\.[0-9]+$")
+
+          name = os.environ["NAME"]
+          if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", name):
+              fail(f"name '{name}': letters, digits, . _ - only")
+          branch = os.environ["BRANCH"]
+          if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,99}", branch) or ".." in branch:
+              fail(f"mirror_branch '{branch}' is not a plain branch name")
+
+          tag, backfill = os.environ["TAG"].strip(), os.environ["BACKFILL"].split()
+          if bool(tag) == bool(backfill):
+              fail("pass exactly one of tag (a release to build) or backfill")
+          for t in [tag] if tag else backfill:
+              if not PLAIN.match(t):
+                  fail(f"tag '{t}' is not vX.Y.Z. A beta is a plain tag with "
+                       "GitHub's prerelease flag; a suffix like -rc1 is read by "
+                       "the registry as part of the file name.")
+
+          try:
+              builds = json.loads(os.environ["BUILDS"])
+          except json.JSONDecodeError as e:
+              fail(f"builds is not JSON: {e}")
+          if not isinstance(builds, list) or not builds:
+              fail("builds must be a non-empty JSON array")
+          matrix, seen = [], set()
+          for b in builds:
+              if not isinstance(b, dict) or set(b) - {"target", "board", "sdkconfig_defaults"}:
+                  fail(f"builds entry {b!r}: keys are target, board, sdkconfig_defaults")
+              target = b.get("target", "")
+              if target not in TARGETS:
+                  fail(f"builds entry {b!r}: unknown target '{target}'")
+              segment = b.get("board", target)
+              if not re.fullmatch(r"[a-z0-9]{1,24}", segment):
+                  fail(f"board '{segment}': lowercase letters and digits, at most 24")
+              if segment in seen:
+                  fail(f"two builds are named '{segment}': give each a distinct board")
+              seen.add(segment)
+              defaults = b.get("sdkconfig_defaults", "")
+              if defaults and not re.fullmatch(r"[A-Za-z0-9._/-]+(;[A-Za-z0-9._/-]+)*", defaults):
+                  fail(f"sdkconfig_defaults '{defaults}' is not a ;-separated list of paths")
+              for part in filter(None, defaults.split(";")):
+                  if part.startswith("/") or ".." in part.split("/"):
+                      fail(f"sdkconfig_defaults '{part}' must be a path inside the project")
+              matrix.append({"target": target, "segment": segment, "defaults": defaults})
+
+          print(f"mode={'release' if tag else 'backfill'}")
+          print(f"tag={tag}")
+          print(f"tags={' '.join([tag] if tag else backfill)}")
+          print(f"matrix={json.dumps(matrix)}")
+          PY
+
+      # A release that does not exist yet is the one mistake worth catching
+      # before a build: every image would build and then have nowhere to go.
+      - name: the release exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAGS: ${{ steps.plan.outputs.tags }}
+        run: |
+          for t in $TAGS; do
+            # stderr kept: "release not found" and "could not authenticate"
+            # need different fixes.
+            if ! e=$(gh release view "$t" --repo "$REPO" --json tagName 2>&1 >/dev/null); then
+              echo "::error::release $t: $e"
+              echo "::error::Create the release first (release-please does), then" \
+                   "call this with its tag."
+              exit 1
+            fi
+          done
+
+  build:
+    needs: plan
+    if: needs.plan.outputs.mode == 'release'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    uses: ./.github/workflows/build-firmware.yml
+    with:
+      target: ${{ matrix.target }}
+      name: ${{ inputs.name }}-${{ matrix.segment }}
+      tag: ${{ needs.plan.outputs.tag }}
+      ref: ${{ needs.plan.outputs.tag }}
+      artifact: firmware-${{ matrix.segment }}
+      require: ${{ inputs.require }}
+      sdkconfig_defaults: ${{ matrix.defaults }}
+      esptool: ${{ inputs.esptool }}
+    secrets:
+      signing_key: ${{ secrets.signing_key }}
+
+  publish:
+    needs: [plan, build]
+    # A backfill has no build to wait for; a release publishes only when every
+    # build succeeded -- a release missing a board's images is worse than a
+    # failed one, because the registry would index it and offer that board
+    # nothing.
+    if: >-
+      always() && needs.plan.result == 'success' &&
+      (needs.build.result == 'success' ||
+       (needs.plan.outputs.mode == 'backfill' && needs.build.result == 'skipped'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    # One publish at a time per repository, never cancelled. An optimisation
+    # only: GitHub keeps one pending job per group and cancels the rest, which
+    # is why the push itself is leased.
+    concurrency:
+      group: release-assets-${{ github.repository }}
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      MODE: ${{ needs.plan.outputs.mode }}
+      TAGS: ${{ needs.plan.outputs.tags }}
+      BRANCH: ${{ inputs.mirror_branch }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .espos-workflow
+          sparse-checkout: tools
+          persist-credentials: false
+
+      - name: collect the images of the new release
+        if: needs.plan.outputs.mode == 'release'
+        uses: actions/download-artifact@v7
+        with:
+          pattern: firmware-*
+          merge-multiple: true
+          path: dist
+
+      - name: stage the images
+        run: |
+          set -euo pipefail
+          mkdir -p staged
+          for t in $TAGS; do
+            mkdir -p "staged/$t"
+            if [ "$MODE" = release ]; then
+              cp dist/*.bin "staged/$t/"
+            else
+              gh release download "$t" --repo "$REPO" --dir "staged/$t" \
+                --pattern '*-merged.bin' --pattern '*-ota.bin'
+            fi
+            compgen -G "staged/$t/*-merged.bin" >/dev/null ||
+              { echo "::error::$t has no -merged.bin image"; exit 1; }
+          done
+          # raw.githubusercontent.com does not serve files over 50 MiB; one
+          # that large would publish a URL the flasher cannot download.
+          big=$(find staged -name '*.bin' -size +52428800c)
+          if [ -n "$big" ]; then
+            echo "::error::too large to serve from raw.githubusercontent.com: $big"
+            exit 1
+          fi
+          find staged -type f -printf '%P %s bytes\n' | sort
+
+      - name: decide what the mirror keeps
+        run: |
+          set -euo pipefail
+          gh api "repos/$REPO/releases" --paginate > releases.json
+          current=""
+          if [ "$MODE" = release ]; then current="$TAGS"; fi
+          python3 .espos-workflow/tools/espos_release_window.py releases.json "$current" > keep
+          echo "the mirror keeps: $(tr '\n' ' ' < keep)"
+          if [ "$MODE" = backfill ]; then
+            for t in $TAGS; do
+              grep -qxF "$t" keep || {
+                echo "::error::$t is not among the releases the flasher offers" \
+                     "($(tr '\n' ' ' < keep)); the next publish would prune it."
+                exit 1
+              }
+            done
+          fi
+
+      - name: mirror the images where a browser can read them
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          {
+            echo "# Browser-readable firmware"
+            echo
+            echo "Generated by espOS's release-firmware.yml; do not edit or merge."
+            echo
+            echo "The images attached to this repository's releases, republished"
+            echo "because GitHub serves release downloads without the CORS header a"
+            echo "web page needs. The flasher reads them from raw.githubusercontent.com."
+            echo
+            echo "Rewritten as one commit on every publish. Holds the releases the"
+            echo "flasher can offer -- the three newest stable ones and up to two"
+            echo "newer prereleases; older ones are pruned here and remain"
+            echo "downloadable from their releases."
+          } > "$RUNNER_TEMP/mirror-README.md"
+          bash .espos-workflow/tools/espos_mirror_release_assets.sh publish \
+            --remote "https://x-access-token:${TOKEN}@github.com/${REPO}.git" \
+            --branch "$BRANCH" --staged staged --keep keep \
+            --readme "$RUNNER_TEMP/mirror-README.md"
+
+      # Said in the release itself, where whoever installs it reads: a device
+      # flashed with an unsigned image can never take an OTA from a later one.
+      - name: mark an unsigned release
+        if: >-
+          needs.plan.outputs.mode == 'release' &&
+          needs.build.outputs.unsigned == 'true'
+        run: |
+          set -euo pipefail
+          marker="Unsigned build:"
+          body=$(gh release view "$TAGS" --repo "$REPO" --json body --jq .body)
+          case "$body" in *"$marker"*) exit 0 ;; esac
+          {
+            echo "**$marker** made without the project's signing key. It installs"
+            echo "over USB, but a device running it will not accept any later"
+            echo "update over the air."
+            echo
+            printf '%s\n' "$body"
+          } > "$RUNNER_TEMP/notes.md"
+          gh release edit "$TAGS" --repo "$REPO" --notes-file "$RUNNER_TEMP/notes.md"
+
+      # After the mirror, so a release never carries images without a
+      # browser-readable copy: if this fails, the rollback below removes the
+      # mirror's publish again. What the release held before is recorded, so a
+      # failure halfway can take back exactly the images this run added -- a
+      # release with one board's images and not the other's would be indexed
+      # as it stands.
+      - name: attach the images to the release
+        if: needs.plan.outputs.mode == 'release'
+        run: |
+          set -euo pipefail
+          # What the release held before this run. A re-run replaces those
+          # images, and a failed re-run must not delete a set an earlier run
+          # attached completely.
+          gh release view "$TAGS" --repo "$REPO" --json assets --jq '.assets[].name' \
+            > "$RUNNER_TEMP/assets-before"
+          for f in dist/*.bin; do
+            gh release upload "$TAGS" --repo "$REPO" --clobber "$f"
+          done
+
+      # Any failure or cancellation after the mirror pushed or the attach began:
+      # the branch would advertise images for a release that has none, or the
+      # release would hold part of a set. The mirror's undo is leased against
+      # this run's own commit, so a later publish is never discarded; only
+      # images the release did not have before this run are removed.
+      - name: roll back if anything after the mirror failed
+        if: failure() || cancelled()
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          if [ -f .espos-workflow/tools/espos_mirror_release_assets.sh ]; then
+            bash .espos-workflow/tools/espos_mirror_release_assets.sh rollback \
+              --remote "https://x-access-token:${TOKEN}@github.com/${REPO}.git" \
+              --branch "$BRANCH"
+          fi
+          [ -f "$RUNNER_TEMP/assets-before" ] || exit 0
+          now=$(gh release view "$TAGS" --repo "$REPO" --json assets --jq '.assets[].name')
+          for f in dist/*.bin; do
+            name=$(basename "$f")
+            grep -qxF -- "$name" "$RUNNER_TEMP/assets-before" && continue
+            grep -qxF -- "$name" <<< "$now" || continue
+            if gh release delete-asset "$TAGS" "$name" --repo "$REPO" --yes; then
+              echo "removed $name, attached by this failed run"
+            else
+              echo "::warning::could not remove $name from $TAGS; delete it by hand" \
+                   "or re-run this release"
+            fi
+          done

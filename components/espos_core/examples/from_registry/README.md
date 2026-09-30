@@ -142,6 +142,13 @@ gives you all of this. What each part is for, in case you start elsewhere:
    all, `secure_boot_signing_key.pem` out of git. Commit `dependencies.lock`: it
    is what makes the next build use the same components.
 
+## Releasing it
+
+espOS's reusable `release-firmware.yml` builds every target and board, attaches
+the images to your GitHub release and publishes the browser-readable copies the
+hosted flasher needs, from a workflow of about twenty lines. See [Releasing a
+firmware](../../../../docs/releasing.md#releasing-a-firmware).
+
 ## What the monitor shows
 
 Same as `minimal`: the portal SSID if there is no stored network, then the IP
