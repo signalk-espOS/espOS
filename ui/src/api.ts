@@ -59,7 +59,7 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
   init.signal = AbortSignal.timeout?.(REQUEST_TIMEOUT_MS);
   const r = await fetch(BASE + path, init);
   const text = await r.text();
-  let js: unknown = null;
+  let js: unknown;
   try { js = text ? JSON.parse(text) : null; } catch { js = null; }
   if (!r.ok) {
     const err = js as ApiError | null;
@@ -193,6 +193,28 @@ export interface JsonSchemaNs {
 // display = stored * multiplier + offset, and the exact inverse on write.
 // A field that declares neither is untouched, so the identity path costs
 // nothing and cannot introduce rounding.
+/* A schema value as display text.
+ *
+ * Config values arrive as JSON, so their type is `unknown` and nothing stops one
+ * being an object or an array -- the table format already stores a JSON string,
+ * and a future field could hold the parsed thing. `String(v)` renders those as
+ * "[object Object]", which is the kind of defect a user reports as "the page is
+ * broken" and nobody can reproduce. JSON at least says what the value is. */
+export function text(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "number" || typeof v === "boolean" || typeof v === "bigint") return String(v);
+  /* Objects and arrays as JSON. Anything else -- a function, a symbol -- is not
+   * something a config value can be, but String() on a symbol THROWS, and a
+   * rendering helper that can throw is worse than one that renders nothing.
+   * JSON.stringify returns undefined for those rather than raising. */
+  try {
+    return JSON.stringify(v) ?? "";
+  } catch {
+    return "";
+  }
+}
+
 export function toDisplay(p: JsonSchemaProp, v: unknown): unknown {
   const m = p["x-espos-displayMultiplier"] ?? 1;
   const o = p["x-espos-displayOffset"] ?? 0;
@@ -303,8 +325,8 @@ export function connectEvents() {
   linkStore.set("connecting");
   es = new EventSource(BASE + "/events", { withCredentials: ABSOLUTE });
   const on = <T,>(name: string, store: Store<T>, map?: (d: T) => void) =>
-    es!.addEventListener(name, (e) => {
-      const d = JSON.parse((e as MessageEvent).data) as T;
+    es!.addEventListener(name, (e: MessageEvent<string>) => {
+      const d = JSON.parse(e.data) as T;
       store.set(d);
       map?.(d);
     });
@@ -331,9 +353,10 @@ export function connectEvents() {
   on("sk_tls", skTlsStore);
   on("ota", otaStore);
   on("ble", bleStore);
-  es.addEventListener("logs", (e) => logsSeqStore.set((JSON.parse((e as MessageEvent).data) as { next: number }).next));
-  es.addEventListener("config", (e) => {
-    const d = JSON.parse((e as MessageEvent).data) as { ns: string; key: string };
+  es.addEventListener("logs", (e: MessageEvent<string>) =>
+    logsSeqStore.set((JSON.parse(e.data) as { next: number }).next));
+  es.addEventListener("config", (e: MessageEvent<string>) => {
+    const d = JSON.parse(e.data) as { ns: string; key: string };
     configChangeStore.set({ ...d, n: ++changes });
   });
 }

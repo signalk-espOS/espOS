@@ -11,6 +11,10 @@ export function StatusPage() {
   const info = useAsync(() => get<SystemInfo>("/system/info"));
   const [msg, setMsg] = useState("");
   const [tick, setTick] = useState(0);
+  /* Empty deps on purpose: `info` comes from useAsync and is a new object every
+   * render, so listing it would clear and recreate this interval on each one --
+   * and a 10 s poll that restarts more often than it fires never fires. */
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { const t = setInterval(() => { info.reload(); setTick((n) => n + 1); }, 10000); return () => clearInterval(t); }, []);
   void tick;
   const i = info.data;
