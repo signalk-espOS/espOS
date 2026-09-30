@@ -66,6 +66,30 @@ esp_err_t TwaiNode::acquire(const TwaiNodeConfig& config) {
     return ESP_ERR_NO_MEM;
   }
 
+  /* Room for everything the driver can hold at once, which is its software
+   * queue PLUS whatever is already in a hardware TX buffer: a queued frame is
+   * popped into a hardware slot and only acknowledged when that slot
+   * completes, so both counts are live at the same moment. A ring the size of
+   * the queue alone would make US the tighter limit and refuse frames the
+   * driver would have taken.
+   *
+   * The hardware count is TWAI_HAL_TX_BUFFER_SLOT_NUM, which lives in a
+   * private HAL header and is reported by no public API, so it is spelled out.
+   * It is the HAL's ceiling rather than this SoC's number, which is the safe
+   * direction: the ring is generous, never short. Were a future HAL to raise
+   * that ceiling the only consequence is the ESP_ERR_NO_MEM this function
+   * already returns safely -- never a slot handed out twice. */
+  constexpr size_t kMaxHwTxSlots = 8; /* TWAI_HAL_TX_BUFFER_SLOT_NUM */
+  const size_t slots = config.tx_queue_depth + kMaxHwTxSlots;
+  tx_slots_ = static_cast<TxSlot*>(calloc(slots, sizeof(TxSlot)));
+  tx_in_use_ = static_cast<bool*>(calloc(slots, sizeof(bool)));
+  if (!tx_slots_ || !tx_in_use_) {
+    teardown();
+    xSemaphoreGive(lock_);
+    return ESP_ERR_NO_MEM;
+  }
+  tx_ring_.init(tx_in_use_, slots);
+
   twai_onchip_node_config_t node_cfg = {};
   node_cfg.io_cfg.tx = config.tx_pin;
   node_cfg.io_cfg.rx = config.rx_pin;
@@ -87,8 +111,13 @@ esp_err_t TwaiNode::acquire(const TwaiNodeConfig& config) {
     return err;
   }
 
+  /* on_tx_done is what makes the slot ring work: it names the frame the driver
+   * has finished with, so a slot is returned exactly when the driver stops
+   * reading it. Not in IRAM -- espOS does not set CONFIG_TWAI_ISR_CACHE_SAFE,
+   * and registration fails loudly with ESP_ERR_INVALID_ARG if a consumer does,
+   * rather than misbehaving quietly. */
   const twai_event_callbacks_t cbs = {
-      .on_tx_done = nullptr,
+      .on_tx_done = &TwaiNode::on_tx_done,
       .on_rx_done = &TwaiNode::on_rx_done,
       .on_state_change = &TwaiNode::on_state_change,
       .on_error = &TwaiNode::on_error,
@@ -158,6 +187,11 @@ void TwaiNode::release() {
              "than freeing it underneath it");
     node_ = nullptr; /* twai_node_delete would fault the same way */
     rx_queue_ = nullptr;
+    /* The ring leaks with it, and must: the node is never deleted on this
+     * path, so the driver may still hold a pointer into it for ever. */
+    tx_ring_.init(nullptr, 0);
+    tx_slots_ = nullptr;
+    tx_in_use_ = nullptr;
     refs_.store(0);
     xSemaphoreGive(lock_);
     return;
@@ -169,10 +203,18 @@ void TwaiNode::release() {
 
 /// Caller holds lock_ (or is on the failure path of acquire()).
 void TwaiNode::teardown() {
+  /* The node first, always. Freeing the slots while the driver still held a
+   * queued pointer would be the very bug this ring exists to prevent, moved to
+   * shutdown -- and harder to see, because nothing transmits afterwards. */
   if (node_) {
     twai_node_delete(node_);
     node_ = nullptr;
   }
+  tx_ring_.init(nullptr, 0);
+  free(tx_slots_);
+  tx_slots_ = nullptr;
+  free(tx_in_use_);
+  tx_in_use_ = nullptr;
   if (rx_queue_) {
     vQueueDelete(rx_queue_);
     rx_queue_ = nullptr;
@@ -185,21 +227,94 @@ void TwaiNode::set_sink(FrameSink sink, void* ctx) {
   sink_.store(sink);
 }
 
+size_t TwaiNode::tx_slot_index(const twai_frame_t* frame) const {
+  /* Matched by address against the slots we own: the pointer came back from
+   * the driver, and a linear scan also rejects a frame that is somehow not one
+   * of ours instead of computing an index into the middle of the ring. */
+  for (size_t i = 0; i < tx_ring_.size(); i++) {
+    if (&tx_slots_[i].frame == frame) return i;
+  }
+  return TxSlotRing::kNone;
+}
+
+void TwaiNode::release_tx_slot(const twai_frame_t* frame) {
+  if (!frame) return;
+  portENTER_CRITICAL_SAFE(&tx_mux_);
+  const size_t idx = tx_slot_index(frame);
+  if (idx != TxSlotRing::kNone) tx_ring_.release(idx);
+  portEXIT_CRITICAL_SAFE(&tx_mux_);
+}
+
+bool TwaiNode::on_tx_done(twai_node_handle_t node,
+                          const twai_tx_done_event_data_t* edata, void* ctx) {
+  (void)node;
+  auto* self = static_cast<TwaiNode*>(ctx);
+  /* Fires for a failed transmission too -- the driver raises TX_DONE whenever
+   * a hardware slot finishes and reports the outcome in is_tx_success, so the
+   * slot comes back either way and a bus nobody answers cannot starve the
+   * ring. The outcome is not read here because the failure itself already
+   * arrives as on_error, which is what error_count_ counts. */
+  if (self && edata) self->release_tx_slot(edata->done_tx_frame);
+  return false;
+}
+
+void TwaiNode::reclaim_tx_slots() {
+  portENTER_CRITICAL_SAFE(&tx_mux_);
+  const TxSlotRing::ReclaimTicket ticket = tx_ring_.reclaim_begin();
+  portEXIT_CRITICAL_SAFE(&tx_mux_);
+  if (!ticket.worth_asking) return;
+
+  /* Timeout 0, so this only ever reads state: ESP_OK means idle hardware and
+   * an empty pending queue. Bus off answers ESP_ERR_INVALID_STATE, which is
+   * deliberately not idle -- the queued frames are restarted on recovery. */
+  if (twai_node_transmit_wait_all_done(node_, 0) != ESP_OK) return;
+
+  portENTER_CRITICAL_SAFE(&tx_mux_);
+  const size_t freed = tx_ring_.reclaim_commit(ticket);
+  portEXIT_CRITICAL_SAFE(&tx_mux_);
+
+  if (freed) {
+    /* Warn, not debug: the driver dropped frames it never reported, so a PGN
+     * somebody asked for never reached the bus. */
+    ESP_LOGW(kTag, "reclaimed %u tx slot(s) the driver abandoned",
+             (unsigned)freed);
+  }
+}
+
 esp_err_t TwaiNode::transmit(const CanFrame& frame, int timeout_ms) {
   if (!node_) return ESP_ERR_INVALID_STATE;
   if (frame.dlc > kCanMaxData) return ESP_ERR_INVALID_ARG;
 
-  twai_frame_t tx = {};
-  tx.header.id = frame.id;
-  tx.header.ide = frame.extended;
-  tx.header.rtr = frame.remote;
-  tx.header.dlc = frame.dlc;
-  // The driver reads the payload from the buffer we point at; the frame is
-  // copied into the driver's queue before transmit returns.
-  tx.buffer = const_cast<uint8_t*>(frame.data);
-  tx.buffer_len = frame.dlc;
+  /* Into a slot that outlives this call, because the driver reads the frame
+   * after it returns -- see TxSlot. */
+  portENTER_CRITICAL_SAFE(&tx_mux_);
+  const size_t idx = tx_ring_.claim();
+  portEXIT_CRITICAL_SAFE(&tx_mux_);
+  if (idx == TxSlotRing::kNone) return ESP_ERR_NO_MEM;
 
-  return twai_node_transmit(node_, &tx, timeout_ms);
+  TxSlot* slot = &tx_slots_[idx];
+  slot->frame = {};
+  slot->frame.header.id = frame.id;
+  slot->frame.header.ide = frame.extended;
+  slot->frame.header.rtr = frame.remote;
+  slot->frame.header.dlc = frame.dlc;
+  memcpy(slot->data, frame.data, frame.dlc);
+  slot->frame.buffer = slot->data;
+  /* dlc and buffer_len both, and equal: _node_queue_tx refuses a frame whose
+   * dlc does not match its length. For classic CAN lengths 0..8 they are the
+   * same number. */
+  slot->frame.buffer_len = frame.dlc;
+
+  const esp_err_t err = twai_node_transmit(node_, &slot->frame, timeout_ms);
+
+  /* A refused frame was never retained: every check in _node_queue_tx returns
+   * before it stores the pointer, and the queue path fails on its semaphore --
+   * also before the push. So the slot goes straight back; holding it would
+   * leak one per refusal and end with a ring that is permanently full. */
+  portENTER_CRITICAL_SAFE(&tx_mux_);
+  tx_ring_.submitted(idx, err == ESP_OK);
+  portEXIT_CRITICAL_SAFE(&tx_mux_);
+  return err;
 }
 
 /* ---------------------------------------------------------------- ISR side */
@@ -276,6 +391,7 @@ bool TwaiNode::on_state_change(twai_node_handle_t node,
 
 void TwaiNode::rx_task(void* arg) {
   auto* self = static_cast<TwaiNode*>(arg);
+  int64_t next_reclaim_us = 0;
 
   while (self->task_running_.load()) {
     if (self->recover_pending_.exchange(false)) {
@@ -284,6 +400,15 @@ void TwaiNode::rx_task(void* arg) {
       if (err != ESP_OK) {
         ESP_LOGE(kTag, "twai_node_recover failed: %s", esp_err_to_name(err));
       }
+    }
+
+    /* Once a second, not once per frame: this loop turns 800+ times a second
+     * on a live bus, and the slots the driver forgets are forgotten at bus-off
+     * -- a rate nothing needs to be chased at. */
+    const int64_t now_us = esp_timer_get_time();
+    if (now_us >= next_reclaim_us) {
+      next_reclaim_us = now_us + 1000000;
+      self->reclaim_tx_slots();
     }
 
     RxItem item;
