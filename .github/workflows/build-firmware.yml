@@ -182,18 +182,52 @@ jobs:
           echo "version=$v" >> "$GITHUB_OUTPUT"
           echo "building with ESP-IDF $v"
 
-      # inputs.tag counts as a release: without this a workflow_call skipped
-      # the whole step, no key was restored, and the release went out signed
-      # with the per-run throwaway -- installable over USB and then refusing
-      # every future OTA, on the boat, months later. That is the exact failure
-      # this file's header warns about, and it would have shipped silently.
+      # This condition must track the artifact upload below: every event that
+      # publishes an image is an event whose image somebody flashes.
+      #
+      # inputs.tag counts as a release: without it a workflow_call skipped the
+      # whole step, no key was restored, and the release went out signed with a
+      # throwaway -- installable over USB and then refusing every future OTA, on
+      # the boat, months later.
+      #
+      # workflow_dispatch counts too, and that is not hypothetical. This file is
+      # workflow_call only, so `github.event_name` is the CALLER's event: a
+      # consumer whose dispatch-triggered workflow calls this one without a tag
+      # uploaded an artifact signed with a key that existed only inside that run.
+      # espos-p4-cockpit did exactly that to build the images its bump PRs call
+      # "the ones to test-flash", and a panel flashed with one refused every
+      # later OTA (ESP_ERR_OTA_VALIDATE_FAILED) until somebody brought a cable.
+      #
+      # `pull_request` is deliberately NOT here, and must not be added: a
+      # same-repository PR does receive secrets and can alter the workflow that
+      # reads them, so that would hand the signing key to anything anyone opens a
+      # PR with. The key cannot be rotated cheaply -- every device already
+      # flashed with it stops accepting OTAs the day it changes. The upload
+      # condition has no PR leg either; keep them that way together.
       - name: restore the signing key
         id: signing
-        if: github.event_name == 'release' || inputs.tag != ''
+        if: >-
+          github.event_name == 'release' ||
+          github.event_name == 'workflow_dispatch' ||
+          inputs.tag != ''
         env:
           KEY: ${{ secrets.signing_key }}
           ALLOW_UNSIGNED: ${{ vars.ESPOS_ALLOW_UNSIGNED_RELEASE }}
+          # A release must not go out unsigned by accident; a dispatch may, since
+          # a fork dispatching a build has no access to the secret at all.
+          IS_RELEASE: ${{ github.event_name == 'release' || inputs.tag != '' }}
         run: |
+          if [ -z "$KEY" ] && [ "$IS_RELEASE" != "true" ]; then
+            # Warn rather than fail: a fork dispatching this wants a binary, and
+            # hard-failing would take that away. Loud, because the artifact is
+            # the thing somebody is about to put on a panel.
+            echo "::warning::No signing key for this dispatched build: it will" \
+                 "be signed with a throwaway. It boots over USB, and a panel" \
+                 "flashed with it will reject EVERY later OTA. Do not" \
+                 "test-flash it to a device you intend to update over the air."
+            echo "unsigned=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ -z "$KEY" ] && [ "$ALLOW_UNSIGNED" = "true" ]; then
             # The opt-out, for a fork that wants a flashable binary and runs
             # no OTA fleet. CMake generates a throwaway key, so this release
@@ -229,9 +263,12 @@ jobs:
       # espsecure: it is on the runner and its spelling does not change
       # between esptool versions.
       - name: throwaway signing key for an unsigned build
+        # Asked of the signing step rather than re-derived from the event: those
+        # two spellings drifting apart is what this PR's review was about. Either
+        # the step ran and reported it had no key, or it did not run at all.
         if: >-
           steps.signing.outputs.unsigned == 'true' ||
-          (github.event_name != 'release' && inputs.tag == '')
+          steps.signing.outcome != 'success'
         run: |
           [ -f secure_boot_signing_key.pem ] ||
             openssl genrsa -out secure_boot_signing_key.pem 3072
