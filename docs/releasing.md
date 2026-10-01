@@ -281,7 +281,12 @@ inside the component directory for exactly this reason.
 built on espOS: it builds every target and board, attaches the images to the
 GitHub release, and mirrors them where a browser can read them, so the hosted
 flasher and the Signal K plugin can install the release. With release-please
-driving the version, a project's entire release workflow is this:
+driving the version, a project's entire release workflow is this — and the
+`@v…` pin below is the one kept current, because release-please bumps this
+file. The same example in the workflow's own header deliberately says `@vX.Y.Z`
+instead: nothing can rewrite a file under `.github/workflows/`, since
+`workflows: write` exists only as a GitHub App permission and no `GITHUB_TOKEN`
+has it, so a version there would freeze at whatever release first wrote it.
 
 ```yaml
 on:

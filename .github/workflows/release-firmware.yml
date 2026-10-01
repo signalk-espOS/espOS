@@ -6,9 +6,16 @@
 # so the hosted flasher and the Signal K plugin can install the release. The
 # whole release workflow of a project becomes:
 #
+# (docs/releasing.md has this example with the current release already filled
+# in, and is kept up to date automatically. This copy deliberately does not
+# name a version: release-please cannot rewrite a file under .github/workflows/
+# -- writing one needs a GitHub App permission that no GITHUB_TOKEN has -- so a
+# version here would be frozen at whatever release first wrote it, and a
+# consumer pinning to it would be pinning to the past. Pin to a release tag.)
+#
 #   jobs:
 #     firmware:
-#       uses: signalk-espOS/espOS/.github/workflows/release-firmware.yml@v0.12.1 # x-release-please-version
+#       uses: signalk-espOS/espOS/.github/workflows/release-firmware.yml@vX.Y.Z
 #       permissions:
 #         contents: write
 #       with:
