@@ -49,6 +49,8 @@
      "description": "Bring up the setup access point when no network is configured or nothing connects for a while."},
     {"name": "portal_after_s", "type": "int", "default": 90, "min": 10, "max": 3600, "unit": "s",
      "title": "Portal after", "description": "Seconds without a connection before the access point comes up (0 networks configured: immediately)."},
+    {"name": "portal_online", "type": "bool", "default": false, "title": "Access point while online",
+     "description": "Raise the setup access point even when Ethernet (or another transport) is carrying the network. Off: a device reachable over Ethernet does not advertise one."},
     {"name": "portal_ssid", "type": "string", "default": "", "maxLength": 32, "title": "Access point SSID",
      "description": "Empty = espOS-<last 4 hex of the device MAC>."},
     {"name": "portal_psk", "type": "string", "default": "", "maxLength": 64, "secret": true, "pattern": "^(.{8,63})?$",

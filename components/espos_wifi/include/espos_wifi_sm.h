@@ -57,21 +57,39 @@ typedef struct {
     uint32_t connect_timeout_ms;
     bool portal_enabled;
     uint32_t portal_after_ms;
+    /* wifi.portal_online: raise the setup access point even while another
+     * transport is carrying the network. Default false -- an Ethernet-only
+     * device is reachable over Ethernet, so an access point adds nothing but
+     * an open network it advertises for as long as it is powered (espOS #158).
+     * Set it for a device whose only way in has to be the portal. */
+    bool portal_online;
 } espos_wifi_cfg_t;
 
+/* Values are ABI: spelled out, appended before _MAX, never renumbered. */
 typedef enum {
-    ESPOS_WIFI_EV_START,          /* cfg loaded; begin */
-    ESPOS_WIFI_EV_STOP,           /* shut down (deinit) */
-    ESPOS_WIFI_EV_CONFIG,         /* cfg replaced (arg = const espos_wifi_cfg_t *) */
-    ESPOS_WIFI_EV_STA_CONNECTED,  /* associated (arg = const espos_wifi_link_t *) */
-    ESPOS_WIFI_EV_STA_DISCONNECTED, /* arg = int reason (802.11/esp_wifi code) */
-    ESPOS_WIFI_EV_GOT_IP,         /* arg = const espos_wifi_ip_t * */
-    ESPOS_WIFI_EV_LOST_IP,
-    ESPOS_WIFI_EV_TIMER,          /* the single SM timer expired */
-    ESPOS_WIFI_EV_PORTAL_CLIENT,  /* arg = int station count on the portal AP */
-    ESPOS_WIFI_EV_PORTAL_FAILED,  /* the port could not bring the AP up */
-    ESPOS_WIFI_EV_PORTAL_RECONFIG, /* portal SSID/password changed */
+    ESPOS_WIFI_EV_START = 0,            /* cfg loaded; begin */
+    ESPOS_WIFI_EV_STOP = 1,             /* shut down (deinit) */
+    ESPOS_WIFI_EV_CONFIG = 2,           /* cfg replaced (arg = const espos_wifi_cfg_t *) */
+    ESPOS_WIFI_EV_STA_CONNECTED = 3,    /* associated (arg = const espos_wifi_link_t *) */
+    ESPOS_WIFI_EV_STA_DISCONNECTED = 4, /* arg = int reason (802.11/esp_wifi code) */
+    ESPOS_WIFI_EV_GOT_IP = 5,           /* arg = const espos_wifi_ip_t * */
+    ESPOS_WIFI_EV_LOST_IP = 6,
+    ESPOS_WIFI_EV_TIMER = 7,           /* the single SM timer expired */
+    ESPOS_WIFI_EV_PORTAL_CLIENT = 8,   /* arg = int station count on the portal AP */
+    ESPOS_WIFI_EV_PORTAL_FAILED = 9,   /* the port could not bring the AP up */
+    ESPOS_WIFI_EV_PORTAL_RECONFIG = 10, /* portal SSID/password changed */
+    ESPOS_WIFI_EV_OTHER_NET = 11,      /* another transport has/lost the network (arg = const bool *up) */
+    ESPOS_WIFI_EV_PORTAL_FORCE = 12,   /* app override (arg = const espos_wifi_portal_force_t *) */
+    ESPOS_WIFI_EV_MAX = 13,
 } espos_wifi_event_t;
+
+/* What espos_wifi_portal_open() asked for. Not persisted: a reboot forgets it. */
+typedef enum {
+    ESPOS_WIFI_PORTAL_AUTO = 0, /* the policy decides (the default) */
+    ESPOS_WIFI_PORTAL_UP = 1,   /* keep it up, connected or not */
+    ESPOS_WIFI_PORTAL_DOWN = 2, /* keep it down, whatever the policy would do */
+    ESPOS_WIFI_PORTAL_FORCE_MAX = 3,
+} espos_wifi_portal_force_t;
 
 typedef struct {
     char ssid[33];
@@ -139,6 +157,11 @@ typedef struct espos_wifi_sm {
      * ones. Appending changes only sizeof -- still an ABI break, hence the bump,
      * but the narrower kind. */
     bool connect_in_flight;
+    /* Another transport (Ethernet today) is carrying the network. Fed in by
+     * ESPOS_WIFI_EV_OTHER_NET rather than read here: this machine never calls
+     * out, which is what lets it run on the host. */
+    bool other_net_up;
+    espos_wifi_portal_force_t portal_force;
 } espos_wifi_sm_t;
 
 void espos_wifi_sm_init(espos_wifi_sm_t *sm, const espos_wifi_port_t *port, void *port_ctx,

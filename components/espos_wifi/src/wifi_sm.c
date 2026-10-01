@@ -91,7 +91,39 @@ static void portal_policy(espos_wifi_sm_t *sm)
         portal_down(sm);
         return;
     }
+    /* An application that can tell for itself gets the last word, but only
+     * inside what the operator allowed above: portal_enabled = false is a
+     * configuration choice, not a default to be overridden. */
+    if (sm->portal_force == ESPOS_WIFI_PORTAL_DOWN) {
+        portal_down(sm);
+        return;
+    }
+    if (sm->portal_force == ESPOS_WIFI_PORTAL_UP) {
+        /* Still not inside an association: switching to APSTA mid-attempt is
+         * measurably worse than doing it between attempts (espOS #144), and
+         * that holds however the portal was asked for. The request is sticky,
+         * so every path out of CONNECTING calls this again and raises it then
+         * -- the wait is bounded by the attempt, not by its success. */
+        if (sm->connect_in_flight) {
+            sm->portal_due_ms = 0;
+            return;
+        }
+        portal_up(sm);
+        return;
+    }
     if (sm->st.state == ESPOS_WIFI_ST_CONNECTED) {
+        portal_down(sm);
+        return;
+    }
+    /* Reachable over something else, so the access point would add nothing but
+     * an open network advertised for as long as the device is powered -- which
+     * on an Ethernet-only device is for ever, because this machine never
+     * reaches CONNECTED and nothing else took the portal down (espOS #158).
+     *
+     * Ahead of the portal_active check below on purpose: Ethernet usually
+     * comes up AFTER the portal, so this has to be able to take a running one
+     * down, not merely decline to raise it. */
+    if (sm->other_net_up && !sm->cfg.portal_online) {
         portal_down(sm);
         return;
     }
@@ -167,6 +199,14 @@ static void arm(espos_wifi_sm_t *sm, uint32_t ms, bool is_dhcp)
 }
 
 /* Re-arm the pending state timeout for whatever time it has left. */
+/* A policy run may have scheduled the portal for later (portal_due_ms) rather
+ * than raised it now, and nothing acts on that deadline unless the timer is
+ * armed for it: arm() folds portal_due_ms in when it is CALLED, not
+ * retroactively. Every handler that changes the policy outside the normal
+ * transitions therefore ends with this, or a portal owed in 30 s arrives
+ * whenever the next unrelated timeout happens to fire -- or not at all. */
+static void rearm_after_policy(espos_wifi_sm_t *sm);
+
 static void rearm_state(espos_wifi_sm_t *sm)
 {
     if (!sm->state_due_ms) {
@@ -195,6 +235,15 @@ static void arm_portal_only(espos_wifi_sm_t *sm)
     }
 }
 
+static void rearm_after_policy(espos_wifi_sm_t *sm)
+{
+    if (sm->state_due_ms) {
+        rearm_state(sm); /* keeps a connect/DHCP/backoff deadline, folds the portal in */
+    } else {
+        arm_portal_only(sm);
+    }
+}
+
 /* ------------------------------------------------------------ transitions */
 
 static void start_attempt(espos_wifi_sm_t *sm)
@@ -202,6 +251,10 @@ static void start_attempt(espos_wifi_sm_t *sm)
     if (sm->cfg.net_count == 0) {
         set_state(sm, ESPOS_WIFI_ST_UNCONFIGURED);
         sm->st.net_index = -1;
+        /* Nothing will be attempted, so nothing is in flight. Left set, the
+         * flag would defer the portal for ever: every path that clears it is a
+         * path out of an attempt, and there is no attempt to come out of. */
+        sm->connect_in_flight = false;
         portal_policy(sm);
         arm_portal_only(sm);
         notify(sm);
@@ -283,6 +336,10 @@ static void go_idle(espos_wifi_sm_t *sm, espos_wifi_state_t s, int reason)
     sm->st.disconnected_since_ms = now(sm);
     memset(&sm->st.link, 0, sizeof(sm->st.link));
     memset(&sm->st.ip, 0, sizeof(sm->st.ip));
+    /* The attempt was abandoned, not replaced: disconnect() above ended it and
+     * no result will arrive for it. Cleared here rather than in the callers
+     * because this is the one place that leaves the attempt cycle. */
+    sm->connect_in_flight = false;
     set_state(sm, s);
     portal_policy(sm);
     arm_portal_only(sm);
@@ -598,5 +655,50 @@ void espos_wifi_sm_event(espos_wifi_sm_t *sm, espos_wifi_event_t ev, const void 
             notify(sm);
         }
         return;
+
+    case ESPOS_WIFI_EV_OTHER_NET: {
+        const bool up = arg ? *(const bool *)arg : false;
+        if (up == sm->other_net_up) {
+            return; /* the bus repeats NETWORK_UP whenever the route moves */
+        }
+        sm->other_net_up = up;
+        /* Recorded but not acted on before EV_START, which seeds this on
+         * purpose: a policy run here would drive the port -- raise a portal,
+         * cancel a timer -- on a machine whose driver is not started, and
+         * EV_START's own first policy run applies the stored value anyway. */
+        if (!sm->started) {
+            return;
+        }
+        /* Both directions matter: Ethernet appearing takes the portal down,
+         * Ethernet going away is what puts it back -- and `due` is computed
+         * from disconnected_since_ms, which has not moved while we sat here
+         * disconnected, so it is usually already past and the portal returns
+         * at once rather than after another portal_after_s. */
+        portal_policy(sm);
+        rearm_after_policy(sm);
+        notify(sm);
+        return;
+    }
+
+    case ESPOS_WIFI_EV_PORTAL_FORCE: {
+        const espos_wifi_portal_force_t want = arg ? *(const espos_wifi_portal_force_t *)arg : ESPOS_WIFI_PORTAL_AUTO;
+        if (want >= ESPOS_WIFI_PORTAL_FORCE_MAX) {
+            return;
+        }
+        if (want == sm->portal_force) {
+            return;
+        }
+        sm->portal_force = want;
+        if (!sm->started) {
+            return; /* as above: stored now, applied by EV_START */
+        }
+        portal_policy(sm);
+        rearm_after_policy(sm);
+        notify(sm);
+        return;
+    }
+
+    case ESPOS_WIFI_EV_MAX:
+        return; /* not an event; named so the switch stays exhaustive */
     }
 }

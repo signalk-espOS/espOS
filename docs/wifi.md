@@ -32,6 +32,7 @@ requires `espos_net_start()` to have run.
 
   DISABLED      sta_enabled=false: idle (portal may be up)
   UNCONFIGURED  no network has an SSID: idle, portal up immediately
+                (no portal while another transport has the network)
 ```
 
 Every driver event carries the raw reason code; the status exposes it as
@@ -91,13 +92,40 @@ see with DHCP.
 The station keeps retrying while the portal is up — the portal never
 replaces the station, it runs alongside (APSTA).
 
-| Situation                          | Portal                                    |
-|------------------------------------|-------------------------------------------|
-| no network configured              | up immediately                            |
-| `sta_enabled = false`              | up immediately                            |
-| retrying without success           | up after `portal_after_s` (default 90 s)  |
-| connected                          | down                                      |
-| `portal_enabled = false`           | never                                     |
+| Situation                                        | Portal                                    |
+|--------------------------------------------------|-------------------------------------------|
+| no network configured                            | up immediately                            |
+| `sta_enabled = false`                            | up immediately                            |
+| retrying without success                         | up after `portal_after_s` (default 90 s)  |
+| connected                                        | down                                      |
+| **another transport has the network**            | **down**, unless `portal_online`          |
+| `portal_enabled = false`                         | never                                     |
+| `espos_wifi_portal_open(true/false)` was called  | up / down, until `espos_wifi_portal_auto()` |
+
+**While Ethernet (or any other transport) is carrying the network, there is no
+access point.** The device is reachable over that transport, so an access point
+adds nothing — and the rows above would otherwise leave one up for as long as
+the device is powered on an Ethernet-only board, because this machine never
+reaches `connected` and nothing else would take it down. That is what espOS
+used to do, and with `portal_psk` empty by default it was an open network
+advertised indefinitely (espOS #158).
+
+It applies in both directions: Ethernet coming up takes a running portal
+*down*, and Ethernet going away puts it back at once rather than after another
+`portal_after_s`. `wifi.portal_online = true` restores the old behaviour, for a
+device whose only way in has to be the access point. It matters if the API key
+is then lost: the power-cycle recovery in
+[security.md](security.md#the-setup-portal-and-the-way-back-in) exempts
+requests arriving on the access point but does not raise one, so on a device
+that is online over Ethernet the cable has to come out first. That brings the
+portal back at once when no WiFi network is configured; with one configured it
+returns when `portal_after_s` has passed since the station link dropped, which
+on a device that has been up a while is immediately.
+
+`espos_wifi_portal_open(bool)` lets an application decide for itself — a key
+switch, a hatch sensor, a commissioning mode. It is not persisted, so a reboot
+forgets it, and it does not override `portal_enabled = false`: an operator who
+turned the access point off keeps it off.
 
 SSID `portal_ssid` (default `espOS-<id>`, the device id being the last 4 hex
 of the base MAC, [net.md](net.md)), open unless

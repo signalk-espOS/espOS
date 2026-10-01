@@ -88,10 +88,13 @@ in over the station or Ethernet link.
 Once a key is set, the access point is treated like any other network: Bearer
 or a login, the Origin rule, the throttle. Being on it is not evidence that
 anyone is at the device, because `wifi.portal_psk` is empty by default — so the
-access point is **open** — and espos_wifi raises it unattended: at once and
-permanently when no station network is configured, and `wifi.portal_after_s`
-after a station link drops otherwise. Earlier releases exempted it
-unconditionally; [decisions.md](decisions.md) records why that changed.
+access point is **open** — and espos_wifi raises it unattended:
+`wifi.portal_after_s` after a station link drops, or at once when no station
+network is configured. (It no longer raises one while another transport has the
+network, which is the Ethernet-only case — [wifi.md](wifi.md#portal-softap-provisioning)
+— but that is a reduction of the surface, not a credential.) Earlier releases
+exempted the access point unconditionally; [decisions.md](decisions.md) records
+why that changed.
 
 **A lost key, with no cable.** Switch the device **off and on again three
 times**, waiting for it to come up each time and cycling within 20 s of each
@@ -102,6 +105,20 @@ open the Config page and set a new key. `GET /api/v1/auth/status` reports
 ```
 W espos_auth: 3 power cycles: the setup access point is exempt from the API key for 600 s — set a new one
 ```
+
+> **On a device that is online over Ethernet, unplug the cable first.** The
+> window exempts requests that arrive on the access point; it does not raise
+> one, and there is none while another transport has the network. Unplugging
+> brings it back — at once on a device with no WiFi network configured, and
+> otherwise once its `portal_after_s` deadline has passed, measured from when
+> the station link dropped rather than from the unplug. The Ethernet side stays
+> authenticated throughout, so a key cannot be recovered
+> over the cable, only over the access point the cable was suppressing. Doing
+> the three cycles with the cable already out is the simpler order.
+> `wifi.portal_online = true`, set while you still have the key, avoids the
+> question; an application with presence hardware can also call
+> `espos_wifi_portal_open(true)` and `espos_httpd_auth_recovery_open()`
+> together.
 
 Only a **power-on** reset counts — a watchdog reboot, a panic or a software
 restart does not, so a device in a reboot loop cannot cycle its way open — and

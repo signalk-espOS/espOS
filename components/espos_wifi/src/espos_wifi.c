@@ -145,6 +145,7 @@ static void load_cfg(espos_wifi_cfg_t *c)
     v = 90;
     espos_config_get_i32(ESPOS_CFG_NS_WIFI, ESPOS_CFG_WIFI_PORTAL_AFTER_S, &v);
     c->portal_after_ms = (uint32_t)v * 1000;
+    espos_config_get_bool(ESPOS_CFG_NS_WIFI, ESPOS_CFG_WIFI_PORTAL_ONLINE, &c->portal_online);
 
     /* names: build locally, publish under the lock (readers copy under it).
      * The hostname is espos_net's (net.hostname; wifi.hostname until 0.7):
@@ -660,6 +661,64 @@ static void sse_hello(int client, void *arg)
 
 /* ------------------------------------------------------------ lifecycle */
 
+/* ------------------------------------------------- the other transports */
+
+/* Whether something that is not this station is carrying the network.
+ *
+ * Read from espos_net rather than tracked here: it already decides which
+ * interface holds the default route, including the preference between
+ * Ethernet and WiFi when both are up. */
+static bool other_net_up(void)
+{
+    espos_net_status_t ns;
+    if (espos_net_get_status(&ns) != ESP_OK) {
+        return false;
+    }
+    return ns.up && ns.iface != ESPOS_NET_IF_WIFI_STA;
+}
+
+/* Take the reading and hand it over as one step, under the lock the machine is
+ * already serialised by.
+ *
+ * Both callers do it this way, which is what keeps them from fighting: reading
+ * outside the lock would let a stale snapshot taken before an event land after
+ * it and undo it, and the two callers are a task and the event loop. Whoever
+ * takes the lock last therefore writes what was true when it looked, and any
+ * change after that posts its own event.
+ *
+ * espos_net's lock is taken inside ours, never the other way round: espos_net
+ * posts to the bus (asynchronous) rather than calling subscribers here, and
+ * this component's own espos_net_report() calls are made by the drainer
+ * outside the lock. */
+static void push_other_net(void)
+{
+    if (!s.lock || !s.sm_ready) {
+        return;
+    }
+    lock();
+    bool up = other_net_up();
+    espos_wifi_sm_event(&s.sm, ESPOS_WIFI_EV_OTHER_NET, &up);
+    unlock();
+    drain();
+}
+
+/* On the event bus rather than espos_net_subscribe(): a subscriber callback
+ * runs on whichever task reported, and this component is itself one of the
+ * reporters -- our own drainer calling espos_net_report() would re-enter us.
+ * The bus delivers on the system event task instead, which is also how
+ * espos_net's own mDNS watcher listens. */
+static void on_network_event(void *arg, esp_event_base_t base, int32_t id, void *data)
+{
+    (void)arg;
+    (void)base;
+    (void)id;
+    (void)data;
+    /* Re-read rather than trust the event id: NETWORK_UP also fires when the
+     * route merely MOVES, so "up" alone does not say which interface has it,
+     * and this station coming up posts the same event. */
+    push_other_net();
+}
+
 esp_err_t espos_wifi_start(void)
 {
     if (s.started) {
@@ -738,15 +797,59 @@ esp_err_t espos_wifi_start(void)
     }
     espos_config_subscribe(on_config_change, NULL);
     s.started = true;
+    /* Subscribed before the first reading is taken, not after: a link coming
+     * up in between would otherwise be delivered to nobody and the seeded
+     * value would stand unchallenged. */
+    (void)espos_event_subscribe(ESPOS_EVENT_NETWORK_UP, on_network_event, NULL);
+    (void)espos_event_subscribe(ESPOS_EVENT_NETWORK_DOWN, on_network_event, NULL);
+
+    /* Read before the narration below, which is otherwise a lie: on an
+     * Ethernet-only device the portal is suppressed, and telling an operator
+     * to join an access point that will never appear is worse than saying
+     * nothing. This reading is for the message only; the machine gets its own
+     * through push_other_net() below. */
+    bool other = other_net_up();
+    bool portal_expected = cfg.portal_enabled && (!other || cfg.portal_online);
+
     ESP_LOGI(TAG, "hostname %s, %u network(s), portal %s", s.hostname, (unsigned)cfg.net_count,
-             cfg.portal_enabled ? s.portal_ssid : "off");
-    if (cfg.net_count == 0 && cfg.portal_enabled) {
+             !cfg.portal_enabled ? "off" : portal_expected ? s.portal_ssid
+                                                           : "suppressed (another transport is up)");
+    if (cfg.net_count == 0 && portal_expected) {
         /* The machine brings the portal up at once when nothing is
          * configured; say what to do next before the driver lines start. */
         ESP_LOGI(TAG, "no network configured: join \"%s\" and open http://%s", s.portal_ssid,
                  s.drv->portal_ip ? s.drv->portal_ip : "192.168.4.1");
+    } else if (cfg.net_count == 0 && cfg.portal_enabled) {
+        ESP_LOGI(TAG, "no WiFi network configured; reachable over the transport that is up "
+                      "(set wifi.portal_online to raise the access point anyway)");
     }
+    /* Seeded before EV_START, because Ethernet is usually up by now -- espOS
+     * starts espos_net, and a consumer its own espos_eth, before the station.
+     * Without it the machine would raise the portal on its first policy run
+     * and take it down only at the next bus event, which on a link that never
+     * changes again would be never. */
+    push_other_net();
     espos_wifi_dispatch(ESPOS_WIFI_EV_START, NULL);
+    return ESP_OK;
+}
+
+esp_err_t espos_wifi_portal_open(bool up)
+{
+    if (!s.lock || !s.sm_ready) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    espos_wifi_portal_force_t want = up ? ESPOS_WIFI_PORTAL_UP : ESPOS_WIFI_PORTAL_DOWN;
+    espos_wifi_dispatch(ESPOS_WIFI_EV_PORTAL_FORCE, &want);
+    return ESP_OK;
+}
+
+esp_err_t espos_wifi_portal_auto(void)
+{
+    if (!s.lock || !s.sm_ready) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    espos_wifi_portal_force_t want = ESPOS_WIFI_PORTAL_AUTO;
+    espos_wifi_dispatch(ESPOS_WIFI_EV_PORTAL_FORCE, &want);
     return ESP_OK;
 }
 
@@ -756,6 +859,8 @@ esp_err_t espos_wifi_stop(void)
         return ESP_OK;
     }
     espos_config_unsubscribe(on_config_change, NULL);
+    (void)espos_event_unsubscribe(ESPOS_EVENT_NETWORK_UP, on_network_event);
+    (void)espos_event_unsubscribe(ESPOS_EVENT_NETWORK_DOWN, on_network_event);
     xTimerStop(s.cfg_debounce, 0);
     espos_wifi_dispatch(ESPOS_WIFI_EV_STOP, NULL);
     s.started = false;
