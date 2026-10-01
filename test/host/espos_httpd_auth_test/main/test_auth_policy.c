@@ -4,7 +4,8 @@
  * espos_httpd authentication policy, driven with a fake port.
  *
  * The properties that matter: nothing is judged while no key is set (unless
- * the build requires one), the portal is always exempt, a key compares
+ * the build requires one), the portal is exempt only while there is no key to
+ * present or a recovery window is open (espOS #154), a key compares
  * whole and only whole, a session lives exactly its lifetime and the table
  * evicts the one idle longest, a new key ends every session, five misses
  * within the window lock every key check out for the lockout time and no
@@ -128,10 +129,161 @@ TEST_CASE("bearer: the whole key or nothing", "[auth]")
     rq.bearer = "wrong";
     rq.cookie_sid = sid;
     TEST_ASSERT_EQUAL(ESPOS_HTTPD_AUTH_UNAUTHORIZED, decide(&rq, &m));
-    /* the portal beats every credential */
+    /* and the portal does not rescue it either, now that a key is set */
     rq.from_portal = true;
+    TEST_ASSERT_EQUAL(ESPOS_HTTPD_AUTH_UNAUTHORIZED, decide(&rq, &m));
+    TEST_ASSERT_EQUAL(ESPOS_HTTPD_AUTH_NONE, m);
+}
+
+/* ----------------------------------------------------------------- portal */
+
+TEST_CASE("portal: exempt while no key is set, judged once there is one", "[auth][portal]")
+{
+    fresh(3600, false, "");
+    espos_httpd_auth_method_t m;
+    espos_httpd_auth_request_t rq = { .from_portal = true, .state_changing = true };
+    /* Setting the first key is the one thing this has to keep working. */
     TEST_ASSERT_EQUAL(ESPOS_HTTPD_AUTH_ALLOW, decide(&rq, &m));
     TEST_ASSERT_EQUAL(ESPOS_HTTPD_AUTH_PORTAL, m);
+
+    /* The moment a key exists, the access point is just another network: it is
+     * open by default and espos_wifi raises it unattended, so being on it is
+     * not evidence of anybody standing at the device (espOS #154). */
+    espos_httpd_auth_policy_set_key(&P, KEY);
+    TEST_ASSERT_EQUAL(ESPOS_HTTPD_AUTH_UNAUTHORIZED, decide(&rq, &m));
+    TEST_ASSERT_EQUAL(ESPOS_HTTPD_AUTH_NONE, m);
+
+    /* The key works there like anywhere else. */
+    rq.bearer = KEY;
+    TEST_ASSERT_EQUAL(ESPOS_HTTPD_AUTH_ALLOW, decide(&rq, &m));
+    TEST_ASSERT_EQUAL(ESPOS_HTTPD_AUTH_BEARER, m);
+}
+
+TEST_CASE("portal: a wrong key on the portal is counted and locks out", "[auth][portal]")
+{
+    fresh(3600, false, KEY);
+    espos_httpd_auth_method_t m;
+    espos_httpd_auth_request_t rq = { .from_portal = true, .bearer = "wrong" };
+    /* It used to be impossible to guess at a key from the portal because the
+     * portal never looked at one. Now that it does, the throttle has to cover
+     * it, or the access point is where an attacker guesses without limit. */
+    for (int i = 0; i < ESPOS_HTTPD_AUTH_FAIL_MAX; i++) {
+        TEST_ASSERT_EQUAL(ESPOS_HTTPD_AUTH_UNAUTHORIZED, decide(&rq, &m));
+    }
+    TEST_ASSERT_TRUE(espos_httpd_auth_policy_throttled(&P));
+    rq.bearer = KEY;
+    TEST_ASSERT_EQUAL(ESPOS_HTTPD_AUTH_THROTTLED, decide(&rq, &m));
+}
+
+TEST_CASE("recovery: the window exempts the portal and then expires", "[auth][portal]")
+{
+    fresh(3600, false, KEY);
+    espos_httpd_auth_method_t m;
+    espos_httpd_auth_request_t rq = { .from_portal = true, .state_changing = true };
+    TEST_ASSERT_EQUAL(ESPOS_HTTPD_AUTH_UNAUTHORIZED, decide(&rq, &m));
+    TEST_ASSERT_EQUAL(0, espos_httpd_auth_policy_recovery_s_left(&P));
+
+    espos_httpd_auth_policy_recovery_open(&P, 600);
+    TEST_ASSERT_EQUAL_UINT32(600, espos_httpd_auth_policy_recovery_s_left(&P));
+    TEST_ASSERT_EQUAL(ESPOS_HTTPD_AUTH_ALLOW, decide(&rq, &m));
+    TEST_ASSERT_EQUAL(ESPOS_HTTPD_AUTH_PORTAL, m);
+
+    F.now_s += 599;
+    TEST_ASSERT_EQUAL_UINT32(1, espos_httpd_auth_policy_recovery_s_left(&P));
+    TEST_ASSERT_EQUAL(ESPOS_HTTPD_AUTH_ALLOW, decide(&rq, &m));
+
+    /* Both bounds: open at 599 s, shut at 600. */
+    F.now_s += 1;
+    TEST_ASSERT_EQUAL_UINT32(0, espos_httpd_auth_policy_recovery_s_left(&P));
+    TEST_ASSERT_EQUAL(ESPOS_HTTPD_AUTH_UNAUTHORIZED, decide(&rq, &m));
+    TEST_ASSERT_EQUAL(ESPOS_HTTPD_AUTH_NONE, m);
+}
+
+TEST_CASE("recovery: the window never reaches the station side", "[auth][portal]")
+{
+    fresh(3600, false, KEY);
+    espos_httpd_auth_policy_recovery_open(&P, 600);
+    espos_httpd_auth_method_t m;
+    /* The whole point is physical presence. A request that came in over the
+     * boat's network has proved nothing, window or no window. */
+    espos_httpd_auth_request_t rq = { .state_changing = true };
+    TEST_ASSERT_EQUAL(ESPOS_HTTPD_AUTH_UNAUTHORIZED, decide(&rq, &m));
+    rq.bearer = "wrong";
+    TEST_ASSERT_EQUAL(ESPOS_HTTPD_AUTH_UNAUTHORIZED, decide(&rq, &m));
+}
+
+TEST_CASE("recovery: a lockout does not shut the window", "[auth][portal]")
+{
+    fresh(3600, false, KEY);
+    espos_httpd_auth_method_t m;
+    espos_httpd_auth_request_t rq = { .bearer = "wrong" };
+    for (int i = 0; i < ESPOS_HTTPD_AUTH_FAIL_MAX; i++) {
+        (void)decide(&rq, &m);
+    }
+    TEST_ASSERT_TRUE(espos_httpd_auth_policy_throttled(&P));
+    /* Being locked out is one of the things somebody power-cycles their way in
+     * to fix, so the window is decided before any key is compared. */
+    espos_httpd_auth_policy_recovery_open(&P, 600);
+    espos_httpd_auth_request_t portal = { .from_portal = true, .state_changing = true };
+    TEST_ASSERT_EQUAL(ESPOS_HTTPD_AUTH_ALLOW, decide(&portal, &m));
+    TEST_ASSERT_EQUAL(ESPOS_HTTPD_AUTH_PORTAL, m);
+}
+
+TEST_CASE("recovery: opening with 0 closes it, and a re-open replaces it", "[auth][portal]")
+{
+    fresh(3600, false, KEY);
+    espos_httpd_auth_method_t m;
+    espos_httpd_auth_request_t rq = { .from_portal = true };
+
+    espos_httpd_auth_policy_recovery_open(&P, 600);
+    espos_httpd_auth_policy_recovery_open(&P, 60); /* shorter wins: it replaces */
+    TEST_ASSERT_EQUAL_UINT32(60, espos_httpd_auth_policy_recovery_s_left(&P));
+
+    espos_httpd_auth_policy_recovery_open(&P, 0);
+    TEST_ASSERT_EQUAL_UINT32(0, espos_httpd_auth_policy_recovery_s_left(&P));
+    TEST_ASSERT_EQUAL(ESPOS_HTTPD_AUTH_UNAUTHORIZED, decide(&rq, &m));
+}
+
+TEST_CASE("recovery: a fresh policy has no window, and init clears one", "[auth][portal]")
+{
+    fresh(3600, false, KEY);
+    TEST_ASSERT_EQUAL_UINT32(0, espos_httpd_auth_policy_recovery_s_left(&P));
+    espos_httpd_auth_policy_recovery_open(&P, 600);
+    /* A re-init must not inherit it: espos_httpd_auth_init() runs once, but a
+     * host test and a restarted server both re-init the same object. */
+    fresh(3600, false, KEY);
+    TEST_ASSERT_EQUAL_UINT32(0, espos_httpd_auth_policy_recovery_s_left(&P));
+}
+
+TEST_CASE("recovery: an absurd duration is clamped, not inverted", "[auth][portal]")
+{
+    fresh(3600, false, KEY);
+    /* The deadline is a signed difference on a wrapping clock, so a window of
+     * more than INT32_MAX seconds would read as already past: a caller asking
+     * for one would get a window that was SHUT, which is the wrong way for
+     * this mistake to fail. */
+    espos_httpd_auth_policy_recovery_open(&P, 0xFFFFFFFFu);
+    TEST_ASSERT_EQUAL_UINT32(ESPOS_HTTPD_AUTH_RECOVERY_MAX_S, espos_httpd_auth_policy_recovery_s_left(&P));
+    espos_httpd_auth_method_t m;
+    espos_httpd_auth_request_t rq = { .from_portal = true };
+    TEST_ASSERT_EQUAL(ESPOS_HTTPD_AUTH_ALLOW, decide(&rq, &m));
+}
+
+TEST_CASE("recovery: a window survives the clock wrapping", "[auth][portal]")
+{
+    fresh(3600, false, KEY);
+    /* now_s is monotonic seconds that wrap; the deadline is compared as a
+     * signed difference, so a window opened just before the wrap still
+     * closes 600 s later and not 136 years later. */
+    F.now_s = 0xFFFFFF00u;
+    espos_httpd_auth_policy_recovery_open(&P, 600);
+    espos_httpd_auth_method_t m;
+    espos_httpd_auth_request_t rq = { .from_portal = true };
+    TEST_ASSERT_EQUAL(ESPOS_HTTPD_AUTH_ALLOW, decide(&rq, &m));
+    F.now_s += 599; /* wrapped */
+    TEST_ASSERT_EQUAL(ESPOS_HTTPD_AUTH_ALLOW, decide(&rq, &m));
+    F.now_s += 1;
+    TEST_ASSERT_EQUAL(ESPOS_HTTPD_AUTH_UNAUTHORIZED, decide(&rq, &m));
 }
 
 /* ---------------------------------------------------------------- sessions */

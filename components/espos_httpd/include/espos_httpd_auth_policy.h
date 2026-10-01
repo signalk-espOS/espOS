@@ -5,7 +5,9 @@
  * REST authentication policy — pure C. Decides whether one request may reach
  * a protected endpoint, keeps the login sessions and throttles failed keys:
  *
- *   portal ──────────────────────────────▶ allowed (the soft-AP network is exempt)
+ *   portal, no key set ──────────────────▶ allowed (this is where the first key is set)
+ *   portal, key set, recovery window ────▶ allowed (physical presence was proved)
+ *   portal, key set, no window ──────────▶ judged like any other request, below
  *   no key configured ───────────────────▶ allowed, or 403 when the build requires a key
  *   Authorization: Bearer <key> ─ match ─▶ allowed        ─ miss ─▶ 401 (counted)
  *   Cookie: espos_sid=<id> ─ live session ▶ allowed; a state change also needs
@@ -13,6 +15,16 @@
  *   nothing ─────────────────────────────▶ 401
  *   ESPOS_HTTPD_AUTH_FAIL_MAX misses within ESPOS_HTTPD_AUTH_FAIL_WINDOW_S
  *                                        ▶ every key check answers 429 for ESPOS_HTTPD_AUTH_LOCKOUT_S
+ *
+ * The soft-AP network is NOT exempt once a key is set. It used to be, on the
+ * reasoning that whoever joined the device's own access point was standing
+ * next to it; that does not hold, because the access point is open by default
+ * (wifi.portal_psk) and espos_wifi raises it unattended -- permanently when no
+ * station network is configured, which is the normal setup for an
+ * Ethernet-only device, and after wifi.portal_after_s otherwise. So anyone
+ * within radio range was an operator (espOS #154). What proves presence now is
+ * a recovery window, opened by espos_httpd_auth_recovery_open() -- on a device
+ * from a run of power cycles, which nobody outside the room can produce.
  *
  * Key and session-id comparisons run in constant time over the maximum
  * length, so neither the bytes nor the length of a secret shows in the
@@ -40,6 +52,12 @@ extern "C" {
 #define ESPOS_HTTPD_AUTH_FAIL_MAX      5  /* failed key checks that start a lockout */
 #define ESPOS_HTTPD_AUTH_FAIL_WINDOW_S 60 /* counted within this window */
 #define ESPOS_HTTPD_AUTH_LOCKOUT_S     30 /* how long every key check then answers 429 */
+/* Longest recovery window, and a day is already generous for "somebody is at
+ * the device". Also a correctness bound: the deadline is compared as a signed
+ * difference on a wrapping clock, so a window of more than INT32_MAX seconds
+ * would read as already past -- a caller asking for one would get a window
+ * that was shut rather than one that never closed. */
+#define ESPOS_HTTPD_AUTH_RECOVERY_MAX_S 86400
 
 /* How a request authenticated itself. Values are ABI: append, never renumber. */
 typedef enum {
@@ -99,6 +117,11 @@ typedef struct espos_httpd_auth_policy {
     uint32_t fail_first_s;
     uint32_t lockout_until_s;
     bool locked;
+    /* The recovery window: until when the portal is exempt again. A flag
+     * beside the deadline, like the lockout above, because the port clock
+     * wraps and no instant can mean "closed". */
+    uint32_t recovery_until_s;
+    bool recovery;
 } espos_httpd_auth_policy_t;
 
 void espos_httpd_auth_policy_init(espos_httpd_auth_policy_t *p, const espos_httpd_auth_port_t *port, void *ctx,
@@ -122,6 +145,19 @@ bool espos_httpd_auth_policy_required(const espos_httpd_auth_policy_t *p);
  */
 espos_httpd_auth_verdict_t espos_httpd_auth_policy_check_key(espos_httpd_auth_policy_t *p, const char *presented);
 bool espos_httpd_auth_policy_throttled(const espos_httpd_auth_policy_t *p);
+
+/**
+ * Exempt portal requests again for `seconds`, as proof that someone is at the
+ * device. Replaces any window already open, including with a shorter one;
+ * 0 closes it, and anything above ESPOS_HTTPD_AUTH_RECOVERY_MAX_S is clamped
+ * to it. The window applies ONLY to requests that arrived on the soft-AP
+ * interface -- it never relaxes anything on the station or Ethernet side -- and
+ * a lockout does not apply to it, because being locked out is one of the things
+ * it exists to recover from.
+ */
+void espos_httpd_auth_policy_recovery_open(espos_httpd_auth_policy_t *p, uint32_t seconds);
+/** Seconds left of an open recovery window; 0 when none is open. */
+uint32_t espos_httpd_auth_policy_recovery_s_left(const espos_httpd_auth_policy_t *p);
 /** Seconds until key checks are answered again; 0 when not locked. */
 uint32_t espos_httpd_auth_policy_retry_after_s(const espos_httpd_auth_policy_t *p);
 

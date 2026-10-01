@@ -107,3 +107,31 @@ was retired.
   only). Both land for espOS whenever a release carrying them appears and the
   `[6.0.0, 6.1.0)` pin moves -- so the custom GATT server stays the option
   that would fix things sooner, and stays unbuilt.
+
+* **The setup portal is no longer exempt from the API key once one is set**
+  (2026-10-01, espOS #154, reported against a third-party relay board). The
+  exemption was written on the premise that whoever joined `espOS-xxxx` was
+  standing at the device, and it was the first branch of the decision --- ahead
+  of the key, the cookie, the `Origin` rule and
+  `CONFIG_ESPOS_HTTPD_AUTH_REQUIRED`. The premise is false as espOS ships:
+  `wifi.portal_psk` defaults to empty, so the access point is open, and
+  `portal_policy()` raises it unattended --- immediately and permanently when
+  no station network is configured, which is the normal setup for an
+  Ethernet-only device, and `wifi.portal_after_s` (90 s) after a station link
+  drops otherwise. An Ethernet-only board therefore served its whole API,
+  application endpoints included, to anything within radio range, with a key
+  set. On the board it was reported from, those endpoints switch loads.
+  Narrowing the exemption to "no key configured" keeps both cases it existed
+  for --- setting the first key, and reaching a device that has been factory
+  reset --- and removes the one nobody asked for.
+  What it also removed was the way back in after a lost key, since
+  `POST /api/v1/system/factory-reset` is itself protected and espOS has no
+  button support, so three power cycles now open a bounded window instead
+  ([security.md](security.md)) --- presence proved by the one input every
+  device has. Counted in NVS rather than RTC memory, which does not survive
+  the power being removed; only `ESP_RST_POWERON` counts, so a reboot loop
+  cannot reach it, and a brown-out does not either. A consumer with a button,
+  jumper or key switch calls `espos_httpd_auth_recovery_open()` from that
+  instead. The other half of the report --- that the access point should not
+  be up at all while another transport carries the network --- is #158 and is
+  unfixed.

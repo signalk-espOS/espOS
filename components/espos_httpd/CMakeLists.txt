@@ -4,10 +4,12 @@ idf_build_get_property(target IDF_TARGET)
 set(priv_reqs esp_timer esp_app_format esp_system esp_event espos_log espos_event espos_health espressif__cjson)
 if(NOT target STREQUAL "linux")
     # spi_flash/esp_hw_support/heap: the hardware block in api_system.c
-    # (flash size, base MAC, RAM totals). Device-only, like the rest of this
-    # list -- the linux target has none of them and the code is #if-guarded.
+    # (flash size, base MAC, RAM totals). nvs_flash: the power-cycle counter
+    # behind the portal recovery window in auth.c, which has to survive the
+    # power cycles it counts. Device-only, like the rest of this list -- the
+    # linux target has none of them and the code is #if-guarded.
     list(APPEND priv_reqs esp_netif espcoredump esp_partition joltwallet__littlefs
-                          spi_flash esp_hw_support heap)
+                          spi_flash esp_hw_support heap nvs_flash)
 endif()
 idf_component_register(
     SRCS src/espos_httpd.c src/api_config.c src/api_system.c src/api_logs.c src/api_coredump.c src/api_health.c src/static.c src/sse.c

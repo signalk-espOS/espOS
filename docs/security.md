@@ -75,22 +75,61 @@ public set is the UI bundle, `GET /api/v1/system/ping` (liveness: app,
 version, whether a key is wanted), the captive-portal probe URLs, and
 `/api/v1/auth/*` itself.
 
-### The setup portal is exempt — and is the way back in
+### The setup portal, and the way back in
 
-A request that arrives **on the device's own access point** (the soft-AP
-that comes up while it has no WiFi to join, or when the station is
-disabled) bypasses authentication: whoever stands next to the device and
-joined `espOS-xxxx` is its operator. The check compares the local socket
-address with the AP interface's IP, so it is not a header a remote client
-could forge, and it never applies to a request that came in over the
-station link.
+A request that arrives **on the device's own access point** is exempt from
+authentication **only while no key is set**. That is what the portal is for:
+`http://192.168.4.1` on a device straight off the bench, or one that has just
+been factory reset, is where the first `httpd.api_key` gets entered. The check
+compares the local socket address with the AP interface's IP, so it is not a
+header a remote client could forge, and it never applies to a request that came
+in over the station or Ethernet link.
 
-This is also the **lockout recovery**: a lost key is replaced by a factory
-reset (the button or `POST /api/v1/system/factory-reset`; the settings,
-WiFi and SignalK token go with it), joining the portal at
-`http://192.168.4.1`, and entering a new key on the Config page — no key
-needed on that network. There is no other back door: no default key, no
-reset URL on the station side.
+Once a key is set, the access point is treated like any other network: Bearer
+or a login, the Origin rule, the throttle. Being on it is not evidence that
+anyone is at the device, because `wifi.portal_psk` is empty by default — so the
+access point is **open** — and espos_wifi raises it unattended: at once and
+permanently when no station network is configured, and `wifi.portal_after_s`
+after a station link drops otherwise. Earlier releases exempted it
+unconditionally; [decisions.md](decisions.md) records why that changed.
+
+**A lost key, with no cable.** Switch the device **off and on again three
+times**, waiting for it to come up each time and cycling within 20 s of each
+boot. The third cycle exempts the portal for 10 minutes: join `espOS-xxxx`,
+open the Config page and set a new key. `GET /api/v1/auth/status` reports
+`recovery_s`, the seconds left. The log says so too:
+
+```
+W espos_auth: 3 power cycles: the setup access point is exempt from the API key for 600 s — set a new one
+```
+
+Only a **power-on** reset counts — a watchdog reboot, a panic or a software
+restart does not, so a device in a reboot loop cannot cycle its way open — and
+the count is kept in NVS (RTC memory does not survive the power being removed),
+written only while a key is set, so an open device pays no flash writes for it.
+A boot that lasts longer than `CONFIG_ESPOS_HTTPD_RECOVERY_CLEAR_S` clears the
+count, so only cycles in quick succession add up. The window lives in RAM: a
+reboot ends it. The numbers are
+`CONFIG_ESPOS_HTTPD_RECOVERY_CYCLES`, `CONFIG_ESPOS_HTTPD_RECOVERY_CLEAR_S` and
+`CONFIG_ESPOS_HTTPD_RECOVERY_WINDOW_S`; `CONFIG_ESPOS_HTTPD_PORTAL_RECOVERY=n`
+removes the path entirely for a device whose power an untrusted person can
+reach — keep a cable for that one.
+
+A consumer that can prove presence properly — a recessed button, a jumper, a
+key switch — calls `espos_httpd_auth_recovery_open(seconds)` from that event
+instead. Do not call it from a timer or a network request: that gives the API
+key away. The window never relaxes anything on the station side, and a lockout
+does not apply to it, because being locked out is one of the things it exists to
+recover from.
+
+A factory reset (`POST /api/v1/system/factory-reset`, which needs the key) also
+gets you back, by leaving the device with no key at all — and takes the
+settings, WiFi and the SignalK token with it. There is no other back door: no
+default key, no reset URL on the station side.
+
+**While you are at it**, set `wifi.portal_psk`. An open access point is a
+nuisance even when nothing behind it is reachable, and a device that keeps its
+portal up permanently is advertising one all the time.
 
 ### For products: `CONFIG_ESPOS_HTTPD_AUTH_REQUIRED`
 
@@ -99,7 +138,8 @@ that must never ship open builds with `CONFIG_ESPOS_HTTPD_AUTH_REQUIRED=y`:
 while `httpd.api_key` is empty, protected endpoints answer
 `403 auth_unconfigured` instead of serving — except from the portal
 network, where the first key gets set. The web UI explains exactly that when
-it sees the 403.
+it sees the 403. The portal exemption that lets the first key be set is the
+no-key one above, so it closes the moment that key exists.
 
 ### What it does and does not stop
 

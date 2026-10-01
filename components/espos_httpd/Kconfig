@@ -72,9 +72,58 @@ menu "espOS HTTP server"
             (the default, so a device that predates authentication keeps
             working after an update). A product build that must never ship
             open turns this on: protected endpoints then answer
-            403 auth_unconfigured until a key is set. Requests from the
-            setup portal's network are exempt, which is where the first key
-            is set. See docs/security.md.
+            403 auth_unconfigured until a key is set. The setup portal's
+            network is exempt for exactly as long as that is true, which is
+            where the first key is set; it is not exempt afterwards. See
+            docs/security.md.
+
+    config ESPOS_HTTPD_PORTAL_RECOVERY
+        bool "Open a portal recovery window after a run of power cycles"
+        default y
+        help
+            The setup access point is exempt from authentication only while
+            no key is configured; once httpd.api_key is set, requests on it are
+            judged like any other (the access point is open by default and
+            comes up unattended, so being on it proves nothing). This is the
+            way back in when the key is then lost and there is no cable:
+            switching the device off and on again
+            ESPOS_HTTPD_RECOVERY_CYCLES times, each within
+            ESPOS_HTTPD_RECOVERY_CLEAR_S of the one before, exempts the portal
+            for ESPOS_HTTPD_RECOVERY_WINDOW_S -- long enough to set a new key.
+            Counted in NVS, and only while a key is set, so an open device
+            writes nothing. Turn this off for a device whose power an
+            untrusted person can reach, and keep a cable for it.
+            See docs/security.md.
+
+    config ESPOS_HTTPD_RECOVERY_CYCLES
+        int "Power cycles that open the window"
+        depends on ESPOS_HTTPD_PORTAL_RECOVERY
+        default 3
+        range 2 10
+        help
+            Two is enough to be reached by accident; three is the familiar
+            number from consumer hardware and is hard to produce by mistake.
+
+    config ESPOS_HTTPD_RECOVERY_CLEAR_S
+        int "Seconds of uptime that reset the count"
+        depends on ESPOS_HTTPD_PORTAL_RECOVERY
+        default 20
+        range 5 300
+        help
+            A boot that lasts this long clears the count, so only cycles in
+            quick succession add up. It has to be longer than the device takes
+            to reach espos_httpd_start(), or a cycle is never counted at all;
+            20 s leaves room on every target espOS builds for.
+
+    config ESPOS_HTTPD_RECOVERY_WINDOW_S
+        int "How long the window stays open"
+        depends on ESPOS_HTTPD_PORTAL_RECOVERY
+        default 600
+        range 60 3600
+        help
+            Finding the access point, joining it and typing a key takes a few
+            minutes on a phone. The window closes by itself; a reboot ends it
+            too, since it is kept in RAM.
 
     config ESPOS_HTTPD_MAX_SESSIONS
         int "Maximum concurrent login sessions"

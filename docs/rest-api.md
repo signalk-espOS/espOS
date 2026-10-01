@@ -51,14 +51,15 @@ on a protected request must carry one of
 * the `espos_sid` cookie from `POST /auth/login` — browsers. `fetch()` and
   `EventSource` send it by themselves; `HttpOnly; SameSite=Strict; Path=/`.
 
-or arrive on the device's own setup-portal network, which is exempt (the
-lockout recovery, [security.md](security.md)). Otherwise:
+or arrive on the device's own setup-portal network **while that network is
+exempt**, which it is only when no key is configured or a recovery window is
+open ([security.md](security.md)). Otherwise:
 
 | Status | `error` | When |
 |---|---|---|
 | `401` | `unauthorized` | no or invalid credential, a stale cookie included; carries `WWW-Authenticate: Bearer realm="espOS"` |
 | `403` | `forbidden` | a cookie-authenticated `PUT`/`POST`/`DELETE` whose `Origin` (else `Referer`) host is not the `Host`, or that has neither — Bearer requests skip this |
-| `403` | `auth_unconfigured` | the build has `CONFIG_ESPOS_HTTPD_AUTH_REQUIRED=y` and no key is set yet; set one from the portal |
+| `403` | `auth_unconfigured` | the build has `CONFIG_ESPOS_HTTPD_AUTH_REQUIRED=y` and no key is set yet; set one from the portal, which is exempt exactly while that is true |
 | `429` | `too_many_attempts` | five wrong keys within 60 s: every key check (login and Bearer, the right key too) answers this for 30 s, `Retry-After` says how long; live cookies keep working |
 
 The check runs before the handler, for every endpoint registered through
@@ -88,14 +89,16 @@ Drops the session the cookie names, if any → `204` with a cookie of
 ### `GET /auth/status` — public
 
 ```json
-{"required": true, "configured": true, "authenticated": true, "method": "cookie"}
+{"required": true, "configured": true, "authenticated": true, "method": "cookie", "recovery_s": 0}
 ```
 
 `required`: protected endpoints need a credential (a key is set, or the build
 requires one); `configured`: a key is set; `authenticated`: *this* request
-carried a valid one, or came from the portal; `method` ∈ `none bearer cookie
-portal`. The web UI decides from this whether to show its login page. A wrong
-Bearer on this endpoint counts toward the throttle like any other key check.
+carried a valid one, or came from the portal while the portal was exempt;
+`method` ∈ `none bearer cookie portal`; `recovery_s`: seconds left of a portal
+recovery window, `0` when none is open (docs/security.md). The web UI decides
+from this whether to show its login page. A wrong Bearer on this endpoint
+counts toward the throttle like any other key check.
 
 ## Configuration
 

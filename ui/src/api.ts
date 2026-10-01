@@ -149,9 +149,12 @@ export interface AuthStatus {
   required: boolean;
   /** httpd.api_key is set */
   configured: boolean;
-  /** this request carried a valid credential (or came from the setup portal) */
+  /** this request carried a valid credential (or came from an exempt setup portal) */
   authenticated: boolean;
   method: "none" | "bearer" | "cookie" | "portal";
+  /** seconds left of a portal recovery window; 0 when none is open. Optional
+   * because `npm run dev` may be pointed at a device older than this field. */
+  recovery_s?: number;
 }
 export interface LogsDoc { first: number; next: number; dropped: number; size: number; used: number; gap: boolean; from: number; lines: string[] }
 export interface Coredump {

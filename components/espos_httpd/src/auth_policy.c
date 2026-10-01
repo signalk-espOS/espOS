@@ -127,6 +127,35 @@ espos_httpd_auth_verdict_t espos_httpd_auth_policy_check_key(espos_httpd_auth_po
     return ESPOS_HTTPD_AUTH_UNAUTHORIZED;
 }
 
+/* ------------------------------------------------------------- recovery */
+
+void espos_httpd_auth_policy_recovery_open(espos_httpd_auth_policy_t *p, uint32_t seconds)
+{
+    if (seconds == 0) {
+        p->recovery = false;
+        p->recovery_until_s = 0;
+        return;
+    }
+    if (seconds > ESPOS_HTTPD_AUTH_RECOVERY_MAX_S) {
+        seconds = ESPOS_HTTPD_AUTH_RECOVERY_MAX_S;
+    }
+    p->recovery = true;
+    p->recovery_until_s = now_s(p) + seconds;
+}
+
+static bool recovery_open(const espos_httpd_auth_policy_t *p)
+{
+    return p->recovery && !reached(now_s(p), p->recovery_until_s);
+}
+
+uint32_t espos_httpd_auth_policy_recovery_s_left(const espos_httpd_auth_policy_t *p)
+{
+    if (!recovery_open(p)) {
+        return 0;
+    }
+    return p->recovery_until_s - now_s(p);
+}
+
 /* ------------------------------------------------------------- sessions */
 
 /* Free every session past its expiry; done on each table access rather than
@@ -233,15 +262,36 @@ size_t espos_httpd_auth_policy_sessions_live(espos_httpd_auth_policy_t *p)
 
 /* ------------------------------------------------------------- decision */
 
+/* Does a request on the soft-AP network skip authentication?
+ *
+ * Only in the two cases that were ever the point of it, because "arrived on
+ * the access point" is not evidence of anybody standing at the device: the
+ * access point is open unless wifi.portal_psk was set, and espos_wifi brings
+ * it up by itself -- permanently with no station network configured, and
+ * wifi.portal_after_s after a station link drops. An Ethernet-only board
+ * therefore served its whole API to radio range, with a key set (espOS #154).
+ */
+static bool portal_exempt(const espos_httpd_auth_policy_t *p)
+{
+    /* Nothing to authenticate against yet. This is how the first key is set,
+     * and how a device set up again after a factory reset is reached --
+     * including on a build with ESPOS_HTTPD_AUTH_REQUIRED, which answers 403
+     * everywhere else until a key exists. */
+    if (!espos_httpd_auth_policy_configured(p)) {
+        return true;
+    }
+    /* A key is set, so this device has an operator who chose one. Only proof
+     * of physical presence gets past it now. */
+    return recovery_open(p);
+}
+
 espos_httpd_auth_verdict_t espos_httpd_auth_policy_decide(espos_httpd_auth_policy_t *p,
                                                           const espos_httpd_auth_request_t *rq,
                                                           espos_httpd_auth_method_t *method)
 {
     espos_httpd_auth_method_t m = ESPOS_HTTPD_AUTH_NONE;
     espos_httpd_auth_verdict_t v;
-    if (rq->from_portal) {
-        /* Whoever stands next to the device and joined its own access point
-         * is its operator: this is also how a forgotten key is replaced. */
+    if (rq->from_portal && portal_exempt(p)) {
         m = ESPOS_HTTPD_AUTH_PORTAL;
         v = ESPOS_HTTPD_AUTH_ALLOW;
     } else if (!espos_httpd_auth_policy_configured(p)) {
