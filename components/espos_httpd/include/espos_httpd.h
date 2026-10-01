@@ -66,6 +66,25 @@ esp_err_t espos_httpd_register_ex(const httpd_uri_t *uri, uint32_t flags);
  */
 bool espos_httpd_request_authenticated(httpd_req_t *req);
 
+/**
+ * Exempt requests arriving on the setup access point from the API key for
+ * `seconds`, as proof that somebody is at the device. 0 closes the window.
+ *
+ * For a consumer with a way to establish that itself -- a recessed button, a
+ * jumper, a key switch. espOS opens the same window by itself after a run of
+ * power cycles when CONFIG_ESPOS_HTTPD_PORTAL_RECOVERY is set, which is the
+ * path for a device with no such hardware.
+ *
+ * The window relaxes nothing on the station or Ethernet side, and it is held
+ * in RAM, so a reboot ends it. Call it only from a hardware event a person
+ * has to cause; an app that opens it on a schedule or on a network request has
+ * given its API key away. ESP_ERR_INVALID_STATE before espos_httpd_start().
+ */
+esp_err_t espos_httpd_auth_recovery_open(uint32_t seconds);
+
+/** Seconds left of an open recovery window; 0 when none is open. */
+uint32_t espos_httpd_auth_recovery_s_left(void);
+
 /* ------------------------------------------------- helpers for handlers */
 
 /** Send `json` (NUL-terminated) with application/json and the given HTTP

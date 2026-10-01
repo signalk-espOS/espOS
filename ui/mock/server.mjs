@@ -366,7 +366,7 @@ export function startMock(port = 8484) {
       const method = authenticate(req, res, isPublic);
       if (method === false) return;
       // ---- auth
-      if (r === "/auth/status" && m === "GET") return json(res, 200, { required: authRequired(), configured: authRequired(), authenticated: method !== "none", method });
+      if (r === "/auth/status" && m === "GET") return json(res, 200, { required: authRequired(), configured: authRequired(), authenticated: method !== "none", method, recovery_s: 0 });
       if (r === "/auth/login" && m === "POST") {
         if (!needJson(req, res)) return;
         if (!authRequired()) return err(res, 409, "auth_open", "no API key is configured; the API is open");

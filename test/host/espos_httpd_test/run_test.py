@@ -581,7 +581,9 @@ class AuthTests(unittest.TestCase):
     def test_01_open_by_default(self):
         st, _, _, js = req("GET", "/api/v1/auth/status")
         self.assertEqual(st, 200)
-        self.assertEqual(js, {"required": False, "configured": False, "authenticated": False, "method": "none"})
+        self.assertEqual(
+            js, {"required": False, "configured": False, "authenticated": False, "method": "none", "recovery_s": 0}
+        )
         st, _, _, _ = req("GET", "/api/v1/config")
         self.assertEqual(st, 200)
         st, _, _, js = req("GET", "/api/v1/system/ping")
@@ -639,7 +641,9 @@ class AuthTests(unittest.TestCase):
         self.assertEqual(st, 200)
         self.assertTrue(js["auth"])
         st, _, _, js = req("GET", "/api/v1/auth/status")
-        self.assertEqual(js, {"required": True, "configured": True, "authenticated": False, "method": "none"})
+        self.assertEqual(
+            js, {"required": True, "configured": True, "authenticated": False, "method": "none", "recovery_s": 0}
+        )
         # the stream is protected too
         sse = SseReader()
         self.assertIn("401", sse.status)
@@ -811,7 +815,9 @@ class AuthTests(unittest.TestCase):
         st, _, _, _ = req("GET", "/api/v1/config")
         self.assertEqual(st, 200)
         st, _, _, js = req("GET", "/api/v1/auth/status")
-        self.assertEqual(js, {"required": False, "configured": False, "authenticated": False, "method": "none"})
+        self.assertEqual(
+            js, {"required": False, "configured": False, "authenticated": False, "method": "none", "recovery_s": 0}
+        )
         st, _, _, js = req("GET", "/api/v1/system/ping")
         self.assertFalse(js["auth"])
 
