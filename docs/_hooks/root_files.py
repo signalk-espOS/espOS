@@ -33,15 +33,15 @@ PAGES = {
 # `](target)` of an inline link; reference-style links are not used at the root.
 _LINK = re.compile(r"\]\(([^)\s]+)\)")
 
-# A URL standing on its own after whitespace (group 2). Text in which a URL
-# must stay as written is matched first, whole, and kept (group 1): a code
-# span, and a link, label and target together. An autolink (`<url>`) and a
-# reference definition (`[label]: url`) are already links, so the URL's
-# lookbehind skips them. A URL never ends on sentence punctuation, so one
-# closing a sentence leaves the full stop outside the link.
+# A URL standing on its own, at the start or after whitespace (group 2).
+# Text in which a URL must stay as written is matched first, whole, and kept
+# (group 1): a code span, and a link, label and target together. An autolink
+# (`<url>`) and a reference definition (`[label]: url`) are already links, so
+# the URL's lookbehind skips them. A URL never ends on sentence punctuation,
+# so one closing a sentence leaves the full stop outside the link.
 _BARE_URL = re.compile(
     r"(`[^`]*`|\[[^\]]*\]\([^)]*\))"
-    r"|(?<=\s)(?<!\]: )(https?://[^\s<>()]*[^\s<>().,;:!?])"
+    r"|(?<!\S)(?<!\]: )(https?://[^\s<>()]*[^\s<>().,;:!?])"
 )
 _PULL = re.compile(r"/pull/(\d+)$")
 
