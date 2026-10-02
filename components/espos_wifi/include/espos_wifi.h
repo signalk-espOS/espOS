@@ -34,6 +34,33 @@ extern "C" {
 esp_err_t espos_wifi_start(void);
 esp_err_t espos_wifi_stop(void);
 
+/**
+ * Hold the setup access point up, or down, whatever the policy would do.
+ *
+ * For an application that can tell something espOS cannot -- a hull hatch is
+ * open, a key switch is turned, this device is the one being commissioned. Not
+ * persisted: a reboot forgets it, and espos_wifi_portal_auto() hands the
+ * decision back.
+ *
+ * It does not override `wifi.portal_enabled`: an operator who turned the
+ * access point off keeps it off. ESP_ERR_INVALID_STATE before
+ * espos_wifi_start().
+ *
+ * Holding it UP is not instant: the request waits for any station association
+ * already in flight to finish, because switching the radio to AP+STA inside an
+ * attempt is measurably worse than between attempts (espOS #144). The wait is
+ * bounded by the attempt rather than by its success, so a device that never
+ * connects still gets its access point -- but a caller that expects the AP the
+ * moment this returns will be surprised.
+ *
+ * Holding it DOWN takes away the way back into a device whose key is lost
+ * (docs/security.md), so an application that does this should offer its own.
+ */
+esp_err_t espos_wifi_portal_open(bool up);
+
+/** Give the decision back to the policy. */
+esp_err_t espos_wifi_portal_auto(void);
+
 /** Snapshot of the WiFi-specific status (thread-safe copy): state machine,
  * link, portal, counters. rssi is the value captured at association and
  * refreshed by espos_wifi_refresh_rssi(). For "is the network up" use

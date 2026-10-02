@@ -133,5 +133,31 @@ was retired.
   cannot reach it, and a brown-out does not either. A consumer with a button,
   jumper or key switch calls `espos_httpd_auth_recovery_open()` from that
   instead. The other half of the report --- that the access point should not
-  be up at all while another transport carries the network --- is #158 and is
-  unfixed.
+  be up at all while another transport carries the network --- is #158, fixed
+  by the entry below.
+
+* **No setup access point while another transport has the network**
+  (2026-10-02, espOS #158, the other half of #154). `portal_policy()` decided
+  from the *station's* state alone, and `ESPOS_WIFI_ST_CONNECTED` means a WiFi
+  station connection, so a device with no station network configured — the
+  normal Ethernet-only setup — never reached it and nothing ever took the
+  access point down. With `wifi.portal_psk` empty by default that was an open
+  network advertised for as long as the device was powered, on a device
+  reachable over Ethernet the whole time. A WiFi device did the same
+  `wifi.portal_after_s` after its link dropped, even while Ethernet carried the
+  traffic.
+  Suppressed by **default** rather than behind an opt-in key, which is a
+  behaviour change for existing devices and was chosen deliberately: an
+  opt-in would have left every device insecure-by-default for want of knowing
+  a key existed, and the complaint came from a board where the access point
+  reached endpoints that switch loads. What it costs is the rescue path for a
+  device that is online but unfindable — wrong subnet, no mDNS, an unknown
+  lease — which now needs `wifi.portal_online = true`, set beforehand, or a
+  cable. `espos_wifi_portal_open(bool)` lets an application that can prove
+  presence decide instead.
+  The state machine learns this through a new `ESPOS_WIFI_EV_OTHER_NET` event
+  fed from `ESPOS_EVENT_NETWORK_UP`/`DOWN` on the event bus, not from
+  `espos_net_subscribe()`: a subscriber callback runs on whichever task
+  reported, and espos_wifi is itself one of the reporters, so its own drainer
+  would have re-entered it. `ESPOS_ABI_VERSION` 5 → 6.
+

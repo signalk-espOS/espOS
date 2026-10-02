@@ -18,8 +18,11 @@ static struct {
     uint32_t timer_due;
     int connects, disconnects, portal_starts, portal_stops, notifies;
     /* Timer arms, so a test can catch a deferral that re-arms in a tight
-     * loop rather than waiting for the attempt (espOS #144). */
-    int arms;
+     * loop rather than waiting for the attempt (espOS #144). Cancels for the
+     * same reason in the other direction: it is the only mark a policy run
+     * leaves when it decides to do nothing, which is how "nothing reached the
+     * port before EV_START" is checkable at all (espOS #158). */
+    int arms, cancels;
     char last_ssid[33];
     bool last_has_bssid;
     uint32_t rnd;
@@ -63,6 +66,7 @@ static void f_cancel(void *ctx)
 {
     (void)ctx;
     F.timer_armed = false;
+    F.cancels++;
 }
 static uint32_t f_now(void *ctx)
 {
@@ -730,4 +734,273 @@ TEST_CASE("state names", "[wifi_sm]")
     TEST_ASSERT_EQUAL_STRING("backoff", espos_wifi_state_str(ESPOS_WIFI_ST_BACKOFF));
     TEST_ASSERT_EQUAL_STRING("unconfigured", espos_wifi_state_str(ESPOS_WIFI_ST_UNCONFIGURED));
     TEST_ASSERT_EQUAL_STRING("obtaining_ip", espos_wifi_state_str(ESPOS_WIFI_ST_OBTAINING_IP));
+}
+
+/* ------------------------------------------- another transport (espOS #158) */
+
+static void ev_other_net(bool up)
+{
+    espos_wifi_sm_event(&SM, ESPOS_WIFI_EV_OTHER_NET, &up);
+}
+
+static void ev_portal_force(espos_wifi_portal_force_t f)
+{
+    espos_wifi_sm_event(&SM, ESPOS_WIFI_EV_PORTAL_FORCE, &f);
+}
+
+TEST_CASE("Ethernet up: an unconfigured device raises no portal", "[wifi_sm][othernet]")
+{
+    espos_wifi_cfg_t c = cfg_with(NULL, NULL);
+    reset(&c);
+    /* The reported case: no station network, so this machine never reaches
+     * CONNECTED and nothing ever took the portal down -- an open access point
+     * for as long as the device was powered, on a device reachable over
+     * Ethernet the whole time. */
+    ev_other_net(true);
+    /* Seeded before EV_START, where it must be recorded and nothing else: the
+     * driver is not started yet, so a policy run here would reach a port that
+     * cannot serve it. EV_START applies it. */
+    TEST_ASSERT_EQUAL_MESSAGE(0, F.notifies, "a pre-start event drove the machine");
+    TEST_ASSERT_EQUAL_MESSAGE(0, F.cancels, "a pre-start event reached the timer");
+    TEST_ASSERT_EQUAL_MESSAGE(0, F.portal_starts + F.portal_stops, "a pre-start event reached the radio");
+
+    espos_wifi_sm_event(&SM, ESPOS_WIFI_EV_START, NULL);
+    TEST_ASSERT_EQUAL(ESPOS_WIFI_ST_UNCONFIGURED, ST()->state);
+    TEST_ASSERT_FALSE_MESSAGE(ST()->portal_active, "an open access point nobody needs");
+    TEST_ASSERT_EQUAL(0, F.portal_starts);
+}
+
+TEST_CASE("Ethernet arriving takes a running portal down", "[wifi_sm][othernet]")
+{
+    espos_wifi_cfg_t c = cfg_with(NULL, NULL);
+    reset(&c);
+    espos_wifi_sm_event(&SM, ESPOS_WIFI_EV_START, NULL);
+    TEST_ASSERT_TRUE(ST()->portal_active);
+    /* Ethernet usually comes up AFTER the portal -- a PHY negotiates while the
+     * portal is already serving -- so declining to raise one is not enough. */
+    ev_other_net(true);
+    TEST_ASSERT_FALSE(ST()->portal_active);
+    TEST_ASSERT_EQUAL(1, F.portal_stops);
+}
+
+TEST_CASE("Ethernet going away puts the portal back at once", "[wifi_sm][othernet]")
+{
+    espos_wifi_cfg_t c = cfg_with(NULL, NULL);
+    reset(&c);
+    ev_other_net(true);
+    espos_wifi_sm_event(&SM, ESPOS_WIFI_EV_START, NULL);
+    TEST_ASSERT_FALSE(ST()->portal_active);
+    /* Unplugged: the device has no way in left, so the portal is owed
+     * immediately -- not after another portal_after_s, because the clock it is
+     * measured from has not moved while we sat here disconnected. */
+    ev_other_net(false);
+    TEST_ASSERT_TRUE(ST()->portal_active);
+    TEST_ASSERT_EQUAL(1, F.portal_starts);
+}
+
+TEST_CASE("Ethernet up does not suppress the portal when portal_online is set", "[wifi_sm][othernet]")
+{
+    espos_wifi_cfg_t c = cfg_with(NULL, NULL);
+    c.portal_online = true;
+    reset(&c);
+    ev_other_net(true);
+    espos_wifi_sm_event(&SM, ESPOS_WIFI_EV_START, NULL);
+    TEST_ASSERT_TRUE_MESSAGE(ST()->portal_active, "wifi.portal_online was ignored");
+}
+
+TEST_CASE("Ethernet up still defers to the configured deadline, then suppresses", "[wifi_sm][othernet]")
+{
+    espos_wifi_cfg_t c = cfg_with("Boat", NULL);
+    c.portal_after_ms = 5000;
+    reset(&c);
+    espos_wifi_sm_event(&SM, ESPOS_WIFI_EV_START, NULL);
+    ev_other_net(true);
+    /* A configured device that cannot reach its network: the deadline passes
+     * and the portal still does not come up, because Ethernet is carrying it. */
+    ev_disconnected(201);
+    F.now += 6000;
+    espos_wifi_sm_event(&SM, ESPOS_WIFI_EV_TIMER, NULL);
+    TEST_ASSERT_FALSE(ST()->portal_active);
+}
+
+TEST_CASE("a repeated OTHER_NET does not bounce the portal", "[wifi_sm][othernet]")
+{
+    espos_wifi_cfg_t c = cfg_with(NULL, NULL);
+    reset(&c);
+    espos_wifi_sm_event(&SM, ESPOS_WIFI_EV_START, NULL);
+    ev_other_net(true);
+    TEST_ASSERT_EQUAL(1, F.portal_stops);
+    /* NETWORK_UP fires again whenever the default route moves, and the port
+     * re-reads rather than trusting the id, so the same answer arrives often. */
+    ev_other_net(true);
+    ev_other_net(true);
+    TEST_ASSERT_EQUAL(1, F.portal_stops);
+    TEST_ASSERT_EQUAL(1, F.portal_starts);
+}
+
+TEST_CASE("portal_open(false) holds it down with no network at all", "[wifi_sm][othernet]")
+{
+    espos_wifi_cfg_t c = cfg_with(NULL, NULL);
+    reset(&c);
+    espos_wifi_sm_event(&SM, ESPOS_WIFI_EV_START, NULL);
+    TEST_ASSERT_TRUE(ST()->portal_active);
+    ev_portal_force(ESPOS_WIFI_PORTAL_DOWN);
+    TEST_ASSERT_FALSE(ST()->portal_active);
+    /* And it stays down: this is an application decision, not a hint. */
+    ev_other_net(false);
+    TEST_ASSERT_FALSE(ST()->portal_active);
+    ev_portal_force(ESPOS_WIFI_PORTAL_AUTO);
+    TEST_ASSERT_TRUE_MESSAGE(ST()->portal_active, "auto did not hand the decision back");
+}
+
+TEST_CASE("portal_open(true) holds it up through a connection", "[wifi_sm][othernet]")
+{
+    espos_wifi_cfg_t c = cfg_with("Boat", NULL);
+    reset(&c);
+    espos_wifi_sm_event(&SM, ESPOS_WIFI_EV_START, NULL);
+    ev_portal_force(ESPOS_WIFI_PORTAL_UP);
+    /* Deferred, not dropped: the attempt in flight comes first (espOS #144). */
+    TEST_ASSERT_FALSE(ST()->portal_active);
+    ev_connected("Boat");
+    /* The association is done, so the request is honoured -- and connecting,
+     * which normally takes the portal down, does not: an application that
+     * asked for it up is commissioning something and wants AP+STA. */
+    TEST_ASSERT_TRUE_MESSAGE(ST()->portal_active, "the deferred request was never applied");
+    ev_got_ip();
+    TEST_ASSERT_TRUE(ST()->portal_active);
+    ev_other_net(true);
+    TEST_ASSERT_TRUE_MESSAGE(ST()->portal_active, "suppression overrode an explicit request");
+}
+
+TEST_CASE("neither override outranks portal_enabled = false", "[wifi_sm][othernet]")
+{
+    espos_wifi_cfg_t c = cfg_with(NULL, NULL);
+    c.portal_enabled = false;
+    reset(&c);
+    espos_wifi_sm_event(&SM, ESPOS_WIFI_EV_START, NULL);
+    ev_portal_force(ESPOS_WIFI_PORTAL_UP);
+    /* An operator who turned the access point off in the configuration keeps
+     * it off; the override is for deciding within what they allowed. */
+    TEST_ASSERT_FALSE_MESSAGE(ST()->portal_active, "an app overrode the operator");
+    TEST_ASSERT_EQUAL(0, F.portal_starts);
+}
+
+TEST_CASE("Ethernet going away pulls the timer in to the portal deadline", "[wifi_sm][othernet]")
+{
+    espos_wifi_cfg_t c = cfg_with("Boat", NULL);
+    c.portal_after_ms = 1000; /* sooner than the 15 s DHCP timeout below */
+    reset(&c);
+    ev_other_net(true);
+    espos_wifi_sm_event(&SM, ESPOS_WIFI_EV_START, NULL);
+    ev_connected("Boat");
+    /* OBTAINING_IP on purpose: the association is done, so the espOS #144
+     * deferral does not apply and the policy will schedule rather than skip.
+     * The armed timer is the 15 s DHCP timeout. */
+    TEST_ASSERT_EQUAL(ESPOS_WIFI_ST_OBTAINING_IP, ST()->state);
+    const uint32_t deadline = 1000 + c.portal_after_ms; /* reset() starts the clock at 1000 */
+    TEST_ASSERT_TRUE(F.timer_due > deadline);
+
+    /* Unplugged: the portal is owed in under a second while the armed timer is
+     * fifteen away. arm() folds the portal deadline in when it is CALLED, not
+     * retroactively, so without a re-arm here the portal waits out the DHCP
+     * timeout -- it does arrive, which is why "does it arrive" cannot catch
+     * this, but it arrives fourteen seconds late. */
+    ev_other_net(false);
+    TEST_ASSERT_FALSE_MESSAGE(ST()->portal_active, "raised early, so this tests nothing");
+    TEST_ASSERT_TRUE_MESSAGE(F.timer_armed, "nothing is armed, so nothing will raise it");
+    TEST_ASSERT_TRUE_MESSAGE(F.timer_due <= deadline, "the timer still points past the portal deadline");
+
+    F.now = F.timer_due;
+    espos_wifi_sm_event(&SM, ESPOS_WIFI_EV_TIMER, NULL);
+    TEST_ASSERT_TRUE_MESSAGE(ST()->portal_active, "the deadline fired and nothing came up");
+    TEST_ASSERT_TRUE_MESSAGE(F.now <= deadline, "the portal was late");
+    /* The DHCP timeout it displaced is still owed, not cancelled. */
+    TEST_ASSERT_TRUE_MESSAGE(F.timer_armed, "the DHCP timeout was lost with the re-arm");
+}
+
+TEST_CASE("Ethernet going away inside the deadline arms the timer for it", "[wifi_sm][othernet]")
+{
+    espos_wifi_cfg_t c = cfg_with("Boat", NULL);
+    c.portal_after_ms = 30000;
+    reset(&c);
+    ev_other_net(true);
+    espos_wifi_sm_event(&SM, ESPOS_WIFI_EV_START, NULL);
+    ev_disconnected(201); /* retrying; the portal is owed 30 s from here */
+    F.now += 1000;
+
+    /* Unplugged well before the deadline, so the policy schedules rather than
+     * raises. Nothing acts on portal_due_ms unless the timer is armed for it:
+     * arm() folds the deadline in when it is CALLED, not retroactively, so
+     * without a re-arm here the portal arrives whenever some unrelated
+     * timeout happens to fire -- or never. */
+    ev_other_net(false);
+    TEST_ASSERT_FALSE(ST()->portal_active);
+    TEST_ASSERT_TRUE_MESSAGE(F.timer_armed, "nothing is armed, so nothing will raise it");
+
+    /* Which timer fires first is not the point -- a retry deadline is sooner
+     * than the portal's and legitimately wins -- so drive the clock through
+     * them and assert only the guarantee: the portal is owed and arrives. A
+     * bounded loop, because the failure being guarded against is a deadline
+     * nothing is armed for, which here looks like running out of timers. */
+    for (int i = 0; i < 40 && !ST()->portal_active; i++) {
+        TEST_ASSERT_TRUE_MESSAGE(F.timer_armed, "the portal deadline was dropped");
+        F.now = F.timer_due;
+        espos_wifi_sm_event(&SM, ESPOS_WIFI_EV_TIMER, NULL);
+    }
+    TEST_ASSERT_TRUE_MESSAGE(ST()->portal_active, "the deadline passed and nothing came up");
+}
+
+TEST_CASE("a forced portal still waits out an association", "[wifi_sm][othernet]")
+{
+    espos_wifi_cfg_t c = cfg_with("Boat", NULL);
+    reset(&c);
+    espos_wifi_sm_event(&SM, ESPOS_WIFI_EV_START, NULL);
+    TEST_ASSERT_EQUAL(ESPOS_WIFI_ST_CONNECTING, ST()->state);
+
+    /* An application asking for the portal does not get to undo espOS #144:
+     * switching to APSTA inside an attempt cost one board a ~9 minute stall.
+     * The request is sticky, so it is honoured the moment the attempt ends. */
+    ev_portal_force(ESPOS_WIFI_PORTAL_UP);
+    TEST_ASSERT_FALSE_MESSAGE(ST()->portal_active, "APSTA switch inside an association");
+    int arms_before = F.arms;
+
+    ev_disconnected(201);
+    TEST_ASSERT_TRUE_MESSAGE(ST()->portal_active, "the request was dropped, not deferred");
+    /* And it did not spin re-arming a past-due timer while it waited. */
+    TEST_ASSERT_TRUE(F.arms - arms_before <= 2);
+}
+
+TEST_CASE("disabling the station mid-attempt does not strand a forced portal", "[wifi_sm][othernet]")
+{
+    espos_wifi_cfg_t c = cfg_with("Boat", NULL);
+    reset(&c);
+    espos_wifi_sm_event(&SM, ESPOS_WIFI_EV_START, NULL);
+    TEST_ASSERT_EQUAL(ESPOS_WIFI_ST_CONNECTING, ST()->state);
+    ev_portal_force(ESPOS_WIFI_PORTAL_UP); /* deferred: an attempt is in flight */
+    TEST_ASSERT_FALSE(ST()->portal_active);
+
+    /* The attempt is now abandoned rather than resolved, so nothing will ever
+     * report it finished. A connect_in_flight left set here defers the portal
+     * for the life of the boot. */
+    espos_wifi_cfg_t off = c;
+    off.sta_enabled = false;
+    espos_wifi_sm_event(&SM, ESPOS_WIFI_EV_CONFIG, &off);
+    TEST_ASSERT_EQUAL(ESPOS_WIFI_ST_DISABLED, ST()->state);
+    TEST_ASSERT_TRUE_MESSAGE(ST()->portal_active, "the deferral outlived the attempt");
+}
+
+TEST_CASE("removing every network mid-attempt does not strand a forced portal", "[wifi_sm][othernet]")
+{
+    espos_wifi_cfg_t c = cfg_with("Boat", NULL);
+    reset(&c);
+    espos_wifi_sm_event(&SM, ESPOS_WIFI_EV_START, NULL);
+    ev_portal_force(ESPOS_WIFI_PORTAL_UP);
+    TEST_ASSERT_FALSE(ST()->portal_active);
+
+    /* Same gap by the other route: UNCONFIGURED is reached without any attempt
+     * resolving. */
+    espos_wifi_cfg_t none = cfg_with(NULL, NULL);
+    espos_wifi_sm_event(&SM, ESPOS_WIFI_EV_CONFIG, &none);
+    TEST_ASSERT_EQUAL(ESPOS_WIFI_ST_UNCONFIGURED, ST()->state);
+    TEST_ASSERT_TRUE_MESSAGE(ST()->portal_active, "the deferral outlived the attempt");
 }

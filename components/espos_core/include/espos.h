@@ -117,8 +117,11 @@ const char *espos_board(void);
  * A binding generated from the headers records the value it was built
  * against and compares it with espos_abi_version() at run time.
  */
-#define ESPOS_ABI_VERSION 5
+#define ESPOS_ABI_VERSION 6
 /* History, so that a binding pinned to an older value can tell what moved:
+ *   6  espos_wifi_cfg_t gained portal_online and espos_wifi_sm_t gained
+ *      other_net_up + portal_force (both appended, sizeof) -- espOS #158.
+ *      The portal policy changed with them: see docs/wifi.md.
  *   5  espos_httpd_auth_policy_t gained recovery_until_s and recovery
  *      (appended, sizeof) -- espOS #154. The portal exemption narrowed with
  *      it, which is a behaviour change rather than an ABI one.
