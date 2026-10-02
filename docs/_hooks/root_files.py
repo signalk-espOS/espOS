@@ -33,11 +33,16 @@ PAGES = {
 # `](target)` of an inline link; reference-style links are not used at the root.
 _LINK = re.compile(r"\]\(([^)\s]+)\)")
 
-# A URL standing on its own after whitespace. One inside a link, an autolink or
-# a reference definition (`[label]: url`) is already a link and is left alone.
-# It never ends on sentence punctuation, so a URL closing a sentence leaves
-# the full stop outside the link.
-_BARE_URL = re.compile(r"(?<=\s)(?<!\]: )https?://[^\s<>()]*[^\s<>().,;:!?]")
+# A URL standing on its own after whitespace (group 2). Text in which a URL
+# must stay as written is matched first, whole, and kept (group 1): a code
+# span, and a link, label and target together. An autolink (`<url>`) and a
+# reference definition (`[label]: url`) are already links, so the URL's
+# lookbehind skips them. A URL never ends on sentence punctuation, so one
+# closing a sentence leaves the full stop outside the link.
+_BARE_URL = re.compile(
+    r"(`[^`]*`|\[[^\]]*\]\([^)]*\))"
+    r"|(?<=\s)(?<!\]: )(https?://[^\s<>()]*[^\s<>().,;:!?])"
+)
 _PULL = re.compile(r"/pull/(\d+)$")
 
 
@@ -55,7 +60,9 @@ def _rewrite(text: str, root_file: str, page_uri: str, repo_url: str) -> str:
         return f"]({repo_url.rstrip('/')}/blob/main/{resolved}{fragment})"
 
     def autolink(m: re.Match) -> str:
-        url = m.group(0)
+        url = m.group(2)
+        if url is None:
+            return m.group(0)
         pull = _PULL.search(url)
         return f"[#{pull.group(1)}]({url})" if pull else f"<{url}>"
 
