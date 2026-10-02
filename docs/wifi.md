@@ -102,9 +102,9 @@ replaces the station, it runs alongside (APSTA).
 | `portal_enabled = false`                         | never                                     |
 | `espos_wifi_portal_open(true/false)` was called  | up / down, until `espos_wifi_portal_auto()` |
 
-**While Ethernet (or any other transport) is carrying the network, there is no
-access point.** The device is reachable over that transport, so an access point
-adds nothing — and the rows above would otherwise leave one up for as long as
+**By default, while Ethernet (or any other transport) is carrying the network,
+there is no access point.** The device is reachable over that transport, so an
+access point adds nothing — and the rows above would otherwise leave one up for as long as
 the device is powered on an Ethernet-only board, because this machine never
 reaches `connected` and nothing else would take it down. That is what espOS
 used to do, and with `portal_psk` empty by default it was an open network

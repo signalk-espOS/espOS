@@ -78,14 +78,18 @@ whose `reset_reason` and `last_reset` say why the device last restarted.
 ## WiFi
 
 **No `espOS-xxxx` network appears**
-: First check whether something else is carrying the network: **while Ethernet
-  (or any other transport) has the default route, there is no access point at
-  all**, because the device is reachable over that instead.
-  `GET /api/v1/net/status` names the interface; `wifi.portal_online = true`
+: First check whether something else is carrying the network: **by default
+  there is no access point while Ethernet (or any other transport) has the
+  default route**, because the device is reachable over that instead.
+  `GET /api/v1/net/status` names the interface, and `wifi.portal_online = true`
   raises the portal anyway. Otherwise: the portal comes up at once only when
   *no* network is configured or `wifi.sta_enabled` is off. With networks
   configured it appears after `wifi.portal_after_s` (90 s) of failed attempts,
-  and never while connected or with `wifi.portal_enabled` off. A phone that
+  and never while connected or with `wifi.portal_enabled` off. An application
+  can also hold it down — or up — with `espos_wifi_portal_open()`, which
+  outranks all of the above except `portal_enabled`; it is not persisted, so a
+  reboot clears it, and nothing reports that it is in force, so the firmware
+  that calls it is the only place that shows. A phone that
   does not pop its sign-in sheet still reaches the page at
   `http://192.168.4.1`. A `wifi.portal_psk` makes the portal a protected
   network. [WiFi → Portal](wifi.md#portal-softap-provisioning).
