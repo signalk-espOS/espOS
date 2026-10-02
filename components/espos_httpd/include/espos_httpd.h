@@ -67,6 +67,33 @@ esp_err_t espos_httpd_register_ex(const httpd_uri_t *uri, uint32_t flags);
 bool espos_httpd_request_authenticated(httpd_req_t *req);
 
 /**
+ * What a radio co-processor reports about itself, for
+ * `GET /api/v1/system/info`'s `hardware.coprocessor`.
+ *
+ * On a host whose radio is a separate chip (an ESP32-P4 with an ESP32-C6 over
+ * SDIO), esp_hosted compares its own version against the co-processor's and
+ * warns that a mismatch causes RPC timeouts -- once, into the log ring, which
+ * rotates. That left the standing precondition for a whole class of failure
+ * visible nowhere (espOS #164).
+ *
+ * The type is declared here rather than in espos_wifi because the consumer
+ * owns it: espos_wifi already includes this header, so the producer can fill
+ * it without espos_httpd naming a radio.
+ *
+ * A false return means there is nothing to report, which covers both a chip
+ * that is its own radio and a co-processor that has not answered -- the two are
+ * not distinguishable, and both mean the same thing to a reader.
+ */
+typedef struct {
+    char version[16];      /* the co-processor's firmware, "2.12.0". "0.0.0" means it
+                              answered without naming one, which is what an image too
+                              old to support the query looks like. */
+    char host_version[16]; /* what this build's esp_hosted expects to talk to */
+    char target[16];       /* the co-processor's chip, "esp32c6"; "" when unknown */
+    bool stale;            /* host_version is newer than version */
+} espos_httpd_coproc_t;
+
+/**
  * Exempt requests arriving on the setup access point from the API key for
  * `seconds`, as proof that somebody is at the device. 0 closes the window.
  *

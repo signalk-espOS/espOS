@@ -192,6 +192,13 @@ class ApiTests(unittest.TestCase):
                   "free_internal", "min_internal_free", "reset_reason",
                   "config_storage_reset", "schema_etag"):
             self.assertIn(k, js, k)
+        # The co-processor object is absent on a target that has no radio
+        # co-processor -- which the host is, so the weak hook answers false
+        # here. Asserted rather than assumed: a strong definition that returned
+        # false would look identical to the stub and would hide a link that
+        # never pulled it in, which is how the wallclock hook (#49) shipped
+        # broken. "hardware" itself is absent on the host for the same reason.
+        self.assertNotIn("hardware", js)
         # free_internal/min_internal_free are the live and low-water halves of one
         # measurement, and min_internal_free is what memoryTrough is raised from;
         # until they were added a device could not be asked for the number behind

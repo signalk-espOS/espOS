@@ -208,6 +208,34 @@ already advertise.
 }
 ```
 
+On a host whose radio is a separate chip — an ESP32-P4 with an ESP32-C6 over
+SDIO — `hardware` also carries the co-processor. A C6 like the one above has its
+own radio and never does:
+
+```json
+"hardware": {
+  "mac": "30:ed:a0:e3:2b:e9", "cpu_mhz": 360, "flash_bytes": 16777216,
+  "board": "Waveshare ESP32-P4-WIFI6-Touch-LCD-X 7in",
+  "coprocessor": {"version": "0.0.0", "host_version": "3.0.9",
+                  "target": "esp32c6", "stale": true}
+}
+```
+
+`host_version` is what this build's `esp_hosted` expects to talk to, `target`
+the co-processor's chip, and `stale` whether the host is newer. All four come
+out of the PRIV TLVs the co-processor sends during transport bring-up, which
+`esp_hosted` has already parsed and kept — **not** from
+`esp_hosted_get_coprocessor_fwversion()`, which is an RPC to the other chip.
+That distinction is the whole reason this field can be trusted: a co-processor
+old or broken enough to be worth reporting is exactly the one whose RPC does
+not answer, so a query-based field would be absent precisely when it matters.
+`stale` is `esp_hosted`'s own verdict
+(`eh_host_mcu_transport_verify_fw_compat()`), so it cannot disagree with the
+warning `esp_hosted` logs; a patch-level difference is not stale, and a host
+*older* than its co-processor is a different problem and not this flag.
+`stale: true` is also raised as the `coprocessorStale` health condition
+([hardware.md](hardware.md#updating-the-c6-co-processor-firmware)).
+
 `hardware` answers "which board is this", which matters once there is more than
 one on the bench. Most of it is read from the chip; `cpu_mhz` is what the build
 asked for and `board` is what the firmware declared, so neither is a live
@@ -218,6 +246,7 @@ measurement:
 | `mac` | the base MAC — the identity `espos_net` derives the short id and default hostname from |
 | `cpu_mhz` | what the build asked for (`CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ`), not a live reading |
 | `flash_bytes` | the flash chip's size |
+| `coprocessor` | **only on a host whose radio is a separate chip**, and only from the first co-processor heartbeat onwards (so: within about 20 s of boot, or never if `CONFIG_ESP_HOSTED_HOST_FEAT_HEARTBEAT` is off). Absence does not distinguish those cases from a board with no co-processor at all. A co-processor whose firmware never announced a version reads `"0.0.0"` — present, answering, silent about itself. See below |
 | `ram_internal_bytes`, `ram_psram_bytes` | **totals**, not free — `free_heap` above is the live number. `ram_psram_bytes: 0` means no PSRAM, which is what separates two boards with the same chip. |
 | `features` | `wifi`, `ble`, `bt-classic`, `802.15.4`, `embedded-flash`, `embedded-psram`, from `esp_chip_info()`'s bitmask |
 | `board` | **only if the firmware said so** (`espos_start_opts_t.board`); absent otherwise |

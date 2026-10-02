@@ -162,6 +162,22 @@ __attribute__((weak)) const char *espos_httpd_board_hook(void)
     return NULL;
 }
 
+/* The radio co-processor, by the same route again: only espos_wifi links
+ * esp_hosted, and espos_wifi REQUIRES espos_httpd, so naming it here would
+ * close the cycle the other two hooks exist to avoid.
+ *
+ * espos_wifi/src/hosted_watchdog.c holds the strong definition, in an object
+ * espos_wifi.c already calls into (espos_wifi_hosted_watchdog_start), so
+ * espos_wifi needs no WHOLE_ARCHIVE -- the same reasoning as espos_core above,
+ * and the trap #49 fell into when it did not hold. A build with no hosted
+ * radio -- every native-radio target, and the linux host -- keeps this stub and
+ * the object is simply absent from the document. */
+__attribute__((weak)) bool espos_httpd_coprocessor_hook(espos_httpd_coproc_t *out)
+{
+    (void)out;
+    return false;
+}
+
 /* "time": what the device believes the wall clock says and where it learned
  * it. Always present, so a client never has to guess whether the firmware has
  * the component; `source: "none"` and `now: 0` is the honest answer for a
@@ -279,6 +295,29 @@ static void add_hardware(cJSON *j, const esp_chip_info_t *chip)
     const char *board = espos_httpd_board_hook();
     if (board && board[0]) {
         cJSON_AddStringToObject(hw, "board", board);
+    }
+
+    /* Absent on a chip that is its own radio -- most of them -- and absent too
+     * while a co-processor has not answered yet. Those two are NOT
+     * distinguishable from the document, which is the honest shape: a
+     * co-processor that answers without naming a version is present with
+     * "0.0.0", so the only ambiguity left is "no radio chip" versus "one that
+     * never replied", and both mean there is nothing to report. */
+    espos_httpd_coproc_t cp;
+    memset(&cp, 0, sizeof(cp));
+    if (espos_httpd_coprocessor_hook(&cp)) {
+        cJSON *co = cJSON_AddObjectToObject(hw, "coprocessor");
+        if (co) {
+            cJSON_AddStringToObject(co, "version", cp.version);
+            cJSON_AddStringToObject(co, "host_version", cp.host_version);
+            if (cp.target[0]) {
+                cJSON_AddStringToObject(co, "target", cp.target);
+            }
+            /* The answer to "is this the thing causing my RPC timeouts",
+             * decided where both numbers are known rather than left to every
+             * client to compare two version strings correctly. */
+            cJSON_AddBoolToObject(co, "stale", cp.stale);
+        }
     }
 #endif /* !CONFIG_IDF_TARGET_LINUX */
 }
