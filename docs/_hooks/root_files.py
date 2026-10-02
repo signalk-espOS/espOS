@@ -35,7 +35,9 @@ _LINK = re.compile(r"\]\(([^)\s]+)\)")
 
 # A URL standing on its own after whitespace. One inside a link, an autolink or
 # a reference definition (`[label]: url`) is already a link and is left alone.
-_BARE_URL = re.compile(r"(?<=\s)(?<!\]: )https?://[^\s<>()]+")
+# It never ends on sentence punctuation, so a URL closing a sentence leaves
+# the full stop outside the link.
+_BARE_URL = re.compile(r"(?<=\s)(?<!\]: )https?://[^\s<>()]*[^\s<>().,;:!?]")
 _PULL = re.compile(r"/pull/(\d+)$")
 
 
