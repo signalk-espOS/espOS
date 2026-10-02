@@ -13,6 +13,11 @@ in docs/ is a stub and this hook substitutes the root file's text at build
 time, rewriting its relative links: one that points into docs/ becomes a
 link to that page, anything else becomes a link to the file on GitHub.
 
+It also links the bare URLs the release notes GitHub generates are written
+with, one for each pull request and one for the full changelog. GitHub
+links those by itself; Python-Markdown leaves them as text. A pull request's
+URL reads `#<number>`, as it does on the release page.
+
 Registered in mkdocs.yml (`hooks:`); PAGES maps a page in docs/ to the root
 file it shows. Standard library only.
 """
@@ -28,6 +33,18 @@ PAGES = {
 # `](target)` of an inline link; reference-style links are not used at the root.
 _LINK = re.compile(r"\]\(([^)\s]+)\)")
 
+# A URL standing on its own, at the start or after whitespace (group 2).
+# Text in which a URL must stay as written is matched first, whole, and kept
+# (group 1): a code span, and a link, label and target together. An autolink
+# (`<url>`) and a reference definition (`[label]: url`) are already links, so
+# the URL's lookbehind skips them. A URL never ends on sentence punctuation,
+# so one closing a sentence leaves the full stop outside the link.
+_BARE_URL = re.compile(
+    r"(`[^`]*`|\[[^\]]*\]\([^)]*\))"
+    r"|(?<!\S)(?<!\]: )(https?://[^\s<>()]*[^\s<>().,;:!?])"
+)
+_PULL = re.compile(r"/pull/(\d+)$")
+
 
 def _rewrite(text: str, root_file: str, page_uri: str, repo_url: str) -> str:
     def repl(m: re.Match) -> str:
@@ -42,7 +59,14 @@ def _rewrite(text: str, root_file: str, page_uri: str, repo_url: str) -> str:
             return f"]({posixpath.relpath(resolved[len('docs/'):], page_dir)}{fragment})"
         return f"]({repo_url.rstrip('/')}/blob/main/{resolved}{fragment})"
 
-    return _LINK.sub(repl, text)
+    def autolink(m: re.Match) -> str:
+        url = m.group(2)
+        if url is None:
+            return m.group(0)
+        pull = _PULL.search(url)
+        return f"[#{pull.group(1)}]({url})" if pull else f"<{url}>"
+
+    return _BARE_URL.sub(autolink, _LINK.sub(repl, text))
 
 
 def on_page_markdown(markdown: str, page, config, files) -> str:

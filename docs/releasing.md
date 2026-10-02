@@ -8,25 +8,43 @@ the device reports.
 
 Nobody edits `CHANGELOG.md` or a version number by hand.
 [release-please](https://github.com/googleapis/release-please)
-(`.github/workflows/release-please.yml`) runs on every push to `main` and
-keeps one pull request open, **`chore: release <version>`**, which
+(`.github/workflows/release-please.yml`) runs on every push to `main` that
+carries a change users get, and keeps one pull request open,
+**`chore: release <version>`**, which
 
-* prepends the new `CHANGELOG.md` section, built from the Conventional
-  Commit subjects merged since the last release — the PR titles, because
-  pull requests are squash-merged (`feat` → Added, `fix` → Fixed, `perf` and
-  `refactor` → Changed; `docs`, `build`, `ci`, `test` and `chore` stay out);
+* prepends the new `CHANGELOG.md` section: the release notes GitHub
+  generates for the pull requests merged since the last release, one line
+  each with its title, its author and a link to it. A label sorts each into
+  a section (`.github/release.yml`), and
+  `.github/workflows/label-by-title.yml` sets that label from the title's
+  type whenever a pull request is opened or its title or description is
+  edited: `feat` → Added, `fix` and `revert` → Fixed, `perf` and
+  `refactor` → Changed, while `docs`, `build`, `ci`, `test` and `chore` stay
+  out. A breaking change goes under Breaking changes whatever its type. A
+  label set by hand holds until the next such edit;
 * bumps `version.txt` and every espOS version in the component manifests
   (below);
-* picks the version: a `feat` raises the minor, a `fix` the patch, and a
+* picks the version from the same titles, because pull requests are
+  squash-merged: a `feat` raises the minor, a `fix` the patch, and a
   breaking change (`!` after the type, or a `BREAKING CHANGE:` line in the
   squashed body) the minor as well while espOS is below 1.0.
+
+A push that carries only `docs`, `build`, `ci`, `test` or `chore` changes
+does not run release-please at all. GitHub's notes are never empty, so it
+would otherwise propose a release for each of them. Such a push does not
+refresh an open release PR either; run the workflow by hand (**Actions →
+release-please → Run workflow**) to do that, for instance after a change to
+the release configuration. A manual run judges every commit since the last
+release rather than one push's, so with only those changes unreleased it
+does nothing either.
 
 **Merging that pull request is the release.** The next run tags the merge
 commit `v<version>`, creates the GitHub release with the new section as its
 notes, and publishes the components to the registry. Until a maintainer
 merges it, nothing is released. The release PR can be edited before merging
 — lead the notes with anything that requires a consumer to change its own
-code.
+code: the notes list a breaking change by its title, not by the
+`BREAKING CHANGE:` line in its description.
 
 There are no binaries to attach — espOS is source consumed as a submodule,
 and the tag remains the deliverable; the release is a readable front page

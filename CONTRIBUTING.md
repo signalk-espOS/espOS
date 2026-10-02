@@ -85,12 +85,15 @@ the person with the hardware — say in the PR which board that was.
   with the title as the commit subject, and release-please builds
   `CHANGELOG.md` and the next version from those subjects
   ([docs/releasing.md](docs/releasing.md)); a check fails a title that is not
-  a Conventional Commit. `feat` lands under Added, `fix` under Fixed, `perf`
-  and `refactor` under Changed; the other types stay out of the notes. A
-  change a consumer has to react to puts `!` after the type and ends the PR
-  description with `BREAKING CHANGE: <what to change>` -- the description is
-  the squashed commit's body, so that line reaches the release notes. Do not
-  edit `CHANGELOG.md` in a pull request.
+  a Conventional Commit. Each line of the notes is the title, its author and
+  a link to the pull request. `feat` lands under Added, `fix` and `revert`
+  under Fixed, `perf` and `refactor` under Changed; the other types stay out
+  of the notes. A label set from the title does the sorting, so there is
+  nothing to label by hand. A change a consumer has to react to puts `!`
+  after the type and ends the PR description with
+  `BREAKING CHANGE: <what to change>`. Either one lists it under Breaking
+  changes; the line is what the maintainer cutting the release leads its
+  notes with. Do not edit `CHANGELOG.md` in a pull request.
 * **Sign off every commit** (`git commit -s`). The `Signed-off-by` line is
   your statement under the [Developer Certificate of
   Origin](https://developercertificate.org) that you may contribute the

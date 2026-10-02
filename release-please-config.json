@@ -4,19 +4,8 @@
   "include-component-in-tag": false,
   "bump-minor-pre-major": true,
   "changelog-path": "CHANGELOG.md",
+  "changelog-type": "github",
   "pull-request-title-pattern": "chore: release ${version}",
-  "changelog-sections": [
-    { "type": "feat", "section": "Added" },
-    { "type": "fix", "section": "Fixed" },
-    { "type": "perf", "section": "Changed" },
-    { "type": "refactor", "section": "Changed" },
-    { "type": "revert", "section": "Fixed" },
-    { "type": "docs", "section": "Documentation", "hidden": true },
-    { "type": "build", "section": "Internal", "hidden": true },
-    { "type": "ci", "section": "Internal", "hidden": true },
-    { "type": "test", "section": "Internal", "hidden": true },
-    { "type": "chore", "section": "Internal", "hidden": true }
-  ],
   "packages": {
     ".": {
       "extra-files": [
