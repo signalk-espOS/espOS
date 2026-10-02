@@ -215,7 +215,7 @@ and [#220](https://github.com/espressif/esp-hosted-mcu/issues/220).
 
 esp_hosted raises `ESP_HOSTED_EVENT_TRANSPORT_FAILURE` for faults it can
 detect itself (a dropped SDIO read, an all-ones `PKT_LEN`), and with
-`CONFIG_ESP_HOSTED_TRANSPORT_RESTART_ON_FAILURE=y` — the default, which
+`CONFIG_ESP_HOSTED_HOST_TRANSPORT_RESTART_ON_FAILURE=y` — the default, which
 espOS keeps — that reboots the device. **A silently wedged link raises no
 event at all**, because there is nothing to detect, only an absence.
 
@@ -258,6 +258,49 @@ than one sitting unreachable until someone power-cycles it, which is the
 behaviour this replaces — and that, not the in-place repair, was always
 the valuable half.
 
+## esp_hosted 2.x → 3.x key names
+
+espOS pins `espressif/esp_hosted ^3.0.9`. 3.0 renamed most of the
+host-side Kconfig surface and **removed** the 2.x spellings. IDF leaves
+`KCONFIG_WARN_UNDEF_ASSIGN` off, so an assignment to a symbol that no
+longer exists is dropped without a word: a project carrying its own 2.x
+fragment gets the component's built-in SDIO defaults, the co-processor
+never answers, and the only symptom is a P4 with no WiFi.
+`espos_core/project_include.cmake` scans the defaults files for these keys
+and fails the configure rather than letting that reach a device.
+
+| esp_hosted 2.x | esp_hosted 3.x |
+| --- | --- |
+| `CONFIG_ESP_HOSTED_ENABLED` | `CONFIG_ESP_HOSTED` (role: `CONFIG_ESP_HOSTED_HOST`) |
+| `CONFIG_ESP_HOSTED_SDIO_HOST_INTERFACE` | `CONFIG_ESP_HOSTED_HOST_TRANSPORT_BUS_SDIO` |
+| `CONFIG_ESP_HOSTED_SDIO_4_BIT_BUS` | `CONFIG_ESP_HOSTED_HOST_SDIO_BUS_WIDTH_4` |
+| `CONFIG_ESP_HOSTED_SDIO_PIN_{CLK,CMD,D0..D3}` | `CONFIG_ESP_HOSTED_HOST_SDIO_PIN_{CLK,CMD,D0..D3}` |
+| `CONFIG_ESP_HOSTED_SDIO_GPIO_RESET_SLAVE` | `CONFIG_ESP_HOSTED_HOST_RESET_GPIO` |
+| `CONFIG_ESP_HOSTED_SDIO_RESET_ACTIVE_HIGH` | *(gone — see below)* |
+| `CONFIG_ESP_HOSTED_SDIO_CLOCK_FREQ_KHZ` | `CONFIG_ESP_HOSTED_HOST_SDIO_CLK_KHZ` |
+| `CONFIG_ESP_HOSTED_SDIO_OPTIMIZATION_RX_STREAMING_MODE` | `CONFIG_ESP_HOSTED_HOST_SDIO_RX_STREAMING_MODE` |
+| `CONFIG_ESP_HOSTED_SLAVE_RESET_ON_EVERY_HOST_BOOTUP` | `CONFIG_ESP_HOSTED_HOST_CP_RESET_STRATEGY_ALWAYS` |
+| `CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM` | `CONFIG_EH_HOST_PORT_DMA_PREFER_SPIRAM` |
+| `CONFIG_ESP_HOSTED_TRANSPORT_RESTART_ON_FAILURE` | `CONFIG_ESP_HOSTED_HOST_TRANSPORT_RESTART_ON_FAILURE` |
+| `CONFIG_ESP_HOSTED_ENABLE_BT_BLUEDROID` + `..._BLUEDROID_HCI_VHCI` | `CONFIG_ESP_HOSTED_HOST_FEAT_BT` + `CONFIG_BT_BLUEDROID_ENABLED` ([ble.md](ble.md)) |
+| *(no equivalent)* | `CONFIG_ESP_HOSTED_HOST_FEAT_HEARTBEAT` — opt-in in 3.x, required here |
+
+Reset polarity is no longer configurable: 3.x hardcodes the pulse the
+`ACTIVE_HIGH` setting produced — park high, 10 ms low, park high
+(`eh_host_port_power.c`: *"CP reset is its EN pin: LOW asserts reset,
+HIGH runs it"*). 2.x with `ACTIVE_HIGH=y` emitted the same three levels
+on the same pin, so dropping the key changes nothing electrically on the
+Waveshare boards.
+
+A 3.x host is back-compatible with 0.0.6+/1.x/2.x co-processor firmware, so
+the C6 slaves do not need reflashing. One consequence to know about: a slave
+that predates the `ESP_PRIV_FIRMWARE_VERSION` handshake TLV reports no version
+at all, which is why the boot log says `Co-proc [0.0.0]` on a board whose link
+is perfectly healthy. The version is only readable over RPC
+(`esp_hosted_get_coprocessor_fwversion()`), so on such a slave there is no way
+to learn it — the handshake carries nothing and the RPC the slave would answer
+with times out.
+
 ## mDNS
 
 The responder moved to [`espos_net`](net.md#mdns) with the network seam,
@@ -285,7 +328,7 @@ route, and the knobs are `CONFIG_ESPOS_NET_MDNS` and
   pinout in `sdkconfig.d/espos.defaults.esp32p4`). Same `esp_wifi_*` API; the MAC is
   read from the driver, not eFuse.
 
-  Three settings on that transport are load-bearing, all pinned in
+  Four settings on that transport are load-bearing, all pinned in
   `sdkconfig.d/espos.defaults.esp32p4`:
 
   * **`CONFIG_WIFI_RMT_RX_BA_WIN=6`.** IDF defaults this to 6 but raises it
@@ -300,11 +343,17 @@ route, and the knobs are `CONFIG_ESPOS_NET_MDNS` and
     repeated ~30 KB HTTP reads: wedged after 85 requests at 16, survived
     400 at 6. Note the knob is `WIFI_RMT_*` — with hosted WiFi the radio is
     remote, so the local `ESP_WIFI_RX_BA_WIN` does not reach it.
-  * **`CONFIG_ESP_HOSTED_SDIO_OPTIMIZATION_RX_STREAMING_MODE=y` must stay
+  * **`CONFIG_ESP_HOSTED_HOST_SDIO_RX_STREAMING_MODE=y` must stay
     on.** The C6 slave firmware is fixed in streaming mode and the host has
     to match, or the transport asserts at boot: *"SDIO mode mismatch: slave
     is in streaming mode, but host is in packet mode. Aborting."*
-  * **`CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM=y`.** The transport mempool
+  * **`CONFIG_ESP_HOSTED_HOST_FEAT_HEARTBEAT=y`.** The co-processor
+    heartbeat is the only evidence the host has that the link is alive, so
+    the watchdog described above is built on it; esp_hosted 3.x made the
+    feature opt-in and defaults it off, which leaves
+    `esp_hosted_configure_heartbeat()` out of the build and the watchdog
+    with nothing to watch.
+  * **`CONFIG_EH_HOST_PORT_DMA_PREFER_SPIRAM=y`.** The transport mempool
     is the transport's large DMA buffer pool; left in internal RAM
     (the default) it is the biggest `MALLOC_CAP_INTERNAL|DMA` consumer on
     the host, and sustained inbound TCP (measured with ~270 KB/s of
@@ -328,6 +377,7 @@ route, and the knobs are `CONFIG_ESPOS_NET_MDNS` and
   out), an application that must survive it unattended should reboot on
   its own liveness signal — real traffic, not `ESPOS_WIFI_ST_CONNECTED`,
   which keeps reporting success.
+
 * The state machine posts nothing itself: on every status change
   `espos_wifi.c` queues a report for `espos_net` and delivers it from the
   drainer, outside the SM lock (`espos_net_report()` takes its own lock and

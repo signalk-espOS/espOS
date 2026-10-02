@@ -30,7 +30,10 @@
 
 #include "sdkconfig.h"
 
-#if defined(CONFIG_ESP_HOSTED_ENABLED)
+/* esp_hosted 3.x: the component's own enable is CONFIG_ESP_HOSTED (2.x spelled
+ * it CONFIG_ESP_HOSTED_ENABLED). Getting this wrong compiles the whole file
+ * away without a word -- the watchdog simply stops existing. */
+#if defined(CONFIG_ESP_HOSTED)
 
 #include "espos_wifi.h"
 
@@ -120,10 +123,10 @@ static void on_hosted_event(void *arg, esp_event_base_t base, int32_t id, void *
     }
     case ESP_HOSTED_EVENT_TRANSPORT_FAILURE:
         /* esp_hosted found the fault itself. With
-         * CONFIG_ESP_HOSTED_TRANSPORT_RESTART_ON_FAILURE=y it restarts
+         * CONFIG_ESP_HOSTED_HOST_TRANSPORT_RESTART_ON_FAILURE=y it restarts
          * the system and we never get here; with it disabled, recover
          * now instead of waiting out the heartbeat timeout. */
-        /* With CONFIG_ESP_HOSTED_TRANSPORT_RESTART_ON_FAILURE=y (the
+        /* With CONFIG_ESP_HOSTED_HOST_TRANSPORT_RESTART_ON_FAILURE=y (the
          * default espOS keeps) esp_hosted restarts the system itself and
          * we never reach here. With it disabled, act now rather than
          * waiting out the heartbeat timeout. */
@@ -222,9 +225,9 @@ uint32_t espos_wifi_hosted_recoveries(void)
     return 0;
 }
 
-#endif /* CONFIG_ESP_HOSTED_ENABLED */
+#endif /* CONFIG_ESP_HOSTED */
 
-#if !defined(CONFIG_ESP_HOSTED_ENABLED)
+#if !defined(CONFIG_ESP_HOSTED)
 
 /* Native-radio and simulator builds: the API exists so callers never
  * need an #ifdef, but there is no co-processor to watch. */

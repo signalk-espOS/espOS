@@ -115,17 +115,34 @@ here — or a C6, S3 or ESP32, which build and are expected to work but have not
 run on hardware.
 
 **ESP32-P4**: no radio at all. Bluedroid's HCI is routed at an ESP32-C6
-co-processor over esp_hosted's SDIO transport
-(`CONFIG_ESP_HOSTED_ENABLE_BT_BLUEDROID` + `..._HCI_VHCI`, with
-`CONFIG_BT_CONTROLLER_DISABLED`). Three things about that path are easy to
-get wrong:
+co-processor over esp_hosted's SDIO transport (`CONFIG_ESP_HOSTED_HOST_FEAT_BT`
+plus the IDF stack you already select, `CONFIG_BT_BLUEDROID_ENABLED`, with
+`CONFIG_BT_CONTROLLER_DISABLED`). esp_hosted 3.0 removed the 2.x keys
+`CONFIG_ESP_HOSTED_ENABLE_BT_BLUEDROID` and `..._BLUEDROID_HCI_VHCI` — see the
+[key table](wifi.md#esp_hosted-2x--3x-key-names) — and moved the stack glue out
+of the hosted core into an adapter the application binds once:
 
-1. **Order is load-bearing.** The remote controller must be initialised *and
-   enabled* before `esp_bluedroid_attach_hci_driver()`, because enabling it is
-   what populates the driver's function pointers. Attaching first faults on
-   the first call through them, and the `BT_HCI: command_timed_out opcode:
-   0xc03` (HCI_Reset) that follows is a symptom of the host crash, not an
-   independent fault.
+```c
+esp_hosted_init();
+esp_hosted_connect_to_slave();
+esp_hosted_bt_host_stack_cfg_t cfg = ESP_HOSTED_BT_HOST_STACK_CONFIG_BLUEDROID();
+esp_hosted_bt_host_stack_setup(&cfg);   /* controller up + HCI bound */
+esp_bluedroid_init();                   /* the app still owns the stack */
+esp_bluedroid_enable();
+```
+
+`espos_ble` does this for you in `controller_up()`. Three things about that path
+are easy to get wrong:
+
+1. **Order is load-bearing — and now upstream's job.** The remote controller
+   must be initialised *and enabled* before the HCI driver is attached, because
+   enabling it is what populates the driver's function pointers. Attaching
+   first faults on the first call through them, and the `BT_HCI:
+   command_timed_out opcode: 0xc03` (HCI_Reset) that follows is a symptom of
+   the host crash, not an independent fault. espOS hand-rolled that sequence
+   through 0.13.x; `esp_hosted_bt_host_stack_setup()` now owns it and adds the
+   bounded wait for the co-processor's controller that the hand-rolled version
+   never had.
 2. **BLE 4.2, not 5.0.** The C6 slave's HCI bridge does not correctly forward
    BLE 5.0 extended HCI commands over SDIO; legacy scan is the working path.
 3. **Passive scan.** Active scan needs the C6 to transmit SCAN_REQ over SDIO,

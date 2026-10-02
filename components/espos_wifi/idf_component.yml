@@ -68,7 +68,7 @@ dependencies:
   # esp_hosted, and the co-processor watchdog includes its headers on that
   # target. Same pin as espos_ble.
   espressif/esp_hosted:
-    version: "^2.12.0"
+    version: "^3.0.9"
     rules:
       - if: "target == esp32p4"
   # esp_hosted's own manifest declares only idf, so the Wi-Fi API shim that
