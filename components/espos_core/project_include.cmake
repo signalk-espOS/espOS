@@ -108,6 +108,24 @@ if(CONFIG_IDF_TARGET STREQUAL "esp32p4")
         "ESP_HOSTED_ENABLE_BT_NIMBLE|ESP_HOSTED_HOST_FEAT_BT"
         "ESP_HOSTED_NIMBLE_HCI_VHCI|BT_NIMBLE_ENABLED")
 
+    # Removed in 3.x with no successor, so "set this instead" is the wrong
+    # advice. Reset polarity is no longer configurable: 3.x always drives
+    # park-high / 10 ms low / park-high (eh_host_port_power.c, "CP reset is
+    # its EN pin: LOW asserts reset, HIGH runs it"). That is the waveform
+    # 2.x produced from ACTIVE_HIGH, so a board on ACTIVE_HIGH is unaffected
+    # -- but a board that needed the other polarity has no knob any more and
+    # its co-processor will not come out of reset, which is a hardware fact
+    # no sdkconfig line can fix. Say so instead of silently dropping it.
+    set(_espos_hosted_removed
+        "ESP_HOSTED_SDIO_RESET_ACTIVE_HIGH"
+        "ESP_HOSTED_SDIO_RESET_ACTIVE_LOW"
+        "ESP_HOSTED_SPI_RESET_ACTIVE_HIGH"
+        "ESP_HOSTED_SPI_RESET_ACTIVE_LOW"
+        "ESP_HOSTED_SPI_HD_RESET_ACTIVE_HIGH"
+        "ESP_HOSTED_SPI_HD_RESET_ACTIVE_LOW"
+        "ESP_HOSTED_UART_RESET_ACTIVE_HIGH"
+        "ESP_HOSTED_UART_RESET_ACTIVE_LOW")
+
     # Mirror kconfig.cmake's own resolution: every entry of SDKCONFIG_DEFAULTS
     # plus its .<target> sibling, or the project's sdkconfig.defaults when the
     # variable is unset.
@@ -126,6 +144,16 @@ if(CONFIG_IDF_TARGET STREQUAL "esp32p4")
             continue()
         endif()
         file(STRINGS "${_f}" _lines REGEX "^CONFIG_[A-Z0-9_]+=")
+        foreach(_gone IN LISTS _espos_hosted_removed)
+            foreach(_line IN LISTS _lines)
+                if(_line MATCHES "^CONFIG_${_gone}=")
+                    _espos_lint_report(
+                        "${_f} sets CONFIG_${_gone}. esp_hosted 3.x removed it with no replacement: reset polarity is fixed at park-high / 10 ms low / park-high, which is what 2.x produced from ACTIVE_HIGH. On a board that needed the opposite polarity the co-processor will not come out of reset and no sdkconfig line can change that."
+                        "(delete the CONFIG_${_gone} line; if your board needed the opposite polarity, check its reset line against esp_hosted 3.x's fixed sequence)")
+                endif()
+            endforeach()
+        endforeach()
+
         foreach(_pair IN LISTS _espos_hosted_renames)
             string(REPLACE "|" ";" _p "${_pair}")
             list(GET _p 0 _old)
@@ -275,6 +303,10 @@ if(_espos_lint_problems)
         "${_espos_lint_fix}")
 endif()
 
+unset(_espos_hosted_renames)
+unset(_espos_hosted_removed)
+unset(_espos_defaults_files)
+unset(_espos_defaults_seed)
 unset(_espos_lint_fix)
 unset(_espos_lint_problems)
 unset(_espos_lint_lines)

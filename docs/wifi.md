@@ -276,7 +276,7 @@ and fails the configure rather than letting that reach a device.
 | `CONFIG_ESP_HOSTED_SDIO_4_BIT_BUS` | `CONFIG_ESP_HOSTED_HOST_SDIO_BUS_WIDTH_4` |
 | `CONFIG_ESP_HOSTED_SDIO_PIN_{CLK,CMD,D0..D3}` | `CONFIG_ESP_HOSTED_HOST_SDIO_PIN_{CLK,CMD,D0..D3}` |
 | `CONFIG_ESP_HOSTED_SDIO_GPIO_RESET_SLAVE` | `CONFIG_ESP_HOSTED_HOST_RESET_GPIO` |
-| `CONFIG_ESP_HOSTED_SDIO_RESET_ACTIVE_HIGH` | *(gone — see below)* |
+| `CONFIG_ESP_HOSTED_{SDIO,SPI,SPI_HD,UART}_RESET_ACTIVE_{HIGH,LOW}` | *(removed, no replacement — see below)* |
 | `CONFIG_ESP_HOSTED_SDIO_CLOCK_FREQ_KHZ` | `CONFIG_ESP_HOSTED_HOST_SDIO_CLK_KHZ` |
 | `CONFIG_ESP_HOSTED_SDIO_OPTIMIZATION_RX_STREAMING_MODE` | `CONFIG_ESP_HOSTED_HOST_SDIO_RX_STREAMING_MODE` |
 | `CONFIG_ESP_HOSTED_SLAVE_RESET_ON_EVERY_HOST_BOOTUP` | `CONFIG_ESP_HOSTED_HOST_CP_RESET_STRATEGY_ALWAYS` |
@@ -290,7 +290,11 @@ Reset polarity is no longer configurable: 3.x hardcodes the pulse the
 (`eh_host_port_power.c`: *"CP reset is its EN pin: LOW asserts reset,
 HIGH runs it"*). 2.x with `ACTIVE_HIGH=y` emitted the same three levels
 on the same pin, so dropping the key changes nothing electrically on the
-Waveshare boards.
+Waveshare boards — which is why espOS's P4 fragment simply loses the line.
+A board that needed the **opposite** polarity has no knob any more, and
+its co-processor will not come out of reset; that is a hardware fact, not
+a configuration one, so the lint says so rather than suggesting a
+replacement key.
 
 A 3.x host is back-compatible with 0.0.6+/1.x/2.x co-processor firmware, so
 the C6 slaves do not need reflashing. One consequence to know about: a slave

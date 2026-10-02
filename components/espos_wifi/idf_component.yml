@@ -68,7 +68,12 @@ dependencies:
   # esp_hosted, and the co-processor watchdog includes its headers on that
   # target. Same pin as espos_ble.
   espressif/esp_hosted:
-    version: "^3.0.9"
+    version: "==3.0.9"
+    # Exact, not a range: 3.0 renamed fourteen host-side Kconfig keys,
+    # and IDF drops an assignment to a symbol that no longer exists
+    # without a word -- so a minor bump that renames again gives a P4
+    # with no WiFi and no build error (docs/wifi.md). The weekly
+    # registry-smoke workflow is where a newer version gets tried.
     rules:
       - if: "target == esp32p4"
   # esp_hosted's own manifest declares only idf, so the Wi-Fi API shim that
