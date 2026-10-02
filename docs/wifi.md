@@ -125,7 +125,10 @@ on a device that has been up a while is immediately.
 `espos_wifi_portal_open(bool)` lets an application decide for itself — a key
 switch, a hatch sensor, a commissioning mode. It is not persisted, so a reboot
 forgets it, and it does not override `portal_enabled = false`: an operator who
-turned the access point off keeps it off.
+turned the access point off keeps it off. Holding it **up** is not instant: the
+request waits for any association already in flight, for the reason the
+deadline does (above), so on a device cycling through attempts the access point
+appears when the current one ends.
 
 SSID `portal_ssid` (default `espOS-<id>`, the device id being the last 4 hex
 of the base MAC, [net.md](net.md)), open unless

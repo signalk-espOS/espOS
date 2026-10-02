@@ -46,6 +46,13 @@ esp_err_t espos_wifi_stop(void);
  * access point off keeps it off. ESP_ERR_INVALID_STATE before
  * espos_wifi_start().
  *
+ * Holding it UP is not instant: the request waits for any station association
+ * already in flight to finish, because switching the radio to AP+STA inside an
+ * attempt is measurably worse than between attempts (espOS #144). The wait is
+ * bounded by the attempt rather than by its success, so a device that never
+ * connects still gets its access point -- but a caller that expects the AP the
+ * moment this returns will be surprised.
+ *
  * Holding it DOWN takes away the way back into a device whose key is lost
  * (docs/security.md), so an application that does this should offer its own.
  */
