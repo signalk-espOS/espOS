@@ -183,13 +183,15 @@ shipped tables; a project with its own partition table passes its own.
   "ip": "192.168.1.23", "netmask": "255.255.255.0", "gateway": "192.168.1.1", "connected_s": 26,
   "reason": {"code": 0, "text": ""},
   "attempt": 0, "round": 0, "connect_count": 1, "disconnect_count": 0,
-  "portal": {"active": false, "ssid": "espOS-1a2b"}
+  "portal": {"active": false, "ssid": "espOS-1a2b", "force": "auto"}
 }
 ```
 
 `ssid/bssid/channel/rssi` appear from `obtaining_ip` on, `ip/netmask/gateway/
 connected_s` only in `connected`, `backoff_ms` only in `backoff`, `portal.ip`
-and `portal.clients` only while the portal is active. `hostname` is
+and `portal.clients` only while the portal is active. `portal.force` is always
+present — it says what was *asked* for, which is just as meaningful when the
+answer is no access point. `hostname` is
 `net.hostname` as `espos_net` applied it at boot. The same document is
 pushed as the `wifi` SSE event on every change (and once on connect). The
 transport-neutral view — is there a route, on which interface, with which

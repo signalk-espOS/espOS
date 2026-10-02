@@ -82,7 +82,7 @@ export function startMock(port = 8484) {
   const wifi = {
     state: "unconfigured", sta_enabled: true, hostname: "espos-1a2b", reason: { code: 0, text: "" },
     connect_count: 0, disconnect_count: 0, attempt: 0,
-    portal: { active: true, ssid: "espOS-1a2b", ip: "192.168.4.1", clients: 0 },
+    portal: { active: true, ssid: "espOS-1a2b", force: "auto", ip: "192.168.4.1", clients: 0 },
   };
   let wifiTimer = null;
   const wifiEmit = () => emit("wifi", wifiStatus());
