@@ -105,9 +105,7 @@ if(CONFIG_IDF_TARGET STREQUAL "esp32p4")
         "ESP_HOSTED_MEMPOOL_PREFER_SPIRAM|EH_HOST_PORT_DMA_PREFER_SPIRAM"
         "ESP_HOSTED_TRANSPORT_RESTART_ON_FAILURE|ESP_HOSTED_HOST_TRANSPORT_RESTART_ON_FAILURE"
         "ESP_HOSTED_ENABLE_BT_BLUEDROID|ESP_HOSTED_HOST_FEAT_BT"
-        "ESP_HOSTED_BLUEDROID_HCI_VHCI|BT_BLUEDROID_ENABLED"
-        "ESP_HOSTED_ENABLE_BT_NIMBLE|ESP_HOSTED_HOST_FEAT_BT"
-        "ESP_HOSTED_NIMBLE_HCI_VHCI|BT_NIMBLE_ENABLED")
+        "ESP_HOSTED_ENABLE_BT_NIMBLE|ESP_HOSTED_HOST_FEAT_BT")
 
     # Removed in 3.x with no successor, so "set this instead" is the wrong
     # advice. Reset polarity is no longer configurable: 3.x always drives
@@ -117,7 +115,14 @@ if(CONFIG_IDF_TARGET STREQUAL "esp32p4")
     # -- but a board that needed the other polarity has no knob any more and
     # its co-processor will not come out of reset, which is a hardware fact
     # no sdkconfig line can fix. Say so instead of silently dropping it.
+    # The HCI-transport knobs went the same way: 3.x binds the stack through
+    # esp_hosted_bt_host_stack_setup() and takes the stack from the IDF BT
+    # Kconfig the project already sets, so there is nothing to put in their
+    # place -- CONFIG_BT_{BLUEDROID,NIMBLE}_ENABLED is a selector the project
+    # has, not a replacement for these.
     set(_espos_hosted_removed
+        "ESP_HOSTED_BLUEDROID_HCI_VHCI"
+        "ESP_HOSTED_NIMBLE_HCI_VHCI"
         "ESP_HOSTED_SDIO_RESET_ACTIVE_HIGH"
         "ESP_HOSTED_SDIO_RESET_ACTIVE_LOW"
         "ESP_HOSTED_SPI_RESET_ACTIVE_HIGH"
@@ -149,8 +154,8 @@ if(CONFIG_IDF_TARGET STREQUAL "esp32p4")
             foreach(_line IN LISTS _lines)
                 if(_line MATCHES "^CONFIG_${_gone}=")
                     _espos_lint_report(
-                        "${_f} sets CONFIG_${_gone}. esp_hosted 3.x removed it with no replacement: reset polarity is fixed at park-high / 10 ms low / park-high, which is what 2.x produced from ACTIVE_HIGH. On a board that needed the opposite polarity the co-processor will not come out of reset and no sdkconfig line can change that."
-                        "(delete the CONFIG_${_gone} line; if your board needed the opposite polarity, check its reset line against esp_hosted 3.x's fixed sequence)")
+                        "${_f} sets CONFIG_${_gone}, which esp_hosted 3.x removed with NO replacement. Reset polarity is now fixed at park-high / 10 ms low / park-high -- what 2.x produced from ACTIVE_HIGH -- so a board that needed the opposite polarity will not bring its co-processor out of reset, and no sdkconfig line can change that. The HCI-transport knobs are gone because the stack is bound by esp_hosted_bt_host_stack_setup() and chosen by the IDF BT Kconfig (docs/ble.md)."
+                        "(delete the CONFIG_${_gone} line)")
                 endif()
             endforeach()
         endforeach()

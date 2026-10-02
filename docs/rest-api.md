@@ -236,6 +236,23 @@ warning `esp_hosted` logs; a patch-level difference is not stale, and a host
 `stale: true` is also raised as the `coprocessorStale` health condition
 ([hardware.md](hardware.md#updating-the-c6-co-processor-firmware)).
 
+The accessors that read those TLVs are not on the include path `esp_hosted`
+declares — they arrive transitively, which upstream could tighten
+([esp-hosted-mcu#251](https://github.com/espressif/esp-hosted-mcu/issues/251)) —
+so `espos_wifi` guards the include and keeps the RPC as a fallback. **The
+fallback fills the same four fields but not with the same meaning**, and a
+build that takes it is worth knowing about:
+
+| | TLV path (what espOS ships) | RPC fallback |
+| --- | --- | --- |
+| source | `EH_PRIV_FIRMWARE_VER` / chip-id TLVs from the handshake, already in host RAM | `esp_hosted_get_coprocessor_fwversion()` + `esp_hosted_get_cp_info()` |
+| when | from the first co-processor heartbeat, once | retried up to 5× then every 5 min until one succeeds |
+| `stale` | `esp_hosted`'s verdict, patch differences excluded | espOS comparing major.minor itself |
+| if the co-processor will not answer | reports `0.0.0`, which is the fact | the whole `coprocessor` object stays **absent** |
+
+Both are honest; the TLV path is the one that still answers when the
+co-processor is the problem.
+
 `hardware` answers "which board is this", which matters once there is more than
 one on the bench. Most of it is read from the chip; `cpu_mhz` is what the build
 asked for and `board` is what the firmware declared, so neither is a live

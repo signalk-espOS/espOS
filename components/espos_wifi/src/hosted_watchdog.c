@@ -252,9 +252,14 @@ static void cp_fetch_once(void)
  * picked up while somebody is still looking at the device. */
 #define CP_RETRY_QUIET_MS (5 * 60 * 1000)
 
-/* Touched only on the default event loop and by the worker it starts, so these
- * need no lock -- unlike s_cp, which crosses to the httpd task. */
-static bool s_cp_task_started;
+/* Set on the default event loop and cleared by the worker it starts, so two
+ * tasks touch s_cp_task_started. volatile, not locked: the only transition the
+ * worker makes is true->false and the only one the loop makes is false->true
+ * under its own gate, so the worst a torn read can cost is one skipped or one
+ * extra query -- and the query is idempotent. s_cp_last_try_ms is the event
+ * loop's alone. (s_cp itself crosses to the httpd task and does take the
+ * spinlock.) */
+static volatile bool s_cp_task_started;
 static uint32_t s_cp_last_try_ms;
 
 static void cp_fetch_once(void)

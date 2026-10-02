@@ -94,6 +94,22 @@ typedef struct {
 } espos_httpd_coproc_t;
 
 /**
+ * Fill `out` with the co-processor's identity; false when there is none to
+ * report. Weakly defined in espos_httpd and overridden by whichever component
+ * owns the transport (espos_wifi on a hosted target).
+ *
+ * Declared here so the weak stub and the strong definition are checked against
+ * one prototype: the linker accepts a mismatched pair in silence, and a hook
+ * whose object was never pulled in resolves to the stub just as silently --
+ * which is how espos_time's wallclock hook shipped broken (espOS #49). Verify
+ * the override with `nm` (T, not W) as well.
+ *
+ * Called on the httpd task; the implementation must not block on the
+ * co-processor.
+ */
+bool espos_httpd_coprocessor_hook(espos_httpd_coproc_t *out);
+
+/**
  * Exempt requests arriving on the setup access point from the API key for
  * `seconds`, as proof that somebody is at the device. 0 closes the window.
  *

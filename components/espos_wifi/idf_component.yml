@@ -83,6 +83,13 @@ dependencies:
     version: "*"
     rules:
       - if: "target == esp32p4"
+  # The hosted watchdog reports a stale co-processor as a standing health
+  # condition (espOS #164). No cycle: espos_health requires none of ours.
+  signalk-espos/espos_health:
+    # x-release-please-start-version
+    version: "^0.13.0"
+    # x-release-please-end
+    override_path: "../espos_health"
   signalk-espos/espos_event:
     # x-release-please-start-version
     version: "^0.13.0"

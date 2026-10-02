@@ -300,10 +300,12 @@ A 3.x host is back-compatible with 0.0.6+/1.x/2.x co-processor firmware, so
 the C6 slaves do not need reflashing. One consequence to know about: a slave
 that predates the `ESP_PRIV_FIRMWARE_VERSION` handshake TLV reports no version
 at all, which is why the boot log says `Co-proc [0.0.0]` on a board whose link
-is perfectly healthy. The version is only readable over RPC
-(`esp_hosted_get_coprocessor_fwversion()`), so on such a slave there is no way
-to learn it — the handshake carries nothing and the RPC the slave would answer
-with times out.
+is perfectly healthy — and why espOS reads the version out of the handshake
+TLVs rather than through `esp_hosted_get_coprocessor_fwversion()`, which is an
+RPC the same slave does not answer. `hardware.coprocessor` in
+[`GET /api/v1/system/info`](rest-api.md) and the `coprocessorStale` health
+condition report it; `0.0.0` there means "present, answering, silent about its
+version", which is a different fact from the field being absent.
 
 ## mDNS
 

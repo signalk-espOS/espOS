@@ -141,7 +141,7 @@ Everything espOS knows about that transport is in
 `sdkconfig.d/espos.defaults.esp32p4`, which every P4 build inherits:
 
 * **SDIO pinout** for the Waveshare family: slot 1, 4-bit bus, `CLK` 18,
-  `CMD` 19, `D0..D3` 14–17, C6 reset on GPIO 54 (active high), 40 MHz.
+  `CMD` 19, `D0..D3` 14–17, C6 reset on GPIO 54, 40 MHz.
   Another P4 board changes these lines in its own `sdkconfig.defaults`.
 * **Three load-bearing settings**, explained in [WiFi → Design
   notes](wifi.md#design-notes): the receive block-ack window
@@ -172,8 +172,8 @@ E transport: major version mismatch — OTA coprocessor from host
 ```
 
 `0.0.0` means the slave's init event carried no `ESP_PRIV_FIRMWARE_VERSION`
-TLV — an image old enough not to announce itself. Since espOS 0.14 the same
-facts are readable at any time as `hardware.coprocessor` in
+TLV — an image old enough not to announce itself. The same facts are also
+readable at any time as `hardware.coprocessor` in
 `GET /api/v1/system/info`, and raised as the `coprocessorStale` health
 condition, because the lines above are the only other evidence and a device
 that has been up for days has lost them to the log ring.

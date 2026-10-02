@@ -192,12 +192,17 @@ class ApiTests(unittest.TestCase):
                   "free_internal", "min_internal_free", "reset_reason",
                   "config_storage_reset", "schema_etag"):
             self.assertIn(k, js, k)
-        # The co-processor object is absent on a target that has no radio
-        # co-processor -- which the host is, so the weak hook answers false
-        # here. Asserted rather than assumed: a strong definition that returned
-        # false would look identical to the stub and would hide a link that
-        # never pulled it in, which is how the wallclock hook (#49) shipped
-        # broken. "hardware" itself is absent on the host for the same reason.
+        # The whole "hardware" object is absent on the host: nothing in it is
+        # meaningful there and an object full of zeros would be worse than its
+        # absence (add_hardware() in api_system.c). That is all this asserts.
+        #
+        # It is NOT a check that the co-processor hook linked: on linux
+        # hosted_watchdog.c compiles its no-co-processor branch, so no strong
+        # definition exists to pull in and only the weak stub is ever called.
+        # A hook whose object the linker never pulled in resolves to the stub
+        # in silence -- which is how espos_time's wallclock hook shipped broken
+        # (#49) -- and the only thing that catches it is `nm` on a device
+        # image: T, not W. Done for this hook on an esp32p4 build.
         self.assertNotIn("hardware", js)
         # free_internal/min_internal_free are the live and low-water halves of one
         # measurement, and min_internal_free is what memoryTrough is raised from;

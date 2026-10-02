@@ -179,11 +179,12 @@ static esp_err_t controller_up(void)
      * sequence never had -- so a slave that is slow to bring BT up is a
      * retry rather than a fault.
      *
-     * The stack is picked from CONFIG_BT_BLUEDROID_ENABLED by
-     * ESP_HOSTED_BT_HOST_STACK_CONFIG_DEFAULT(); there is no hosted-side
-     * stack knob any more. This whole file is inside a
-     * #if defined(CONFIG_BT_BLUEDROID_ENABLED), so the default cannot
-     * silently resolve to CUSTOM. */
+     * There is no hosted-side stack knob any more: 3.x picks the stack from
+     * the IDF BT Kconfig. The _CONFIG_BLUEDROID() initialiser is used rather
+     * than _CONFIG_DEFAULT() because the latter resolves to CUSTOM when
+     * neither BT stack is enabled, and a silent CUSTOM binding would be a
+     * gateway that scans nothing. Naming the stack makes the mismatch a
+     * compile-time fact instead. */
     ESP_RETURN_ON_ERROR(esp_hosted_init(), TAG, "esp_hosted_init");
     ESP_RETURN_ON_ERROR(esp_hosted_connect_to_slave(), TAG, "connect_to_slave");
 
