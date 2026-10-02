@@ -249,6 +249,7 @@ build that takes it is worth knowing about:
 | when | from the first co-processor heartbeat, once | retried up to 5× then every 5 min until one succeeds |
 | `stale` | `esp_hosted`'s verdict, patch differences excluded | espOS comparing major.minor itself |
 | if the co-processor will not answer | reports `0.0.0`, which is the fact | the whole `coprocessor` object stays **absent** |
+| `target` | from the chip-id TLV | from a second RPC, so it can be missing while the rest is present |
 
 Both are honest; the TLV path is the one that still answers when the
 co-processor is the problem.

@@ -260,14 +260,17 @@ static void cp_fetch_once(void)
  * picked up while somebody is still looking at the device. */
 #define CP_RETRY_QUIET_MS (5 * 60 * 1000)
 
-/* Set on the default event loop and cleared by the worker it starts, so two
- * tasks touch s_cp_task_started. volatile, not locked: the only transition the
- * worker makes is true->false and the only one the loop makes is false->true
- * under its own gate, so the worst a torn read can cost is one skipped or one
- * extra query -- and the query is idempotent. s_cp_last_try_ms is the event
- * loop's alone. (s_cp itself crosses to the httpd task and does take the
- * spinlock.) */
-static volatile bool s_cp_task_started;
+/* Both written and read ONLY on the default event loop, which is one task, so
+ * they need no synchronisation at all -- and that is a property of the design,
+ * not an assumption: the worker does not clear the gate.
+ *
+ * An earlier shape had the worker clear it on giving up. That left two tasks
+ * writing one flag, and a worker clearing it just as the loop was testing it
+ * could let a second worker start beside the first. Letting the retry window
+ * do the job instead removes the second writer: the worker makes at most
+ * 5 attempts 2 s apart, ~10 s, so by the time CP_RETRY_QUIET_MS has elapsed it
+ * is long gone and the loop can safely treat the gate as free. */
+static bool s_cp_task_started;
 static uint32_t s_cp_last_try_ms;
 
 static void cp_fetch_once(void)
@@ -366,32 +369,31 @@ static void cp_fetch_task(void *arg)
         portEXIT_CRITICAL(&s_cp_mux);
     }
     if (!known) {
-        /* Released rather than left latched, so a later heartbeat may try
-         * again: a slave whose RPC server is slow to come up would otherwise
-         * leave the field absent for the life of the boot on a device that is
-         * perfectly healthy. CP_RETRY_QUIET_MS keeps that from becoming a query
-         * on every beat. */
+        /* Only logged. The gate is NOT cleared here -- see s_cp_task_started.
+         * A later heartbeat retries once CP_RETRY_QUIET_MS has passed, so a
+         * slave whose RPC server is merely slow to come up does not leave the
+         * field absent for the life of the boot. */
         ESP_LOGW(TAG, "co-processor did not report its firmware version; retrying later");
-        s_cp_task_started = false;
     }
     vTaskDelete(NULL);
 }
 
-/* Gated on s_cp_task_started alone: s_cp lives behind a lock for the httpd
- * task's sake, and reading its flag here unlocked would be the one
- * unsynchronised access in the file. The worker clears the gate when it gives
- * up, and it is never set again once the answer is in, because the worker exits
- * having set s_cp_known. */
+/* Starts at most one worker, and at most one per CP_RETRY_QUIET_MS after that.
+ * The elapsed-time test is what frees the gate, so the worker never writes it
+ * and this stays a single-task function. s_cp_known is not consulted here: it
+ * lives behind a lock for the httpd task's sake and the worker checks it
+ * anyway, so a redundant kick costs one task that returns immediately. */
 static void cp_fetch_kick(void)
 {
     const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
-    if (s_cp_task_started || (s_cp_last_try_ms != 0 && now_ms - s_cp_last_try_ms < CP_RETRY_QUIET_MS)) {
+    if (s_cp_task_started && now_ms - s_cp_last_try_ms < CP_RETRY_QUIET_MS) {
         return;
     }
+    s_cp_last_try_ms = now_ms;
     s_cp_task_started = true;
-    s_cp_last_try_ms = now_ms ? now_ms : 1;
     if (xTaskCreate(cp_fetch_task, "cpver", 4096, NULL, 3, NULL) != pdPASS) {
-        /* Cleared, or one failed allocation would be permanent. */
+        /* Cleared, or one failed allocation would latch the gate for ever.
+         * Safe here: this is the only writer. */
         ESP_LOGW(TAG, "could not start the co-processor version query");
         s_cp_task_started = false;
     }
