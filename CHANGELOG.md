@@ -15,6 +15,28 @@ pull request. The `[Unreleased]` block below was written by hand before the
 switch; its entries belong to the next feature release and are folded into
 that section when it is cut.
 
+## [0.13.0](https://github.com/signalk-espOS/espOS/compare/v0.12.1...v0.13.0) (2026-10-02)
+
+
+### ⚠ BREAKING CHANGES
+
+* **wifi:** no setup access point while another transport has the network ([#162](https://github.com/signalk-espOS/espOS/issues/162))
+* **httpd:** stop exempting the setup access point once an API key is set ([#159](https://github.com/signalk-espOS/espOS/issues/159))
+
+### Added
+
+* reusable workflow to release a firmware and mirror it for browsers ([#152](https://github.com/signalk-espOS/espOS/issues/152)) ([9e48c4a](https://github.com/signalk-espOS/espOS/commit/9e48c4a71286a4780c69fd545e72f21f1a53ef01))
+* **ui:** move to Vite 8, type-check in dev, and lint with types ([#155](https://github.com/signalk-espOS/espOS/issues/155)) ([a129ee3](https://github.com/signalk-espOS/espOS/commit/a129ee36317e25e6e60097d195c8ab9402acd7a8))
+* **wifi:** no setup access point while another transport has the network ([#162](https://github.com/signalk-espOS/espOS/issues/162)) ([b4bd270](https://github.com/signalk-espOS/espOS/commit/b4bd270f557b477ec8fbb5075ba02ae22be0a945))
+* **wifi:** report the standing portal request, not just its effect ([#165](https://github.com/signalk-espOS/espOS/issues/165)) ([91fc136](https://github.com/signalk-espOS/espOS/commit/91fc136ccdd14aa7aba735f75b4e18c4dcb14f6a))
+
+
+### Fixed
+
+* **ci:** stop release-please writing a file it is not allowed to write ([#160](https://github.com/signalk-espOS/espOS/issues/160)) ([a1f8dcd](https://github.com/signalk-espOS/espOS/commit/a1f8dcd8998f6a632ea34ca7e387a8aa488853b4))
+* **httpd:** stop exempting the setup access point once an API key is set ([#159](https://github.com/signalk-espOS/espOS/issues/159)) ([64affc2](https://github.com/signalk-espOS/espOS/commit/64affc28c64e74acf595e9cce2880db17bb03a83))
+* **n2k:** give every transmitted frame storage the driver can still read ([#157](https://github.com/signalk-espOS/espOS/issues/157)) ([710ab39](https://github.com/signalk-espOS/espOS/commit/710ab39ff6772da4993d0f858144d717dc1156ff))
+
 ## [0.12.1](https://github.com/signalk-espOS/espOS/compare/v0.12.0...v0.12.1) (2026-09-29)
 
 
