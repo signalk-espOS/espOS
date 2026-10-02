@@ -117,8 +117,12 @@ const char *espos_board(void);
  * A binding generated from the headers records the value it was built
  * against and compares it with espos_abi_version() at run time.
  */
-#define ESPOS_ABI_VERSION 6
+#define ESPOS_ABI_VERSION 7
 /* History, so that a binding pinned to an older value can tell what moved:
+ *   7  portal_force moved from espos_wifi_sm_t into espos_wifi_sm_status_t,
+ *      so that GET /api/v1/wifi/status can report it; both sizeof values
+ *      changed. espos_wifi_portal_force_str() is new, which on its own would
+ *      not have needed a bump.
  *   6  espos_wifi_cfg_t gained portal_online and espos_wifi_sm_t gained
  *      other_net_up + portal_force (both appended, sizeof) -- espOS #158.
  *      The portal policy changed with them: see docs/wifi.md.

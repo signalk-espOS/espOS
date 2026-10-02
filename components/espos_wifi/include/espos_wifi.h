@@ -40,7 +40,9 @@ esp_err_t espos_wifi_stop(void);
  * For an application that can tell something espOS cannot -- a hull hatch is
  * open, a key switch is turned, this device is the one being commissioned. Not
  * persisted: a reboot forgets it, and espos_wifi_portal_auto() hands the
- * decision back.
+ * decision back. GET /api/v1/wifi/status reports the current request as
+ * `portal.force`, so an operator can tell an application's decision from the
+ * policy's.
  *
  * It does not override `wifi.portal_enabled`: an operator who turned the
  * access point off keeps it off. ESP_ERR_INVALID_STATE before

@@ -128,7 +128,9 @@ forgets it, and it does not override `portal_enabled = false`: an operator who
 turned the access point off keeps it off. Holding it **up** is not instant: the
 request waits for any association already in flight, for the reason the
 deadline does (above), so on a device cycling through attempts the access point
-appears when the current one ends.
+appears when the current one ends. `GET /api/v1/wifi/status` reports the
+standing request as `portal.force` (`auto`, `up` or `down`), which is the only
+way to tell an application's decision from the policy's.
 
 SSID `portal_ssid` (default `espOS-<id>`, the device id being the last 4 hex
 of the base MAC, [net.md](net.md)), open unless

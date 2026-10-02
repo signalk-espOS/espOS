@@ -853,6 +853,51 @@ TEST_CASE("portal_open(false) holds it down with no network at all", "[wifi_sm][
     TEST_ASSERT_TRUE_MESSAGE(ST()->portal_active, "auto did not hand the decision back");
 }
 
+TEST_CASE("the standing portal request is reported, not just obeyed", "[wifi_sm][othernet]")
+{
+    espos_wifi_cfg_t c = cfg_with(NULL, NULL);
+    reset(&c);
+    espos_wifi_sm_event(&SM, ESPOS_WIFI_EV_START, NULL);
+    /* The request decides whether an access point exists. A reader who cannot
+     * see it cannot tell "the policy declined" from "an application said no",
+     * which are the same `portal_active: false` and need different answers. */
+    TEST_ASSERT_EQUAL(ESPOS_WIFI_PORTAL_AUTO, ST()->portal_force);
+
+    ev_portal_force(ESPOS_WIFI_PORTAL_DOWN);
+    TEST_ASSERT_FALSE(ST()->portal_active);
+    TEST_ASSERT_EQUAL(ESPOS_WIFI_PORTAL_DOWN, ST()->portal_force);
+
+    ev_portal_force(ESPOS_WIFI_PORTAL_UP);
+    TEST_ASSERT_EQUAL(ESPOS_WIFI_PORTAL_UP, ST()->portal_force);
+
+    ev_portal_force(ESPOS_WIFI_PORTAL_AUTO);
+    TEST_ASSERT_EQUAL(ESPOS_WIFI_PORTAL_AUTO, ST()->portal_force);
+}
+
+TEST_CASE("an out-of-range force request is ignored, and reported as such", "[wifi_sm][othernet]")
+{
+    espos_wifi_cfg_t c = cfg_with(NULL, NULL);
+    reset(&c);
+    espos_wifi_sm_event(&SM, ESPOS_WIFI_EV_START, NULL);
+    ev_portal_force(ESPOS_WIFI_PORTAL_DOWN);
+
+    espos_wifi_portal_force_t junk = (espos_wifi_portal_force_t)99;
+    espos_wifi_sm_event(&SM, ESPOS_WIFI_EV_PORTAL_FORCE, &junk);
+    /* Refused rather than stored: a value the string helper cannot name would
+     * be reported as "auto" while behaving like neither. */
+    TEST_ASSERT_EQUAL(ESPOS_WIFI_PORTAL_DOWN, ST()->portal_force);
+}
+
+TEST_CASE("force names round-trip through the string helper", "[wifi_sm]")
+{
+    TEST_ASSERT_EQUAL_STRING("auto", espos_wifi_portal_force_str(ESPOS_WIFI_PORTAL_AUTO));
+    TEST_ASSERT_EQUAL_STRING("up", espos_wifi_portal_force_str(ESPOS_WIFI_PORTAL_UP));
+    TEST_ASSERT_EQUAL_STRING("down", espos_wifi_portal_force_str(ESPOS_WIFI_PORTAL_DOWN));
+    /* Out of range reads as the default rather than as a dangling pointer. */
+    TEST_ASSERT_EQUAL_STRING("auto", espos_wifi_portal_force_str((espos_wifi_portal_force_t)99));
+    TEST_ASSERT_EQUAL_STRING("auto", espos_wifi_portal_force_str(ESPOS_WIFI_PORTAL_FORCE_MAX));
+}
+
 TEST_CASE("portal_open(true) holds it up through a connection", "[wifi_sm][othernet]")
 {
     espos_wifi_cfg_t c = cfg_with("Boat", NULL);

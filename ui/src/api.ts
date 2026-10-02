@@ -82,7 +82,14 @@ export interface WifiStatus {
   sta_enabled: boolean; hostname: string; reason: { code: number; text: string };
   ssid?: string; bssid?: string; rssi?: number; channel?: number; ip?: string; gateway?: string; netmask?: string;
   network_index?: number; backoff_ms?: number; attempt?: number; connect_count?: number; disconnect_count?: number;
-  portal: { active: boolean; ssid: string; ip?: string; clients?: number };
+  portal: {
+    active: boolean;
+    ssid: string;
+    ip?: string;
+    clients?: number;
+    /** what espos_wifi_portal_open() last asked for; absent on firmware before 0.13 */
+    force?: "auto" | "up" | "down";
+  };
 }
 export interface ScanResult { ssid: string; bssid: string; rssi: number; channel: number; auth: string }
 export interface ScanDoc { scanning: boolean; age_s: number | null; results: ScanResult[] }

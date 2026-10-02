@@ -1288,6 +1288,9 @@ class WifiTests(unittest.TestCase):
         self.assertTrue(js["portal"]["active"])
         self.assertEqual(js["portal"]["ssid"], "espOS-1a2b")
         self.assertEqual(js["portal"]["ip"], "192.168.4.1")
+        # Served over HTTP, not merely held in the state machine: "active" alone
+        # cannot distinguish the policy declining from an application saying no.
+        self.assertEqual(js["portal"]["force"], "auto")
         self.assertEqual(js["reason"], {"code": 0, "text": ""})
         self.assertNotIn("ip", js)
 
@@ -1349,6 +1352,7 @@ class WifiTests(unittest.TestCase):
         self.assertEqual(js["network_index"], 0)
         self.assertEqual(js["connect_count"], 1)
         self.assertFalse(js["portal"]["active"])      # portal goes down once connected
+        self.assertEqual(js["portal"]["force"], "auto")  # by the policy, not by a request
         self.assertEqual(js["reason"]["code"], 0)
         # secrets stay secret
         _, _, _, cfg = req("GET", "/api/v1/config?ns=wifi")
