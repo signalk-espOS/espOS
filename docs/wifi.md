@@ -260,7 +260,7 @@ the valuable half.
 
 ## esp_hosted 2.x → 3.x key names
 
-espOS pins `espressif/esp_hosted ^3.0.9`. 3.0 renamed most of the
+espOS pins `espressif/esp_hosted` at exactly `3.0.9`. 3.0 renamed most of the
 host-side Kconfig surface and **removed** the 2.x spellings. IDF leaves
 `KCONFIG_WARN_UNDEF_ASSIGN` off, so an assignment to a symbol that no
 longer exists is dropped without a word: a project carrying its own 2.x
