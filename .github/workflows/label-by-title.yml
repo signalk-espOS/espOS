@@ -1,0 +1,80 @@
+# SPDX-FileCopyrightText: 2026 Dirk Wahrheit
+# SPDX-License-Identifier: Apache-2.0
+#
+# Labels each pull request from its Conventional Commit title, because
+# .github/release.yml sorts the release notes by label and a pull request
+# opened from the command line carries none. The mapping is the one
+# docs/releasing.md describes: feat -> Added, fix and revert -> Fixed, perf
+# and refactor -> Changed, while docs, build, ci, test and chore stay out of
+# the notes. A breaking change -- `!` after the type, or a `BREAKING CHANGE:`
+# line in the description, which becomes the squash commit's body -- goes
+# under Breaking whatever its type.
+#
+# pull_request_target so that a pull request from a fork is labelled too.
+# Only the title and description are read, with no checkout and nothing from
+# the pull request run here, which is what makes that trigger safe.
+name: label by title
+
+on:
+  pull_request_target:
+    types: [opened, edited]
+
+permissions: {}
+
+jobs:
+  label:
+    name: label from the title
+    # `edited` also fires for a base-branch change, which leaves the labels
+    # alone.
+    if: github.event.action != 'edited' || github.event.changes.title || github.event.changes.body
+    # One run per pull request at a time: two overlapping runs would each read
+    # the labels, then each edit, and could leave two managed labels behind.
+    # Set on the job, after the condition above, so that a run the condition
+    # skips cannot cancel one that edits.
+    concurrency:
+      group: label-by-title-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.pull_request.number }}
+          TITLE: ${{ github.event.pull_request.title }}
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          # The labels this workflow owns, one of them at a time, so a title
+          # edited from feat to fix swaps the label rather than adding one. A
+          # type not listed gets none of them and lands under Other.
+          managed="breaking-change enhancement bug changed skip-changelog"
+          conventional='^([a-z]+)(\([^)]*\))?(!?): '
+          type=""; bang=""
+          if [[ "$TITLE" =~ $conventional ]]; then
+            type="${BASH_REMATCH[1]}"; bang="${BASH_REMATCH[3]}"
+          fi
+          case "$type" in
+            feat) wanted=enhancement ;;
+            fix|revert) wanted=bug ;;
+            perf|refactor) wanted=changed ;;
+            docs|build|ci|test|chore) wanted=skip-changelog ;;
+            *) wanted="" ;;
+          esac
+          if [ -n "$bang" ] || grep -qE '^BREAKING[ -]CHANGE: ' <<< "$BODY"; then
+            wanted=breaking-change
+          fi
+          current=$(gh pr view "$NUMBER" --repo "$REPO" --json labels --jq '[.labels[].name] | join(" ")')
+          args=()
+          for label in $managed; do
+            case " $current " in *" $label "*) has=1 ;; *) has=0 ;; esac
+            if [ "$label" = "$wanted" ] && [ "$has" = 0 ]; then args+=(--add-label "$label"); fi
+            if [ "$label" != "$wanted" ] && [ "$has" = 1 ]; then args+=(--remove-label "$label"); fi
+          done
+          if [ "${#args[@]}" = 0 ]; then
+            echo "#$NUMBER '$TITLE': nothing to change (${wanted:-no managed label})"
+          else
+            gh pr edit "$NUMBER" --repo "$REPO" "${args[@]}"
+            echo "#$NUMBER '$TITLE': ${args[*]}"
+          fi

@@ -13,6 +13,11 @@ in docs/ is a stub and this hook substitutes the root file's text at build
 time, rewriting its relative links: one that points into docs/ becomes a
 link to that page, anything else becomes a link to the file on GitHub.
 
+It also links the bare URLs the release notes GitHub generates are written
+with, one for each pull request and one for the full changelog. GitHub
+links those by itself; Python-Markdown leaves them as text. A pull request's
+URL reads `#<number>`, as it does on the release page.
+
 Registered in mkdocs.yml (`hooks:`); PAGES maps a page in docs/ to the root
 file it shows. Standard library only.
 """
@@ -28,6 +33,11 @@ PAGES = {
 # `](target)` of an inline link; reference-style links are not used at the root.
 _LINK = re.compile(r"\]\(([^)\s]+)\)")
 
+# A URL standing on its own after whitespace. One inside a link, an autolink or
+# a reference definition (`[label]: url`) is already a link and is left alone.
+_BARE_URL = re.compile(r"(?<=\s)(?<!\]: )https?://[^\s<>()]+")
+_PULL = re.compile(r"/pull/(\d+)$")
+
 
 def _rewrite(text: str, root_file: str, page_uri: str, repo_url: str) -> str:
     def repl(m: re.Match) -> str:
@@ -42,7 +52,12 @@ def _rewrite(text: str, root_file: str, page_uri: str, repo_url: str) -> str:
             return f"]({posixpath.relpath(resolved[len('docs/'):], page_dir)}{fragment})"
         return f"]({repo_url.rstrip('/')}/blob/main/{resolved}{fragment})"
 
-    return _LINK.sub(repl, text)
+    def autolink(m: re.Match) -> str:
+        url = m.group(0)
+        pull = _PULL.search(url)
+        return f"[#{pull.group(1)}]({url})" if pull else f"<{url}>"
+
+    return _BARE_URL.sub(autolink, _LINK.sub(repl, text))
 
 
 def on_page_markdown(markdown: str, page, config, files) -> str:
