@@ -144,11 +144,19 @@ static void recover(void *arg)
  * document keeps them apart. */
 
 static espos_httpd_coproc_t s_cp;
-static bool s_cp_known;
-/* Written on whichever task runs the fetch, read on the httpd task, so it is
- * published as one step rather than relying on s_cp_known being observed after
- * the fields it describes. A spinlock, not a mutex: the critical section is one
- * struct copy and neither side may block the other. */
+static volatile bool s_cp_known;
+/* s_cp is written on whichever task runs the fetch and read on the httpd task,
+ * so the flag and the fields it describes are published as ONE step rather
+ * than leaving a reader to see a half-written version string beside a stale
+ * flag. A spinlock, not a mutex: the critical section is one struct copy and
+ * neither side may block the other.
+ *
+ * cp_fetch_once()'s own `if (s_cp_known) return;` reads the flag WITHOUT the
+ * lock, deliberately. It only ever goes false->true, and the cost of reading a
+ * stale false is one redundant fetch that publishes the same values over the
+ * same ones -- so the lock would buy nothing. volatile so the compiler cannot
+ * hoist the read out of a loop. Every read that goes on to touch s_cp's
+ * FIELDS takes the lock. */
 static portMUX_TYPE s_cp_mux = portMUX_INITIALIZER_UNLOCKED;
 
 static void cp_version_str(char *out, size_t n, uint32_t maj, uint32_t min, uint32_t patch)
