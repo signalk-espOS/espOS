@@ -297,7 +297,13 @@ a configuration one, so the lint says so rather than suggesting a
 replacement key.
 
 A 3.x host is back-compatible with 0.0.6+/1.x/2.x co-processor firmware, so
-the C6 slaves do not need reflashing. One consequence to know about: a slave
+moving to 3.x does not by itself require reflashing the C6 — verified on a
+Waveshare P4 against a co-processor reporting 2.12.3: SDIO came up in
+streaming mode, RPC defaulted to V2, and WiFi and BLE both worked. It does not
+mean the co-processor is *current*: both devices here raise `coprocessorStale`
+against a 3.0.9 host, and `esp_hosted` says a major mismatch is what causes RPC
+timeouts. Treat the warning as a precondition worth removing before chasing
+one, per [hardware.md](hardware.md#updating-the-c6-co-processor-firmware). One consequence to know about: a slave
 that predates the `ESP_PRIV_FIRMWARE_VERSION` handshake TLV reports no version
 at all, which is why the boot log says `Co-proc [0.0.0]` on a board whose link
 is perfectly healthy — and why espOS reads the version out of the handshake

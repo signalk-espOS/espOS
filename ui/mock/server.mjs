@@ -409,7 +409,13 @@ export function startMock(port = 8484) {
           hardware: { mac: "60:55:f9:00:1a:2b", cpu_mhz: 160, flash_bytes: 8 * 1024 * 1024,
             ram_internal_bytes: 512 * 1024, ram_psram_bytes: 0,
             features: ["wifi", "ble", "802.15.4", "embedded-flash"],
-            board: "Espressif ESP32-C6-DevKitC-1" } });
+            board: "Espressif ESP32-C6-DevKitC-1",
+            // A C6 is its own radio, so a real one never carries this. Mocked
+            // anyway and deliberately stale, because the only shape worth
+            // developing a UI against is the one that has something to say:
+            // absent is the easy case. Matches add_hardware() in
+            // espos_httpd/src/api_system.c -- target is omitted when unknown.
+            coprocessor: { version: "2.12.3", host_version: "3.0.9", target: "esp32c6", stale: true } } });
       }
       if (r === "/system/reboot" && m === "POST") { if (!needJson(req, res)) return; logAndMark("W", "espos_httpd", "restarting"); return json(res, 202, { status: "rebooting" }); }
       if (r === "/system/factory-reset" && m === "POST") { if (!needJson(req, res)) return; for (const k of Object.keys(stored)) delete stored[k]; wifiEval(); return json(res, 202, { status: "factory_reset", rebooting: true }); }

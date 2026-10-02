@@ -191,11 +191,13 @@ panels here have run for months on a stock slave, and the one device seen with
 not demonstrated. Treat the condition as a precondition worth removing before
 chasing RPC timeouts, not as a diagnosis.
 
-The slave image is built and flashed from `esp_hosted`'s own `slave/` project,
-against the version this build pins (`dependencies.lock`), with the C6 on its
-own USB port — **not** from espOS, and **not exercised here**: no slave has been
-reflashed on this bench, so follow Espressif's instructions for the pinned
-version rather than a recipe from this page. On the PoE board, remember that
+The co-processor image is built and flashed from `esp_hosted`'s own tree, not
+from espOS, with the C6 on its own USB port. In 3.x that is `coprocessor/`
+plus a per-example `cp/` project (`examples/system/get_cp_fw_version/cp` is the
+smallest), which is a different layout from the `slave/` directory 2.x used —
+so follow Espressif's instructions for the version this build pins rather than
+a recipe from this page. **Not exercised here**: no co-processor has been
+reflashed on this bench. On the PoE board, remember that
 USB and Ethernet must not be connected at the same time.
 
 ### Capabilities
