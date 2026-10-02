@@ -515,6 +515,10 @@ static char *status_to_json(const espos_wifi_status_t *st)
     if (portal) {
         cJSON_AddBoolToObject(portal, "active", st->sm.portal_active);
         cJSON_AddStringToObject(portal, "ssid", st->portal_ssid);
+        /* Why it is up or down, not only which: "active": false with
+         * "force": "down" is an application holding it shut, and reads
+         * nothing like the same state as plain "active": false. */
+        cJSON_AddStringToObject(portal, "force", espos_wifi_portal_force_str(st->sm.portal_force));
         if (st->sm.portal_active) {
             cJSON_AddStringToObject(portal, "ip", st->portal_ip);
             cJSON_AddNumberToObject(portal, "clients", st->sm.portal_clients);

@@ -91,9 +91,11 @@ whose `reset_reason` and `last_reset` say why the device last restarted.
   still waits for any association already in flight to finish, so on a device
   cycling through connection attempts the access point appears when the current
   attempt ends rather than immediately — bounded by the attempt, not by its
-  success. The request is not persisted, so a reboot clears it, and nothing
-  reports that it is in force: the firmware that calls it is the only place
-  that shows. A phone that does not pop its sign-in sheet still reaches the
+  success. The request is not persisted, so a reboot clears it, and
+  `GET /api/v1/wifi/status` reports it as `portal.force` — `auto`, `up` or
+  `down` — so "no access point and `force: down`" is an application holding it
+  shut rather than any of the reasons above. A phone that does not pop its
+  sign-in sheet still reaches the
   page at `http://192.168.4.1`. A `wifi.portal_psk` makes the portal a protected
   network. [WiFi → Portal](wifi.md#portal-softap-provisioning).
 

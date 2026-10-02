@@ -526,7 +526,14 @@ unix-millisecond value or `tz` is too long.
 The status document described in [wifi.md](wifi.md): `state` ∈
 `disabled unconfigured connecting obtaining_ip connected backoff`,
 `reason: {code, text}`, link/IP details, `backoff_ms` while backing off,
-counters, `portal: {active, ssid, ip?, clients?}`.
+counters, `portal: {active, ssid, force, ip?, clients?}`.
+
+`portal.force` ∈ `auto up down` is what `espos_wifi_portal_open()` last asked
+for, so `active: false` with `force: "down"` is an application holding the
+access point shut rather than the policy declining to raise it — two states
+that otherwise look identical and need different answers
+([wifi.md](wifi.md#portal-softap-provisioning)). `auto` is the default and
+means the policy decides.
 
 ### `POST /wifi/scan` — M2 · protected
 

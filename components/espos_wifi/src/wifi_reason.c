@@ -17,6 +17,17 @@ const char *espos_wifi_state_str(espos_wifi_state_t s)
 
 /* Codes are wifi_err_reason_t values (esp_wifi_types_generic.h); spelled as
  * numbers here so this file has no esp_wifi dependency on the host. */
+const char *espos_wifi_portal_force_str(espos_wifi_portal_force_t f)
+{
+    switch (f) {
+    case ESPOS_WIFI_PORTAL_UP: return "up";
+    case ESPOS_WIFI_PORTAL_DOWN: return "down";
+    case ESPOS_WIFI_PORTAL_AUTO:
+    case ESPOS_WIFI_PORTAL_FORCE_MAX:
+    default: return "auto";
+    }
+}
+
 const char *espos_wifi_reason_str(int reason)
 {
     switch (reason) {

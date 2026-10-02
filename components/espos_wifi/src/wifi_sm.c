@@ -94,11 +94,11 @@ static void portal_policy(espos_wifi_sm_t *sm)
     /* An application that can tell for itself gets the last word, but only
      * inside what the operator allowed above: portal_enabled = false is a
      * configuration choice, not a default to be overridden. */
-    if (sm->portal_force == ESPOS_WIFI_PORTAL_DOWN) {
+    if (sm->st.portal_force == ESPOS_WIFI_PORTAL_DOWN) {
         portal_down(sm);
         return;
     }
-    if (sm->portal_force == ESPOS_WIFI_PORTAL_UP) {
+    if (sm->st.portal_force == ESPOS_WIFI_PORTAL_UP) {
         /* Still not inside an association: switching to APSTA mid-attempt is
          * measurably worse than doing it between attempts (espOS #144), and
          * that holds however the portal was asked for. The request is sticky,
@@ -685,10 +685,10 @@ void espos_wifi_sm_event(espos_wifi_sm_t *sm, espos_wifi_event_t ev, const void 
         if (want >= ESPOS_WIFI_PORTAL_FORCE_MAX) {
             return;
         }
-        if (want == sm->portal_force) {
+        if (want == sm->st.portal_force) {
             return;
         }
-        sm->portal_force = want;
+        sm->st.portal_force = want;
         if (!sm->started) {
             return; /* as above: stored now, applied by EV_START */
         }

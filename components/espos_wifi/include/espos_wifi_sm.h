@@ -134,6 +134,12 @@ typedef struct {
     uint32_t disconnect_count;
     bool portal_active;
     int portal_clients;
+    /* What espos_wifi_portal_open() last asked for. Kept here rather than
+     * beside the machine's own fields so that it is reported by construction:
+     * a request that silently decides whether an access point exists, and that
+     * nothing could observe, cost a reader the one fact they needed
+     * (espOS #162 review). */
+    espos_wifi_portal_force_t portal_force;
 } espos_wifi_sm_status_t;
 
 typedef struct espos_wifi_sm {
@@ -161,7 +167,6 @@ typedef struct espos_wifi_sm {
      * ESPOS_WIFI_EV_OTHER_NET rather than read here: this machine never calls
      * out, which is what lets it run on the host. */
     bool other_net_up;
-    espos_wifi_portal_force_t portal_force;
 } espos_wifi_sm_t;
 
 void espos_wifi_sm_init(espos_wifi_sm_t *sm, const espos_wifi_port_t *port, void *port_ctx,
@@ -174,6 +179,8 @@ uint32_t espos_wifi_sm_backoff_remaining_ms(const espos_wifi_sm_t *sm);
 const char *espos_wifi_state_str(espos_wifi_state_t s);
 /* Human explanation for a disconnect reason (esp_wifi codes and ours). */
 const char *espos_wifi_reason_str(int reason);
+/** "auto", "up" or "down"; "auto" for a value outside the enum. */
+const char *espos_wifi_portal_force_str(espos_wifi_portal_force_t f);
 /* Deprecated: espos_net_backoff_ms() (espos_net.h) is the same curve — 1 s ·
  * 2^round, capped, ±25 % jitter, floor 250 ms — for every retry loop in espOS.
  * Kept as a standalone copy so the state machine has no dependency and builds
