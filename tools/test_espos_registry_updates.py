@@ -154,5 +154,71 @@ class NewestPublished(unittest.TestCase):
         self.assertIsNone(newest_published("espressif/x", opener=_boom))
 
 
+class ScalarForms(unittest.TestCase):
+    """YAML allows three ways to write the same version. The tree uses double
+    quotes throughout, and a checker that silently skips the other two is a
+    checker that checks nothing the day someone writes one."""
+
+    def _deps(self, body: str, unparsed=None):
+        d = pathlib.Path(tempfile.mkdtemp())
+        (d / "components" / "x").mkdir(parents=True)
+        (d / "components" / "x" / "idf_component.yml").write_text(body)
+        return manifest_deps(d, unparsed)
+
+    def test_double_single_and_bare(self):
+        deps = self._deps(
+            "dependencies:\n"
+            '  espressif/a: "==1.0.0"\n'
+            "  espressif/b: '==2.0.0'\n"
+            "  espressif/c: ==3.0.0\n"
+        )
+        self.assertEqual(deps["espressif/a"], {"==1.0.0"})
+        self.assertEqual(deps["espressif/b"], {"==2.0.0"})
+        self.assertEqual(deps["espressif/c"], {"==3.0.0"})
+
+    def test_hyphenated_namespace_is_recognised(self):
+        # signalk-espos has a hyphen; a pattern that missed it meant our own
+        # components were never matched and so never filtered out.
+        unparsed = []
+        deps = self._deps(
+            "dependencies:\n"
+            '  signalk-espos/espos_core:\n    version: "^0.14.0"\n',
+            unparsed,
+        )
+        self.assertEqual(deps, {})          # ours, filtered
+        self.assertEqual(unparsed, [])      # recognised, so not "unreadable"
+
+    def test_idf_only_manifest_is_not_flagged(self):
+        # Five components declare nothing but idf. That is "no third-party
+        # dependencies", not a parse failure.
+        unparsed = []
+        self._deps('dependencies:\n  idf: ">=6.0.0,<6.1.0"\n', unparsed)
+        self.assertEqual(unparsed, [])
+
+    def test_unreadable_manifest_is_flagged(self):
+        # version placed after `rules:` is a shape the block pattern cannot
+        # reach. It must be reported, never silently dropped.
+        unparsed = []
+        deps = self._deps(
+            "dependencies:\n"
+            "  espressif/weird:\n"
+            '    rules:\n      - if: "target == esp32"\n'
+            '    version: "==1.0.0"\n',
+            unparsed,
+        )
+        self.assertNotIn("espressif/weird", deps)
+        self.assertEqual(len(unparsed), 1)
+
+
+class PrereleaseOnlyRegistry(unittest.TestCase):
+    def test_prerelease_only_is_none_not_a_target(self):
+        # Reporting "behind, newest 2.0.0-rc1" would be advice to ship a
+        # release candidate.
+        def _open(url, timeout=0):
+            return NewestPublished._Resp({"versions": [{"version": "2.0.0-rc1"}]})
+
+        self.assertIsNone(newest_published("espressif/x", opener=_open))
+
+
 if __name__ == "__main__":
     unittest.main()

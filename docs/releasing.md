@@ -200,9 +200,12 @@ It prints one line per dependency:
 | `current` | an exact pin, nothing newer published |
 | `behind` | an exact pin with something newer published, or manifests that disagree about one component |
 | `unpinned` | a range, so the solver takes the newest it permits whenever it next runs |
+| `unparsed` | a manifest declares dependencies the tool could not read, so something is unwatched — fix the tool, not the manifest |
 | `unknown` | the registry did not answer — never a claim that something moved |
 
-Exit status is 1 when anything is `behind` or `unpinned`, 0 otherwise.
+Exit status is 1 when anything is `behind`, `unpinned` or `unparsed`, and 0
+otherwise. Anything above 1 is the tool itself failing, which the workflow
+turns into a failed job rather than an empty report.
 
 Taking a bump is a pull request: edit the manifests, regenerate the lock, let
 the build prove it, and flash the result first where it touches the radio,
