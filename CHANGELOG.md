@@ -15,6 +15,17 @@ pull request. The `[Unreleased]` block below was written by hand before the
 switch; its entries belong to the next feature release and are folded into
 that section when it is cut.
 
+## 0.14.0 (2026-10-03)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### ⚠ Breaking changes
+* feat(wifi)!: move the P4 co-processor transport to esp_hosted 3.x, and report the co-processor's firmware version by @dirkwa in https://github.com/signalk-espOS/espOS/pull/167
+
+
+**Full Changelog**: https://github.com/signalk-espOS/espOS/compare/v0.13.0...v0.14.0
+
 ## [0.13.0](https://github.com/signalk-espOS/espOS/compare/v0.12.1...v0.13.0) (2026-10-02)
 
 
