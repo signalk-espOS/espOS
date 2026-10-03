@@ -44,12 +44,14 @@ _INLINE = re.compile(r"^  " + _NAME + r":[ \t]*" + _SCALAR + r"[ \t]*$", re.M)
 _BLOCK = re.compile(
     r"^  " + _NAME + r":[ \t]*\n(?:[ \t]*#.*\n)*[ \t]+version:[ \t]*" + _SCALAR, re.M
 )
-# A NAMESPACED dependency key, used only to tell "this manifest has no
-# namespaced dependencies" from "this manifest did not parse". Deliberately
-# not matching `idf:`, which every manifest has and which this tool never
-# reads -- counting it made the five components whose only dependency is idf
-# look unreadable.
-_ANY_DEP = re.compile(r"^  [a-z0-9_-]+/[a-z0-9_.-]+:", re.M)
+# Every NAMESPACED dependency key, whatever shape its value takes. Diffed
+# against what the two patterns actually read, so an unreadable dependency is
+# reported even when a readable one sits beside it in the same manifest -- a
+# per-manifest "did anything parse?" test would have missed exactly that.
+# Deliberately not matching `idf:`, which every manifest has and this tool
+# never reads; counting it made the five components whose only dependency is
+# idf look unreadable.
+_ANY_DEP = re.compile(r"^  ([a-z0-9_-]+/[a-z0-9_.-]+):", re.M)
 
 # Ours, and moved by release-please rather than by anyone reading this report.
 OURS = "signalk-espos/"
@@ -93,17 +95,18 @@ def manifest_deps(
         if "managed_components" in f.parts or "build" in f.parts:
             continue
         text = f.read_text()
-        seen_here = 0
+        read_here: set[str] = set()
         for pat in (_INLINE, _BLOCK):
             for match in pat.finditer(text):
                 name = match.group(1)
                 rng = next(g for g in match.groups()[1:] if g is not None)
-                seen_here += 1
-                if name.startswith(OURS) or name == "idf":
+                read_here.add(name)
+                if name.startswith(OURS):
                     continue
                 found.setdefault(name, set()).add(rng)
-        if seen_here == 0 and _ANY_DEP.search(text) and unparsed is not None:
-            unparsed.append(str(f))
+        if unparsed is not None:
+            for name in sorted(set(_ANY_DEP.findall(text)) - read_here):
+                unparsed.append(f"{f}: {name}")
     return found
 
 
@@ -125,19 +128,28 @@ def newest_published(name: str, *, opener=urllib.request.urlopen) -> str | None:
 
 def classify(ranges: set[str], newest: str | None) -> tuple[str, str]:
     """(state, detail). state is one of: current, behind, unpinned, unknown."""
-    if newest is None:
-        return "unknown", "the registry did not answer"
     exact = {r[2:] for r in ranges if r.startswith("==")}
-    if exact and len(exact) == len(ranges):
-        if len(exact) > 1:
-            return "behind", f"pinned inconsistently: {', '.join(sorted(exact))}"
-        pinned = exact.pop()
-        if parse_version(pinned) < parse_version(newest):
-            return "behind", f"pinned {pinned}, newest {newest}"
-        return "current", f"pinned {pinned}"
-    # Not exact: the solver takes the newest the range permits, whenever it
-    # next runs. Worth reporting whether or not anything has moved yet.
-    return "unpinned", f"declared {', '.join(sorted(ranges))}, newest {newest}"
+    all_exact = bool(exact) and len(exact) == len(ranges)
+
+    if not all_exact:
+        # Not exact: the solver takes the newest the range permits, whenever it
+        # next runs. That is a property of the manifest, so it is reported even
+        # when the registry is unreachable -- `unknown` is for a pin whose
+        # standing we could not establish, and a range has no standing to
+        # establish.
+        tail = f"newest {newest}" if newest else "registry did not answer"
+        return "unpinned", f"declared {', '.join(sorted(ranges))}, {tail}"
+
+    if len(exact) > 1:
+        # Ten manifests disagreeing about one component needs no registry.
+        return "behind", f"pinned inconsistently: {', '.join(sorted(exact))}"
+
+    pinned = exact.pop()
+    if newest is None:
+        return "unknown", f"pinned {pinned}, registry did not answer"
+    if parse_version(pinned) < parse_version(newest):
+        return "behind", f"pinned {pinned}, newest {newest}"
+    return "current", f"pinned {pinned}"
 
 
 def report(root: pathlib.Path, *, fetch=newest_published) -> list[dict]:
@@ -153,7 +165,7 @@ def report(root: pathlib.Path, *, fetch=newest_published) -> list[dict]:
     for f in unparsed:
         rows.append(
             {"name": f, "ranges": [], "newest": None, "state": "unparsed",
-             "detail": "declares dependencies this tool could not read"}
+             "detail": "declared here but unreadable by this tool"}
         )
     return rows
 

@@ -83,8 +83,10 @@ jobs:
           fi
           cat "$RUNNER_TEMP/report.txt"
 
-      - name: open or update an issue
-        if: steps.check.outputs.act == 'true'
+      # Runs on every outcome, not only when there is something to report: an
+      # issue left open after the last pin was caught up says the opposite of
+      # the truth, and the next reader has to re-derive it.
+      - name: open, update or close the issue
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           # Through the environment, never interpolated into the script: this is
@@ -92,9 +94,11 @@ jobs:
           # otherwise be evaluated as JavaScript in a step holding
           # issues: write.
           REPORT: ${{ steps.check.outputs.report }}
+          ACT: ${{ steps.check.outputs.act }}
         with:
           script: |
             const title = 'Registry components newer than espOS pins'
+            const act = process.env.ACT === 'true'
             const body = [
               'Asked the Espressif Component Registry for the newest published',
               'version of every third-party dependency in the manifests, and',
@@ -127,6 +131,24 @@ jobs:
               { ...context.repo, state: 'open', per_page: 100 }
             )
             const mine = existing.find(i => i.title === title && !i.pull_request)
+
+            if (!act) {
+              // Everything current. Close a previously opened issue, saying
+              // why; do nothing at all if there was none, so a healthy tree
+              // produces no noise week after week.
+              if (mine) {
+                await github.rest.issues.createComment({
+                  ...context.repo, issue_number: mine.number,
+                  body: 'Every third-party dependency is now at the newest '
+                    + 'published version, or deliberately pinned above it. '
+                    + 'Closing.\n\n```\n' + (process.env.REPORT ?? '') + '\n```'
+                })
+                await github.rest.issues.update(
+                  { ...context.repo, issue_number: mine.number, state: 'closed' })
+              }
+              return
+            }
+
             if (mine) {
               await github.rest.issues.createComment(
                 { ...context.repo, issue_number: mine.number, body })

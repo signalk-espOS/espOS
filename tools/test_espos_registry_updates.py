@@ -220,5 +220,41 @@ class PrereleaseOnlyRegistry(unittest.TestCase):
         self.assertIsNone(newest_published("espressif/x", opener=_open))
 
 
+class RegistryOutage(unittest.TestCase):
+    """What the registry says cannot change whether our own manifest is
+    pinned, so an outage must not downgrade `unpinned` to `unknown`."""
+
+    def test_range_is_unpinned_even_with_no_registry(self):
+        state, detail = classify({"*"}, None)
+        self.assertEqual(state, "unpinned")
+        self.assertIn("did not answer", detail)
+
+    def test_exact_pin_with_no_registry_is_unknown(self):
+        self.assertEqual(classify({"==1.0.0"}, None)[0], "unknown")
+
+    def test_inconsistent_pins_need_no_registry(self):
+        self.assertEqual(classify({"==1.0.0", "==2.0.0"}, None)[0], "behind")
+
+
+class PartialParse(unittest.TestCase):
+    def test_readable_dep_does_not_mask_an_unreadable_one(self):
+        # The per-manifest version of this check missed exactly this shape.
+        d = pathlib.Path(tempfile.mkdtemp())
+        (d / "components" / "x").mkdir(parents=True)
+        (d / "components" / "x" / "idf_component.yml").write_text(
+            "dependencies:\n"
+            '  idf: ">=6.0.0"\n'
+            '  espressif/good: "==1.0.0"\n'
+            "  espressif/weird:\n"
+            '    rules:\n      - if: "target == esp32"\n'
+            '    version: "==2.0.0"\n'
+        )
+        unparsed = []
+        deps = manifest_deps(d, unparsed)
+        self.assertIn("espressif/good", deps)
+        self.assertEqual(len(unparsed), 1)
+        self.assertIn("espressif/weird", unparsed[0])
+
+
 if __name__ == "__main__":
     unittest.main()
