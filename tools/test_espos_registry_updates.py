@@ -37,6 +37,17 @@ class VersionOrder(unittest.TestCase):
         # So that `newest` never reports a release candidate as the thing to
         # move to.
         self.assertLess(parse_version("1.0.0-rc1"), parse_version("1.0.0"))
+        self.assertLess(parse_version("1.0.0-rc10"), parse_version("1.0.0"))
+
+    def test_prereleases_compare_numerically(self):
+        # rc10 follows rc2; a plain string compare puts it before.
+        self.assertLess(parse_version("1.0.0-rc2"), parse_version("1.0.0-rc10"))
+
+    def test_non_numeric_revision_does_not_raise(self):
+        # The string comes from the registry, and a crash here fails the whole
+        # check rather than reporting one odd version.
+        self.assertEqual(parse_version("1.0.0~beta"), parse_version("1.0.0~beta"))
+        self.assertLess(parse_version("1.0.0~beta"), parse_version("1.0.0~2"))
 
     def test_short_versions_pad(self):
         self.assertEqual(parse_version("1.2")[:3], (1, 2, 0))

@@ -70,9 +70,29 @@ def parse_version(v: str) -> tuple:
     nums = [int(x) for x in re.findall(r"\d+", core)[:3]]
     while len(nums) < 3:
         nums.append(0)
-    # No prerelease sorts above any prerelease: (1,) beats (0, ...).
-    pre = (1,) if not rest else (0, rest)
-    return (*nums, int(rev or 0), pre)
+    # Revisions are numeric by convention, but the string comes from the
+    # registry: a `~beta` must not raise ValueError and take the whole check
+    # down with it.
+    rev_n = int(rev) if rev.isdigit() else 0
+    # No prerelease sorts above any prerelease: (1,) beats (0, ...). Within
+    # prereleases, compare digit runs as numbers so rc10 follows rc2 rather
+    # than preceding it the way a plain string compare would.
+    pre = (1,) if not rest else (0, _prerelease_key(rest))
+    return (*nums, rev_n, pre)
+
+
+def _prerelease_key(tag: str) -> tuple:
+    """Split a prerelease tag into comparable text/number runs.
+
+    `rc2` -> (("rc", 0), ("", 2)), so rc2 < rc10. Numbers sort below text at
+    the same position, which is semver's rule for a numeric identifier against
+    an alphanumeric one.
+    """
+    return tuple(
+        (m.group(1), int(m.group(2)) if m.group(2) else -1)
+        for m in re.finditer(r"([^\d]*)(\d*)", tag)
+        if m.group(0)
+    )
 
 
 def is_prerelease(v: str) -> bool:
@@ -199,9 +219,10 @@ def main(argv: list[str] | None = None) -> int:
         for r in rows:
             print(f"{r['state']:9} {r['name']:34} {r['detail']}")
     # Exit code says whether there is something to act on, so a workflow can
-    # branch on it: 1 = behind or unpinned, 0 = everything current or unknown.
-    # Unknown is NOT a failure -- a registry outage must not open an issue
-    # claiming a component moved.
+    # branch on it: 1 = behind, unpinned or unparsed; 0 = everything current or
+    # unknown. Unknown is NOT a failure -- a registry outage must not open an
+    # issue claiming a component moved -- and unparsed IS, because a dependency
+    # this tool cannot read is one nobody is watching.
     actionable = ("behind", "unpinned", "unparsed")
     return 1 if any(r["state"] in actionable for r in rows) else 0
 
