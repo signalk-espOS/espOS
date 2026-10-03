@@ -150,16 +150,27 @@ if(CONFIG_IDF_TARGET STREQUAL "esp32p4")
     set(_espos_hosted_gone_hci_why
         "esp_hosted 3.x removed it: the HCI binding moved into esp_hosted_bt_host_stack_setup(), which takes the stack from the IDF BT Kconfig the project already sets. Enable CONFIG_ESP_HOSTED_HOST_FEAT_BT and call that function after esp_hosted_connect_to_slave() (docs/ble.md).")
 
-    # Mirror kconfig.cmake's own resolution: every entry of SDKCONFIG_DEFAULTS
-    # plus its .<target> sibling, or the project's sdkconfig.defaults when the
-    # variable is unset.
-    set(_espos_defaults_files)
-    if(SDKCONFIG_DEFAULTS)
-        set(_espos_defaults_seed "${SDKCONFIG_DEFAULTS}")
-    else()
-        set(_espos_defaults_seed "${CMAKE_SOURCE_DIR}/sdkconfig.defaults")
+    # The defaults files to scan. Taken from the SDKCONFIG_DEFAULTS build
+    # PROPERTY, not the same-named variable: project.cmake has already made
+    # every entry absolute by then (`get_filename_component(... ABSOLUTE)`) and
+    # folded in the $ENV{SDKCONFIG_DEFAULTS} and project-default cases, whereas
+    # the variable is whatever the caller wrote and may be relative. A relative
+    # path here would simply not exist from this scope, and the whole scan would
+    # skip in silence -- a lint that lints nothing. Falls back to the variable
+    # and then to the project's own file, each made absolute, in case a future
+    # IDF stops setting the property.
+    idf_build_get_property(_espos_defaults_seed SDKCONFIG_DEFAULTS)
+    if(NOT _espos_defaults_seed)
+        if(SDKCONFIG_DEFAULTS)
+            set(_espos_defaults_seed "${SDKCONFIG_DEFAULTS}")
+        else()
+            set(_espos_defaults_seed "${CMAKE_SOURCE_DIR}/sdkconfig.defaults")
+        endif()
     endif()
+    # kconfig.cmake pairs each entry with its .<target> sibling; mirror that.
+    set(_espos_defaults_files)
     foreach(_f IN LISTS _espos_defaults_seed)
+        get_filename_component(_f "${_f}" ABSOLUTE BASE_DIR "${CMAKE_SOURCE_DIR}")
         list(APPEND _espos_defaults_files "${_f}" "${_f}.${IDF_TARGET}")
     endforeach()
 

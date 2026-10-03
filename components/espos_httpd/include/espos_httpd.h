@@ -84,14 +84,32 @@ bool espos_httpd_request_authenticated(httpd_req_t *req);
  * that is its own radio and a co-processor that has not answered -- the two are
  * not distinguishable, and both mean the same thing to a reader.
  */
+/* Every string in espos_httpd_coproc_t, including its NUL. 16 fits
+ * "255.255.255" and "esp32c61" with room to spare. Named because the producer
+ * lives in another component and should not spell the size again. */
+#define ESPOS_HTTPD_COPROC_STRING_MAX 16
+
 typedef struct {
-    char version[16];      /* the co-processor's firmware, "2.12.0". "0.0.0" means it
-                              answered without naming one, which is what an image too
-                              old to support the query looks like. */
-    char host_version[16]; /* what this build's esp_hosted expects to talk to */
-    char target[16];       /* the co-processor's chip, "esp32c6"; "" when unknown */
-    bool stale;            /* host_version is newer than version */
+    char version[ESPOS_HTTPD_COPROC_STRING_MAX];      /* the co-processor's firmware,
+                                                         "2.12.3". "0.0.0" means it
+                                                         announced no version at all,
+                                                         which is what an image older
+                                                         than the version TLV looks
+                                                         like -- a fact, not a
+                                                         failure. */
+    char host_version[ESPOS_HTTPD_COPROC_STRING_MAX]; /* what this build's esp_hosted
+                                                         expects to talk to */
+    char target[ESPOS_HTTPD_COPROC_STRING_MAX];       /* the co-processor's chip,
+                                                         "esp32c6"; "" when unknown */
+    bool stale;            /* esp_hosted's verdict: the co-processor is behind */
 } espos_httpd_coproc_t;
+/* Layout is frozen. The consumer declares it and the producer -- a different
+ * component -- fills a caller-owned instance through the hook below, so
+ * appending a member makes a newer producer write past an older caller's
+ * buffer. espOS's components are version-locked within one firmware, which is
+ * why there is no size or version field; a change here is an
+ * ESPOS_ABI_VERSION bump, and a new field that is not worth one belongs in the
+ * JSON rather than the struct. */
 
 /**
  * Fill `out` with the co-processor's identity; false when there is none to

@@ -404,10 +404,12 @@ static void cp_fetch_kick(void)
     s_cp_last_try_ms = now_ms;
     s_cp_task_started = true;
     if (xTaskCreate(cp_fetch_task, "cpver", 4096, NULL, 3, NULL) != pdPASS) {
-        /* Cleared, or one failed allocation would latch the gate for ever.
-         * Safe here: this is the only writer. */
-        ESP_LOGW(TAG, "could not start the co-processor version query");
-        s_cp_task_started = false;
+        /* The gate stays SET. s_cp_last_try_ms is already stamped, so the
+         * elapsed-time test above frees it after CP_RETRY_QUIET_MS -- clearing
+         * it here instead would short-circuit that test and retry on every
+         * heartbeat, which on a board too short of RAM for a 4 KB stack means
+         * for ever, every 20 s. */
+        ESP_LOGW(TAG, "could not start the co-processor version query; retrying later");
     }
 }
 
@@ -435,13 +437,10 @@ static void on_hosted_event(void *arg, esp_event_base_t base, int32_t id, void *
     }
     case ESP_HOSTED_EVENT_TRANSPORT_FAILURE:
         /* esp_hosted found the fault itself. With
-         * CONFIG_ESP_HOSTED_HOST_TRANSPORT_RESTART_ON_FAILURE=y it restarts
-         * the system and we never get here; with it disabled, recover
-         * now instead of waiting out the heartbeat timeout. */
-        /* With CONFIG_ESP_HOSTED_HOST_TRANSPORT_RESTART_ON_FAILURE=y (the
-         * default espOS keeps) esp_hosted restarts the system itself and
-         * we never reach here. With it disabled, act now rather than
-         * waiting out the heartbeat timeout. */
+         * CONFIG_ESP_HOSTED_HOST_TRANSPORT_RESTART_ON_FAILURE=y -- the default
+         * espOS keeps -- it restarts the system and we never reach here. With
+         * it disabled, act now rather than waiting out the heartbeat
+         * timeout. */
         ESP_LOGE(TAG, "transport failure reported — restarting");
         esp_restart();
         break;
