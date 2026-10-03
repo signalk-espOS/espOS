@@ -119,7 +119,7 @@ co-processor over esp_hosted's SDIO transport (`CONFIG_ESP_HOSTED_HOST_FEAT_BT`
 plus the IDF stack you already select, `CONFIG_BT_BLUEDROID_ENABLED`, with
 `CONFIG_BT_CONTROLLER_DISABLED`). esp_hosted 3.0 removed the 2.x keys
 `CONFIG_ESP_HOSTED_ENABLE_BT_BLUEDROID` and `..._BLUEDROID_HCI_VHCI` — see the
-[key table](wifi.md#esp_hosted-2x--3x-key-names) — and moved the stack glue out
+[key table](wifi.md#esp_hosted-2x-3x-key-names) — and moved the stack glue out
 of the hosted core into an adapter the application binds once:
 
 ```c
