@@ -210,7 +210,9 @@ already advertise.
 
 On a host whose radio is a separate chip — an ESP32-P4 with an ESP32-C6 over
 SDIO — `hardware` also carries the co-processor. A C6 like the one above has its
-own radio and never does:
+own radio and never does. A different device from the one above, and from the
+7B in the `espos_start()` snippet below; all three strings are real boards on
+one bench, so do not read `board` as derived from the chip:
 
 ```json
 "hardware": {
