@@ -323,6 +323,22 @@ class RootPathWithBuildInIt(unittest.TestCase):
         )
         self.assertIn("espressif/a", manifest_deps(base))
 
+    def test_near_miss_name_is_flagged_not_invisible(self):
+        # _ANY_DEP is looser than _NAME on purpose. An uppercase namespace
+        # matches neither reading pattern, and if the cross-check used the same
+        # character class it would match nothing either -- the dependency would
+        # be invisible to both and silently unwatched.
+        base = pathlib.Path(tempfile.mkdtemp())
+        (base / "components" / "x").mkdir(parents=True)
+        (base / "components" / "x" / "idf_component.yml").write_text(
+            'dependencies:\n  Espressif/Weird: "==1.0.0"\n'
+        )
+        unparsed = []
+        deps = manifest_deps(base, unparsed)
+        self.assertEqual(deps, {})
+        self.assertEqual(len(unparsed), 1)
+        self.assertIn("Espressif/Weird", unparsed[0])
+
     def test_managed_components_is_still_excluded(self):
         base = pathlib.Path(tempfile.mkdtemp())
         d = base / "managed_components" / "espressif__x"

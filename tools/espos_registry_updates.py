@@ -52,7 +52,12 @@ _BLOCK = re.compile(
 # Deliberately not matching `idf:`, which every manifest has and this tool
 # never reads; counting it made the five components whose only dependency is
 # idf look unreadable.
-_ANY_DEP = re.compile(r"^  ([a-z0-9_-]+/[a-z0-9_.-]+):", re.M)
+# Deliberately LOOSER than _NAME: anything namespace-shaped counts, including
+# the near-misses _NAME rejects -- an uppercase namespace, a dot in it. If the
+# reading patterns cannot take it, that is the case this cross-check exists to
+# surface, and a key both patterns reject would otherwise be invisible to
+# both.
+_ANY_DEP = re.compile(r"^  ([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+):", re.M)
 
 # Ours, and moved by release-please rather than by anyone reading this report.
 OURS = "signalk-espos/"
