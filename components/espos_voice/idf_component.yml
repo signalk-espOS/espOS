@@ -70,7 +70,13 @@ dependencies:
   # does and ArduinoJson for this one component -- and paid for both in
   # flash. Nothing in the protocol needed what ArduinoJson does differently.
   espressif/cjson: "==1.7.19~2"
+  # Exact, like every other registry dependency here, and 2.5.5 is what the
+  # caret already resolved to -- so this changes nothing but the freedom to
+  # move without anyone deciding to. esp-sr carries the wake-word and speech
+  # models and is the largest thing in a voice build; a minor arriving on its
+  # own would change what is on a boat with no review and no flash.
+  # tools/espos_registry_updates.py reports when a newer one exists.
   espressif/esp-sr:
-    version: "^2.5.0"
+    version: "==2.5.5"
     rules:
       - if: "target in [esp32s3, esp32p4]"
