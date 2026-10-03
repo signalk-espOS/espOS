@@ -392,11 +392,16 @@ static void cp_fetch_task(void *arg)
 
 /* Starts at most one worker, and at most one per CP_RETRY_QUIET_MS after that.
  * The elapsed-time test is what frees the gate, so the worker never writes it
- * and this stays a single-task function. s_cp_known is not consulted here: it
- * lives behind a lock for the httpd task's sake and the worker checks it
- * anyway, so a redundant kick costs one task that returns immediately. */
+ * and this stays a single-task function. */
 static void cp_fetch_kick(void)
 {
+    /* Done means done. Without this the quiet window would spawn a 4 KB task
+     * every five minutes for the life of the boot, each one returning at
+     * cp_fetch_once()'s first line. Unlocked for the same reason that read is:
+     * the flag only ever goes false->true. */
+    if (s_cp_known) {
+        return;
+    }
     const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
     if (s_cp_task_started && now_ms - s_cp_last_try_ms < CP_RETRY_QUIET_MS) {
         return;

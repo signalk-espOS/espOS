@@ -122,8 +122,11 @@ typedef struct {
  * which is how espos_time's wallclock hook shipped broken (espOS #49). Verify
  * the override with `nm` (T, not W) as well.
  *
- * Called on the httpd task; the implementation must not block on the
- * co-processor.
+ * Called on the httpd task. An override must answer from memory it already
+ * holds: no driver call, no RPC to the co-processor, no waiting on one. Not
+ * just "do not block" -- the RPC channel is the thing that wedges, and a
+ * status endpoint that can reach for it is a status endpoint that stops
+ * answering exactly when somebody is trying to find out why.
  */
 bool espos_httpd_coprocessor_hook(espos_httpd_coproc_t *out);
 
