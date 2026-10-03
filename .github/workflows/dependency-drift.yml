@@ -114,6 +114,17 @@ jobs:
           else
             echo "act=false" >> "$GITHUB_OUTPUT"
           fi
+          # Separately: did every component actually answer? `unknown` carries
+          # no exit-code signal -- it is not actionable, so rc stays 0 -- and
+          # without this the closing path below would shut an issue while
+          # claiming "every dependency is current" for a component the registry
+          # never spoke about. This grep is the only source for that fact, not
+          # a second derivation of one already computed.
+          if grep -qE '^unknown ' "$RUNNER_TEMP/report.txt"; then
+            echo "inconclusive=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "inconclusive=false" >> "$GITHUB_OUTPUT"
+          fi
           cat "$RUNNER_TEMP/report.txt"
 
       # Runs on every outcome, not only when there is something to report: an
@@ -128,10 +139,12 @@ jobs:
           # issues: write.
           REPORT: ${{ steps.check.outputs.report }}
           ACT: ${{ steps.check.outputs.act }}
+          INCONCLUSIVE: ${{ steps.check.outputs.inconclusive }}
         with:
           script: |
             const title = 'Registry components newer than espOS pins'
             const act = process.env.ACT === 'true'
+            const inconclusive = process.env.INCONCLUSIVE === 'true'
             const body = [
               'Asked the Espressif Component Registry for the newest published',
               'version of every third-party dependency in the manifests, and',
@@ -166,19 +179,33 @@ jobs:
             const mine = existing.find(i => i.title === title && !i.pull_request)
 
             if (!act) {
-              // Everything current. Close a previously opened issue, saying
-              // why; do nothing at all if there was none, so a healthy tree
-              // produces no noise week after week.
-              if (mine) {
+              // Nothing actionable. Only CLOSE when the report is also
+              // conclusive: an `unknown` row means the registry never answered
+              // for that component, so "every dependency is current" would be
+              // a claim this run cannot support, and closing on it would drop
+              // a standing reminder on the strength of an outage.
+              if (mine && inconclusive) {
                 await github.rest.issues.createComment({
                   ...context.repo, issue_number: mine.number,
-                  body: 'Every third-party dependency is now at the newest '
-                    + 'published version, or deliberately pinned above it. '
-                    + 'Closing.\n\n```\n' + (process.env.REPORT ?? '') + '\n```'
+                  body: 'Nothing actionable this run, but the report is '
+                    + '**inconclusive**: the registry did not answer for at '
+                    + 'least one component (`unknown` below), so this cannot '
+                    + 'say they are current. Left open.\n\n```\n'
+                    + (process.env.REPORT ?? '') + '\n```'
+                })
+              } else if (mine) {
+                await github.rest.issues.createComment({
+                  ...context.repo, issue_number: mine.number,
+                  body: 'Every third-party dependency answered, and each is at '
+                    + 'the newest published version or deliberately pinned '
+                    + 'above it. Closing.\n\n```\n'
+                    + (process.env.REPORT ?? '') + '\n```'
                 })
                 await github.rest.issues.update(
                   { ...context.repo, issue_number: mine.number, state: 'closed' })
               }
+              // No existing issue: nothing to say either way. An outage is not
+              // actionable, so it does not open one.
               return
             }
 
