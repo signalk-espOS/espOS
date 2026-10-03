@@ -166,6 +166,49 @@ different shape again: there is no submodule and no prologue (`cmake/` ships
 in no component archive), so the version range in `idf_component.yml` is the
 selector and `dependencies.lock` records what it resolved to. See the README.
 
+## Keeping third-party components current
+
+Every third-party registry dependency in espOS is **exact-pinned** — the rule
+is stated above `espressif/cjson` in each manifest — so a solve is
+reproducible and nothing moves under a build. The cost is that nothing tells
+you an update exists: espOS sat on `esp_hosted` 2.12.x for weeks while 3.x was
+out, and the first anyone knew was a consumer build failing.
+
+Dependabot cannot cover this. The ESP-IDF component manager is not one of its
+ecosystems, so `.github/dependabot.yml` reaches `github-actions` and the UI's
+npm tree and nothing else. `espos-p4-cockpit` answers it by re-resolving within
+its declared ranges and diffing `dependencies.lock`; that approach cannot work
+here, because exact pins leave nothing to re-resolve and the diff is empty
+however far behind the pins are.
+
+So `.github/workflows/dependency-drift.yml` asks the other question weekly —
+*is there anything newer than what we pinned?* — by querying the registry per
+dependency (`tools/espos_registry_updates.py`) and opening or updating one
+issue. It reports; it never commits, because a component bump changes the
+binary that goes on a boat.
+
+Run it by hand any time:
+
+```sh
+python3 tools/espos_registry_updates.py --root .
+```
+
+It prints one line per dependency:
+
+| state | meaning |
+| --- | --- |
+| `current` | an exact pin, nothing newer published |
+| `behind` | an exact pin with something newer published, or manifests that disagree about one component |
+| `unpinned` | a range, so the solver takes the newest it permits whenever it next runs |
+| `unknown` | the registry did not answer — never a claim that something moved |
+
+Exit status is 1 when anything is `behind` or `unpinned`, 0 otherwise.
+
+Taking a bump is a pull request: edit the manifests, regenerate the lock, let
+the build prove it, and flash the result first where it touches the radio,
+display or audio path. A component bump can change behaviour without breaking
+the build, which is exactly how `esp_hosted` 2.x → 3.x behaved.
+
 ## Versioning
 
 Semantic-ish, judged against what a *consumer firmware* sees:

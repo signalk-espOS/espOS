@@ -1,0 +1,124 @@
+# SPDX-FileCopyrightText: 2026 Dirk Wahrheit
+# SPDX-License-Identifier: Apache-2.0
+#
+# Dependabot for ESP-IDF components, because Dependabot does not do this: the
+# component manager is not one of its ecosystems, so nothing watches
+# idf_component.yml. .github/dependabot.yml covers github-actions and the UI's
+# npm tree, which is all it can cover.
+#
+# espos-p4-cockpit answers this by re-resolving within the declared ranges and
+# diffing dependencies.lock. That cannot work here, and the reason is worth
+# stating: espOS pins its third-party dependencies EXACTLY, so there is nothing
+# to re-resolve and the lock diff is empty however far behind the pins have
+# fallen. espOS sat on esp_hosted 2.12.x for weeks while 3.x was out and
+# nothing said so.
+#
+# So this asks the other question -- is there anything newer than what we
+# pinned? -- as a registry query per dependency
+# (tools/espos_registry_updates.py). On its first run it found mdns pinned
+# 1.11.3 against a published 1.14.0.
+#
+# Reports only, never commits. A component bump changes the binary that goes on
+# a boat, so it goes through a pull request and a build like any other change.
+name: Dependency drift
+
+# One at a time: a scheduled and a manual run overlapping could both see no
+# existing issue and each file one.
+concurrency:
+  group: dependency-drift
+  cancel-in-progress: false
+
+on:
+  schedule:
+    # Mondays 06:00 UTC, matching the weekly Dependabot cadence and the
+    # cockpit's own drift job.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  drift:
+    name: registry versions against the pins
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: ask the registry
+        id: check
+        run: |
+          # No -e, deliberately, where the rest of this repository uses
+          # `set -euo pipefail`: the script exits 1 to mean "something to act
+          # on", and -e would turn that into a failed job and no issue.
+          set -uo pipefail
+          python3 tools/espos_registry_updates.py --root . > "$RUNNER_TEMP/report.txt" || true
+          {
+            echo "report<<ESPOS_EOF"
+            cat "$RUNNER_TEMP/report.txt"
+            echo "ESPOS_EOF"
+          } >> "$GITHUB_OUTPUT"
+          # Only the actionable lines decide whether an issue is raised. A
+          # registry that did not answer reports `unknown`, which must never
+          # open an issue claiming a component moved.
+          if grep -qE '^(behind|unpinned) ' "$RUNNER_TEMP/report.txt"; then
+            echo "act=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "act=false" >> "$GITHUB_OUTPUT"
+          fi
+          cat "$RUNNER_TEMP/report.txt"
+          exit 0
+
+      - name: open or update an issue
+        if: steps.check.outputs.act == 'true'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          # Through the environment, never interpolated into the script: this is
+          # registry-derived text, and a backtick or ${...} in it would
+          # otherwise be evaluated as JavaScript in a step holding
+          # issues: write.
+          REPORT: ${{ steps.check.outputs.report }}
+        with:
+          script: |
+            const title = 'Registry components newer than espOS pins'
+            const body = [
+              'Asked the Espressif Component Registry for the newest published',
+              'version of every third-party dependency in the manifests, and',
+              'compared it with what this tree pins.',
+              '',
+              '```',
+              process.env.REPORT ?? '',
+              '```',
+              '',
+              '- **behind** -- an exact pin with something newer published.',
+              '- **unpinned** -- a range, so the solver will take the newest it',
+              '  permits whenever it next runs, without anyone deciding to.',
+              '- **current** / **unknown** -- nothing to do; `unknown` is a',
+              '  registry that did not answer, never a claim that something moved.',
+              '',
+              'To take a bump: edit the manifests, regenerate the lock, and let the',
+              'PR build prove it. Flash the result before merging if it touches the',
+              'radio, display or audio path -- a component bump can change behaviour',
+              'without breaking the build, which is how esp_hosted 2.x to 3.x went.',
+              '',
+              '_Raised by `.github/workflows/dependency-drift.yml`; re-runs weekly._'
+            ].join('\n')
+
+            // Paginate: the default page is 30, and an older issue sitting past
+            // it would be invisible here and a duplicate filed instead.
+            const existing = await github.paginate(
+              github.rest.issues.listForRepo,
+              { ...context.repo, state: 'open', per_page: 100 }
+            )
+            const mine = existing.find(i => i.title === title && !i.pull_request)
+            if (mine) {
+              await github.rest.issues.createComment(
+                { ...context.repo, issue_number: mine.number, body })
+            } else {
+              await github.rest.issues.create({ ...context.repo, title, body })
+            }

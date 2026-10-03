@@ -79,8 +79,17 @@ dependencies:
   # esp_hosted's own manifest declares only idf, so the Wi-Fi API shim that
   # makes esp_wifi_* calls reach the co-processor has to be named here or by
   # every consumer; naming it once is the point of the component.
+  #
+  # Exact, like every other registry dependency here. It was "*" on the
+  # reasoning that the shim should take whatever esp_hosted wants -- which
+  # stopped holding when esp_hosted became an exact pin, leaving the INNER
+  # dependency fixed and the OUTER one, the component that declares
+  # `esp_hosted >=2.11` itself, open to any major. A 2.x that still accepted
+  # esp_hosted 3.x would have been taken silently on the next solve, API
+  # changes and all. tools/espos_registry_updates.py reports when a newer one
+  # exists.
   espressif/esp_wifi_remote:
-    version: "*"
+    version: "==1.6.5"
     rules:
       - if: "target == esp32p4"
   # The hosted watchdog reports a stale co-processor as a standing health
