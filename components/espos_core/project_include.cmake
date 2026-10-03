@@ -80,6 +80,17 @@ if(CONFIG_IDF_TARGET STREQUAL "esp32p4")
             "CONFIG_CACHE_L2_CACHE_LINE_64B=y")
     endif()
 
+    # esp_hosted 3.x made the co-processor heartbeat opt-in and defaults it
+    # off. It is espos_wifi's only evidence that the radio link is alive, so
+    # without it wedge detection compiles out -- see hosted_watchdog.c. Checked
+    # here as well as there so a consumer gets the line to add rather than a
+    # #warning buried in a build log.
+    if(CONFIG_ESP_HOSTED AND NOT CONFIG_ESP_HOSTED_HOST_FEAT_HEARTBEAT)
+        _espos_lint_report(
+            "CONFIG_ESP_HOSTED is on but CONFIG_ESP_HOSTED_HOST_FEAT_HEARTBEAT is not. The heartbeat is the only signal espos_wifi has that the co-processor link is alive -- esp_hosted reports faults it detects itself but has no liveness query -- so a silently wedged SDIO link becomes undetectable and the device sits unreachable until it is power-cycled."
+            "CONFIG_ESP_HOSTED_HOST_FEAT_HEARTBEAT=y")
+    endif()
+
     # esp_hosted 3.x renamed most host-side keys and REMOVED the 2.x
     # spellings. IDF leaves KCONFIG_WARN_UNDEF_ASSIGN off, so an assignment to
     # a symbol that no longer exists is dropped in silence: the SDIO pins fall

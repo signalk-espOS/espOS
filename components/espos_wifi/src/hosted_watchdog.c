@@ -30,7 +30,19 @@
 
 #include "sdkconfig.h"
 
-#if defined(CONFIG_ESP_HOSTED)
+/* esp_hosted 3.x spells its own enable CONFIG_ESP_HOSTED; 2.x said
+ * CONFIG_ESP_HOSTED_ENABLED. Getting that wrong compiles this whole file away
+ * without a word -- the watchdog simply stops existing.
+ *
+ * The heartbeat is a second condition, not a nicety: it is the ONLY signal
+ * this file has. 3.x made the feature opt-in and defaults it off, and the bare
+ * symptom is unhelpful -- the build stops on "implicit declaration of function
+ * 'esp_hosted_configure_heartbeat'", which never mentions the key. Gated and
+ * warned about instead, with the stubs at the end of the file taking over,
+ * because the one thing that must NOT happen is arming a 60 s timer for a
+ * heartbeat that can never arrive: that is a device rebooting every minute on
+ * healthy hardware. */
+#if defined(CONFIG_ESP_HOSTED) && defined(CONFIG_ESP_HOSTED_HOST_FEAT_HEARTBEAT)
 
 #include "espos_health.h"
 #include "espos_httpd.h" /* espos_httpd_coproc_t, and the hook we define below */
@@ -525,9 +537,19 @@ uint32_t espos_wifi_hosted_recoveries(void)
     return 0;
 }
 
-#endif /* CONFIG_ESP_HOSTED */
+#endif /* CONFIG_ESP_HOSTED && CONFIG_ESP_HOSTED_HOST_FEAT_HEARTBEAT */
 
-#if !defined(CONFIG_ESP_HOSTED)
+#if !defined(CONFIG_ESP_HOSTED) || !defined(CONFIG_ESP_HOSTED_HOST_FEAT_HEARTBEAT)
+
+#if defined(CONFIG_ESP_HOSTED) && !defined(CONFIG_ESP_HOSTED_HOST_FEAT_HEARTBEAT)
+/* A co-processor with no heartbeat is a configuration mistake, not a mode:
+ * esp_hosted raises an event for a transport fault it detects itself but has no
+ * "is the link up" query, so a silently wedged SDIO link becomes undetectable
+ * and the device sits unreachable until somebody power-cycles it. Loud rather
+ * than fatal, so a consumer who means it can still build; silent on a
+ * native-radio build, which has nothing to configure. */
+#warning "espos_wifi: CONFIG_ESP_HOSTED is on but CONFIG_ESP_HOSTED_HOST_FEAT_HEARTBEAT is not -- co-processor wedge detection is COMPILED OUT. Set CONFIG_ESP_HOSTED_HOST_FEAT_HEARTBEAT=y (docs/wifi.md)."
+#endif
 
 /* Native-radio and simulator builds: the API exists so callers never
  * need an #ifdef, but there is no co-processor to watch. */

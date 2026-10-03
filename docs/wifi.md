@@ -363,8 +363,13 @@ route, and the knobs are `CONFIG_ESPOS_NET_MDNS` and
     heartbeat is the only evidence the host has that the link is alive, so
     the watchdog described above is built on it; esp_hosted 3.x made the
     feature opt-in and defaults it off, which leaves
-    `esp_hosted_configure_heartbeat()` out of the build and the watchdog
-    with nothing to watch.
+    `esp_hosted_configure_heartbeat()` out of the build entirely. espOS does
+    not quietly carry on without it: `espos_core`'s consumer lint fails the
+    configure with the line to add, and `hosted_watchdog.c` compiles to its
+    no-co-processor stubs behind a `#warning` for a project that bypasses the
+    lint. What it must never do is arm the 60 s timer for a heartbeat that
+    cannot arrive — that is a device rebooting every minute on healthy
+    hardware.
   * **`CONFIG_EH_HOST_PORT_DMA_PREFER_SPIRAM=y`.** The transport mempool
     is the transport's large DMA buffer pool; left in internal RAM
     (the default) it is the biggest `MALLOC_CAP_INTERNAL|DMA` consumer on
