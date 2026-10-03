@@ -224,17 +224,23 @@ one bench, so do not read `board` as derived from the chip:
 ```
 
 `host_version` is what this build's `esp_hosted` expects to talk to, `target`
-the co-processor's chip, and `stale` whether the host is newer. All four come
-out of the PRIV TLVs the co-processor sends during transport bring-up, which
-`esp_hosted` has already parsed and kept — **not** from
-`esp_hosted_get_coprocessor_fwversion()`, which is an RPC to the other chip.
-That distinction is the whole reason this field can be trusted: a co-processor
+the co-processor's chip, and `stale` whether the host is newer. Where each one
+comes from matters:
+
+| field | source |
+| --- | --- |
+| `version`, `target` | the PRIV TLVs the co-processor sends during transport bring-up, which `esp_hosted` has already parsed and kept |
+| `host_version` | this build's own `ESP_HOSTED_VERSION_*`, a compile-time constant |
+| `stale` | `esp_hosted`'s verdict on the two (`eh_host_mcu_transport_verify_fw_compat()`) |
+
+What none of them is: `esp_hosted_get_coprocessor_fwversion()`, an RPC to the
+other chip. That is the whole reason the object can be trusted — a co-processor
 old or broken enough to be worth reporting is exactly the one whose RPC does
 not answer, so a query-based field would be absent precisely when it matters.
-`stale` is `esp_hosted`'s own verdict
-(`eh_host_mcu_transport_verify_fw_compat()`), so it cannot disagree with the
-warning `esp_hosted` logs; a patch-level difference is not stale, and a host
-*older* than its co-processor is a different problem and not this flag.
+Taking esp_hosted's verdict rather than comparing the two strings here is what
+keeps `stale` from disagreeing with the warning esp_hosted logs: a patch-level
+difference is not stale, and a host *older* than its co-processor is a
+different problem and not this flag's.
 `stale: true` is also raised as the `coprocessorStale` health condition
 ([hardware.md](hardware.md#updating-the-c6-co-processor-firmware)).
 
