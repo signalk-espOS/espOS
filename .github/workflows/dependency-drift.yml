@@ -79,10 +79,16 @@ jobs:
             cat "$RUNNER_TEMP/report.txt" || true
             exit "$rc"
           fi
+          # Random delimiter per run. The report carries manifest paths and
+          # dependency names straight from the tree, so a fixed marker could
+          # appear in the content and end the value early -- the runner would
+          # then read the rest of the report as `key=value` output lines, or
+          # reject the file.
+          delim="ESPOS_$(openssl rand -hex 16)"
           {
-            echo "report<<ESPOS_EOF"
+            echo "report<<$delim"
             cat "$RUNNER_TEMP/report.txt"
-            echo "ESPOS_EOF"
+            echo "$delim"
           } >> "$GITHUB_OUTPUT"
           # The exit code is the authority: the script computes it from the
           # rows, while a grep re-derives it from formatted text and would

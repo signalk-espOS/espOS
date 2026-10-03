@@ -124,7 +124,10 @@ def manifest_deps(
         rel = f.relative_to(root).parts
         if "managed_components" in rel or "build" in rel:
             continue
-        text = f.read_text()
+        # Explicit encoding: read_text() uses the locale, so on a non-UTF-8
+        # machine every manifest containing an em dash would raise and take
+        # the run down. The result must not depend on the host's locale.
+        text = f.read_text(encoding="utf-8")
         read_here: set[str] = set()
         for pat in (_INLINE, _BLOCK):
             for match in pat.finditer(text):
