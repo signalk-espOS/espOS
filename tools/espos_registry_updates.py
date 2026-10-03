@@ -21,6 +21,7 @@ which is a pull request, not a cron job.
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import pathlib
 import re
@@ -139,7 +140,14 @@ def newest_published(name: str, *, opener=urllib.request.urlopen) -> str | None:
     try:
         with opener(f"{REGISTRY}/{name}", timeout=30) as r:
             data = json.load(r)
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError):
+    # OSError covers urllib's URLError and HTTPError and a socket failing
+    # mid-read; http.client's exceptions cover a truncated or malformed
+    # response (IncompleteRead, BadStatusLine), which the previous list let
+    # through; ValueError covers a body that is not JSON. None of these is a
+    # component that moved, and the workflow now treats an uncaught exception
+    # as a failed job, so any of them escaping would take the whole check down
+    # over one unreachable component.
+    except (OSError, http.client.HTTPException, ValueError):
         return None
     # External input: a registry that answers with a list, a string or an
     # error document must yield None, not an AttributeError that the workflow

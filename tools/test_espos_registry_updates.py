@@ -158,11 +158,27 @@ class NewestPublished(unittest.TestCase):
         )
         self.assertEqual(got, "1.0.0")
 
-    def test_network_failure_is_none(self):
-        def _boom(url, timeout=0):
-            raise TimeoutError("no registry")
+    def test_every_transport_failure_is_none(self):
+        # An uncaught exception here fails the whole job, so one unreachable
+        # component must not take the check down. Every class the stack can
+        # raise between "open" and "parsed JSON".
+        import http.client
+        import urllib.error
 
-        self.assertIsNone(newest_published("espressif/x", opener=_boom))
+        for exc in (
+            urllib.error.URLError("down"),
+            urllib.error.HTTPError("u", 500, "err", None, None),
+            TimeoutError("slow"),
+            http.client.IncompleteRead(b""),
+            http.client.BadStatusLine("garbage"),
+            OSError("connection reset mid-read"),
+            ValueError("body is not JSON"),
+        ):
+            with self.subTest(exc=type(exc).__name__):
+                def _boom(url, timeout=0, exc=exc):
+                    raise exc
+
+                self.assertIsNone(newest_published("espressif/x", opener=_boom))
 
 
 class ScalarForms(unittest.TestCase):

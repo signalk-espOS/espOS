@@ -35,14 +35,20 @@ on:
     - cron: '0 6 * * 1'
   workflow_dispatch:
 
+# Least privilege at the top; the one job that needs more says so itself.
 permissions:
   contents: read
-  issues: write
 
 jobs:
   drift:
     name: registry versions against the pins
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # The whole output of this job is an issue opened, commented on or
+      # closed. Scoped here rather than workflow-wide so a second job added
+      # later does not inherit the ability to write issues.
+      issues: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
