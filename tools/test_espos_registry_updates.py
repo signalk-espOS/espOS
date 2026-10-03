@@ -256,5 +256,54 @@ class PartialParse(unittest.TestCase):
         self.assertIn("espressif/weird", unparsed[0])
 
 
+class HostileRegistryShapes(unittest.TestCase):
+    """The registry is external input. A surprising shape must give None, not
+    an exception -- the workflow treats a crash as a failed job, so a
+    wrong-shaped response would take the whole check down."""
+
+    def _open(self, payload):
+        return lambda url, timeout=0: NewestPublished._Resp(payload)
+
+    def test_top_level_list(self):
+        self.assertIsNone(newest_published("e/x", opener=self._open([1, 2])))
+
+    def test_top_level_string(self):
+        self.assertIsNone(newest_published("e/x", opener=self._open("nope")))
+
+    def test_versions_not_a_list(self):
+        self.assertIsNone(
+            newest_published("e/x", opener=self._open({"versions": "x"})))
+
+    def test_version_entries_not_dicts(self):
+        self.assertIsNone(
+            newest_published("e/x", opener=self._open({"versions": ["1.0.0"]})))
+
+    def test_still_reads_a_good_response(self):
+        got = newest_published(
+            "e/x", opener=self._open({"versions": [{"version": "1.2.3"}]}))
+        self.assertEqual(got, "1.2.3")
+
+
+class RootPathWithBuildInIt(unittest.TestCase):
+    def test_checkout_under_a_build_directory_is_not_excluded(self):
+        # Exclusions are relative to root. Absolute matching would exclude the
+        # whole tree for a checkout at .../work/build/espOS, leaving a tool
+        # that reports nothing and looks content.
+        base = pathlib.Path(tempfile.mkdtemp()) / "build" / "espOS"
+        (base / "components" / "x").mkdir(parents=True)
+        (base / "components" / "x" / "idf_component.yml").write_text(
+            'dependencies:\n  espressif/a: "==1.0.0"\n'
+        )
+        self.assertIn("espressif/a", manifest_deps(base))
+
+    def test_managed_components_is_still_excluded(self):
+        base = pathlib.Path(tempfile.mkdtemp())
+        d = base / "managed_components" / "espressif__x"
+        d.mkdir(parents=True)
+        (d / "idf_component.yml").write_text(
+            'dependencies:\n  espressif/b: "==1.0.0"\n')
+        self.assertEqual(manifest_deps(base), {})
+
+
 if __name__ == "__main__":
     unittest.main()

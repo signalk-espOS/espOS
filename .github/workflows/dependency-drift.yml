@@ -45,6 +45,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # This job reads the manifests and talks to the registry. It never
+          # pushes, so it has no business keeping a credential in .git/config
+          # for the rest of the run.
+          persist-credentials: false
 
       - uses: actions/setup-python@v7
         with:
@@ -73,10 +78,26 @@ jobs:
             cat "$RUNNER_TEMP/report.txt"
             echo "ESPOS_EOF"
           } >> "$GITHUB_OUTPUT"
-          # Only the actionable lines decide whether an issue is raised. A
-          # registry that did not answer reports `unknown`, which must never
-          # open an issue claiming a component moved.
+          # The exit code is the authority: the script computes it from the
+          # rows, while a grep re-derives it from formatted text and would
+          # drift the day a column width changes. The grep stays as a
+          # cross-check, and a disagreement fails rather than quietly picking
+          # one -- that mismatch would mean the report and the decision had
+          # come apart.
+          #
+          # A registry that did not answer reports `unknown`, which is not
+          # actionable: an outage must never open an issue claiming a
+          # component moved.
           if grep -qE '^(behind|unpinned|unparsed) ' "$RUNNER_TEMP/report.txt"; then
+            grepped=1
+          else
+            grepped=0
+          fi
+          if [ "$rc" -ne "$grepped" ]; then
+            echo "::error::exit code $rc disagrees with the report ($grepped actionable); format and decision have come apart"
+            exit 1
+          fi
+          if [ "$rc" -eq 1 ]; then
             echo "act=true" >> "$GITHUB_OUTPUT"
           else
             echo "act=false" >> "$GITHUB_OUTPUT"

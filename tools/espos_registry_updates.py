@@ -92,7 +92,11 @@ def manifest_deps(
     """
     found: dict[str, set[str]] = {}
     for f in sorted(root.rglob("idf_component.yml")):
-        if "managed_components" in f.parts or "build" in f.parts:
+        # Relative to root, not absolute: a checkout at .../work/build/espOS
+        # would otherwise match "build" in every path and exclude the entire
+        # tree, leaving a tool that reports nothing and looks content.
+        rel = f.relative_to(root).parts
+        if "managed_components" in rel or "build" in rel:
             continue
         text = f.read_text()
         read_here: set[str] = set()
@@ -117,7 +121,19 @@ def newest_published(name: str, *, opener=urllib.request.urlopen) -> str | None:
             data = json.load(r)
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError):
         return None
-    versions = [v.get("version") for v in data.get("versions", []) if v.get("version")]
+    # External input: a registry that answers with a list, a string or an
+    # error document must yield None, not an AttributeError that the workflow
+    # now correctly treats as a crash.
+    if not isinstance(data, dict):
+        return None
+    raw = data.get("versions")
+    if not isinstance(raw, list):
+        return None
+    versions = [
+        v["version"]
+        for v in raw
+        if isinstance(v, dict) and isinstance(v.get("version"), str) and v["version"]
+    ]
     # No falling back to prereleases when there is no stable release: reporting
     # "behind, newest 2.0.0-rc1" would be advice to ship a release candidate.
     stable = [v for v in versions if not is_prerelease(v)]
