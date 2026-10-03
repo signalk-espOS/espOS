@@ -34,7 +34,7 @@ dependencies:
   ## esp_wifi_* API. esp_hosted does not declare the shim itself, so a P4
   ## build needs both lines; the rules keep them out of every other target.
   espressif/esp_wifi_remote:
-    version: "*"
+    version: "==1.6.5"
     rules:
       - if: "target == esp32p4"
   espressif/esp_hosted:

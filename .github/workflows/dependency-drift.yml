@@ -1,0 +1,217 @@
+# SPDX-FileCopyrightText: 2026 Dirk Wahrheit
+# SPDX-License-Identifier: Apache-2.0
+#
+# Dependabot for ESP-IDF components, because Dependabot does not do this: the
+# component manager is not one of its ecosystems, so nothing watches
+# idf_component.yml. .github/dependabot.yml covers github-actions and the UI's
+# npm tree, which is all it can cover.
+#
+# espos-p4-cockpit answers this by re-resolving within the declared ranges and
+# diffing dependencies.lock. That cannot work here, and the reason is worth
+# stating: espOS pins its third-party dependencies EXACTLY, so there is nothing
+# to re-resolve and the lock diff is empty however far behind the pins have
+# fallen. espOS sat on esp_hosted 2.12.x for weeks while 3.x was out and
+# nothing said so.
+#
+# So this asks the other question -- is there anything newer than what we
+# pinned? -- as a registry query per dependency
+# (tools/espos_registry_updates.py). On its first run it found mdns pinned
+# 1.11.3 against a published 1.14.0.
+#
+# Reports only, never commits. A component bump changes the binary that goes on
+# a boat, so it goes through a pull request and a build like any other change.
+name: Dependency drift
+
+# One at a time: a scheduled and a manual run overlapping could both see no
+# existing issue and each file one.
+concurrency:
+  group: dependency-drift
+  cancel-in-progress: false
+
+on:
+  schedule:
+    # Mondays 06:00 UTC, matching the weekly Dependabot cadence and the
+    # cockpit's own drift job.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+# Least privilege at the top; the one job that needs more says so itself.
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    name: registry versions against the pins
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # The whole output of this job is an issue opened, commented on or
+      # closed. Scoped here rather than workflow-wide so a second job added
+      # later does not inherit the ability to write issues.
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # This job reads the manifests and talks to the registry. It never
+          # pushes, so it has no business keeping a credential in .git/config
+          # for the rest of the run.
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+
+      - name: ask the registry
+        id: check
+        run: |
+          # No -e, deliberately, where the rest of this repository uses
+          # `set -euo pipefail`: the script exits 1 to mean "something to act
+          # on", and -e would turn that into a failed job and no issue.
+          set -uo pipefail
+          python3 tools/espos_registry_updates.py --root . > "$RUNNER_TEMP/report.txt"
+          rc=$?
+          # 0 and 1 are the script's two answers. Anything else is a crash --
+          # a traceback, a bad argument, an import error -- and `|| true` would
+          # have turned that into an empty report, no matching lines, and a
+          # green job that checked nothing. Fail loudly instead.
+          if [ "$rc" -gt 1 ]; then
+            echo "::error::espos_registry_updates.py exited $rc; report not usable"
+            cat "$RUNNER_TEMP/report.txt" || true
+            exit "$rc"
+          fi
+          # Random delimiter per run. The report carries manifest paths and
+          # dependency names straight from the tree, so a fixed marker could
+          # appear in the content and end the value early -- the runner would
+          # then read the rest of the report as `key=value` output lines, or
+          # reject the file.
+          delim="ESPOS_$(openssl rand -hex 16)"
+          {
+            echo "report<<$delim"
+            cat "$RUNNER_TEMP/report.txt"
+            echo "$delim"
+          } >> "$GITHUB_OUTPUT"
+          # The exit code is the authority: the script computes it from the
+          # rows, while a grep re-derives it from formatted text and would
+          # drift the day a column width changes. The grep stays as a
+          # cross-check, and a disagreement fails rather than quietly picking
+          # one -- that mismatch would mean the report and the decision had
+          # come apart.
+          #
+          # A registry that did not answer reports `unknown`, which is not
+          # actionable: an outage must never open an issue claiming a
+          # component moved.
+          if grep -qE '^(behind|unpinned|unparsed) ' "$RUNNER_TEMP/report.txt"; then
+            grepped=1
+          else
+            grepped=0
+          fi
+          if [ "$rc" -ne "$grepped" ]; then
+            echo "::error::exit code $rc disagrees with the report ($grepped actionable); format and decision have come apart"
+            exit 1
+          fi
+          if [ "$rc" -eq 1 ]; then
+            echo "act=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "act=false" >> "$GITHUB_OUTPUT"
+          fi
+          # Separately: did every component actually answer? `unknown` carries
+          # no exit-code signal -- it is not actionable, so rc stays 0 -- and
+          # without this the closing path below would shut an issue while
+          # claiming "every dependency is current" for a component the registry
+          # never spoke about. This grep is the only source for that fact, not
+          # a second derivation of one already computed.
+          if grep -qE '^unknown ' "$RUNNER_TEMP/report.txt"; then
+            echo "inconclusive=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "inconclusive=false" >> "$GITHUB_OUTPUT"
+          fi
+          cat "$RUNNER_TEMP/report.txt"
+
+      # Runs on every outcome, not only when there is something to report: an
+      # issue left open after the last pin was caught up says the opposite of
+      # the truth, and the next reader has to re-derive it.
+      - name: open, update or close the issue
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          # Through the environment, never interpolated into the script: this is
+          # registry-derived text, and a backtick or ${...} in it would
+          # otherwise be evaluated as JavaScript in a step holding
+          # issues: write.
+          REPORT: ${{ steps.check.outputs.report }}
+          ACT: ${{ steps.check.outputs.act }}
+          INCONCLUSIVE: ${{ steps.check.outputs.inconclusive }}
+        with:
+          script: |
+            const title = 'Registry components newer than espOS pins'
+            const act = process.env.ACT === 'true'
+            const inconclusive = process.env.INCONCLUSIVE === 'true'
+            const body = [
+              'Asked the Espressif Component Registry for the newest published',
+              'version of every third-party dependency in the manifests, and',
+              'compared it with what this tree pins.',
+              '',
+              '```',
+              process.env.REPORT ?? '',
+              '```',
+              '',
+              '- **behind** -- an exact pin with something newer published.',
+              '- **unpinned** -- a range, so the solver will take the newest it',
+              '  permits whenever it next runs, without anyone deciding to.',
+              '- **unparsed** -- a manifest declares dependencies this tool could',
+              '  not read, so something is unwatched. Fix the tool, not the manifest.',
+              '- **current** / **unknown** -- nothing to do; `unknown` is a',
+              '  registry that did not answer, never a claim that something moved.',
+              '',
+              'To take a bump: edit the manifests, regenerate the lock, and let the',
+              'PR build prove it. Flash the result before merging if it touches the',
+              'radio, display or audio path -- a component bump can change behaviour',
+              'without breaking the build, which is how esp_hosted 2.x to 3.x went.',
+              '',
+              '_Raised by `.github/workflows/dependency-drift.yml`; re-runs weekly._'
+            ].join('\n')
+
+            // Paginate: the default page is 30, and an older issue sitting past
+            // it would be invisible here and a duplicate filed instead.
+            const existing = await github.paginate(
+              github.rest.issues.listForRepo,
+              { ...context.repo, state: 'open', per_page: 100 }
+            )
+            const mine = existing.find(i => i.title === title && !i.pull_request)
+
+            if (!act) {
+              // Nothing actionable. Only CLOSE when the report is also
+              // conclusive: an `unknown` row means the registry never answered
+              // for that component, so "every dependency is current" would be
+              // a claim this run cannot support, and closing on it would drop
+              // a standing reminder on the strength of an outage.
+              if (mine && inconclusive) {
+                await github.rest.issues.createComment({
+                  ...context.repo, issue_number: mine.number,
+                  body: 'Nothing actionable this run, but the report is '
+                    + '**inconclusive**: the registry did not answer for at '
+                    + 'least one component (`unknown` below), so this cannot '
+                    + 'say they are current. Left open.\n\n```\n'
+                    + (process.env.REPORT ?? '') + '\n```'
+                })
+              } else if (mine) {
+                await github.rest.issues.createComment({
+                  ...context.repo, issue_number: mine.number,
+                  body: 'Every third-party dependency answered, and each is at '
+                    + 'the newest published version or deliberately pinned '
+                    + 'above it. Closing.\n\n```\n'
+                    + (process.env.REPORT ?? '') + '\n```'
+                })
+                await github.rest.issues.update(
+                  { ...context.repo, issue_number: mine.number, state: 'closed' })
+              }
+              // No existing issue: nothing to say either way. An outage is not
+              // actionable, so it does not open one.
+              return
+            }
+
+            if (mine) {
+              await github.rest.issues.createComment(
+                { ...context.repo, issue_number: mine.number, body })
+            } else {
+              await github.rest.issues.create({ ...context.repo, title, body })
+            }

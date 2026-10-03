@@ -63,9 +63,19 @@ dependencies:
   # ble_proto.c includes cJSON.h and builds on every target, linux included.
   # Same exact pin as espos_httpd, per the repo's registry-pinning convention.
   espressif/cjson: "==1.7.19~2"
-  # The control channel is a WebSocket client; not part of IDF core.
+  # The control channel is a WebSocket client; not part of IDF core. Exact,
+  # like the others, and the floor is the reason: the caret it replaces
+  # permitted 1.5.x, which predates the fix for the concurrent TLS read/write
+  # race in esp_websocket_client, and a floor below a known-bad version is not
+  # a floor.
+  #
+  # That race is reachable here, which is why the pin matters rather than being
+  # tidiness: ble_gateway.c sends through ws_send_json() from the Bluetooth
+  # stack task -- run_subscribes() and run_init_writes() report while holding
+  # the session lock -- while gateway_task() is what stops and destroys the
+  # client. Two tasks, one client.
   espressif/esp_websocket_client:
-    version: "^1.5.0"
+    version: "==1.8.0"
     rules:
       - if: "target != linux"
   # The ESP32-P4 has no radio: the backend routes HCI to the C6 co-processor
