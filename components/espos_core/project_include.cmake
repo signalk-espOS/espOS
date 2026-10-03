@@ -63,7 +63,7 @@ if(CONFIG_IDF_TARGET STREQUAL "esp32p4")
     # within seconds. Seen on a Waveshare P4 PoE board.
     if(NOT CONFIG_SPIRAM)
         _espos_lint_report(
-            "CONFIG_SPIRAM is off on the ESP32-P4. esp_hosted's startup allocations leave internal RAM so short that FreeRTOS cannot allocate its timer task's stack, and the board panics within seconds of every boot (\"assert failed: vApplicationGetTimerTaskMemory port_common.c:97\"). CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM is dropped without it as well."
+            "CONFIG_SPIRAM is off on the ESP32-P4. esp_hosted's startup allocations leave internal RAM so short that FreeRTOS cannot allocate its timer task's stack, and the board panics within seconds of every boot (\"assert failed: vApplicationGetTimerTaskMemory port_common.c:97\"). CONFIG_EH_HOST_PORT_DMA_PREFER_SPIRAM is dropped without it as well."
             "CONFIG_SPIRAM=y")
     endif()
 
@@ -73,12 +73,137 @@ if(CONFIG_IDF_TARGET STREQUAL "esp32p4")
     # transport stride is 64-aligned but NOT 128-aligned, so with
     # CONFIG_CACHE_L2_CACHE_LINE_128B the SDIO driver rejects PSRAM buffers
     # (ESP_ERR_INVALID_ARG; esp-hosted-mcu#219)."
-    if(CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM AND DEFINED CONFIG_CACHE_L2_CACHE_LINE_64B
+    if(CONFIG_EH_HOST_PORT_DMA_PREFER_SPIRAM AND DEFINED CONFIG_CACHE_L2_CACHE_LINE_64B
        AND NOT CONFIG_CACHE_L2_CACHE_LINE_64B)
         _espos_lint_report(
-            "CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM=y without CONFIG_CACHE_L2_CACHE_LINE_64B=y. The hosted transport's 1600-byte buffer stride is 64-aligned but not 128-aligned, so with 128-byte L2 cache lines the SDIO driver rejects the PSRAM buffers (ESP_ERR_INVALID_ARG, esp-hosted-mcu#219) and the co-processor link wedges. A 256 KB L2 cache forces 128-byte lines; use 128 KB."
+            "CONFIG_EH_HOST_PORT_DMA_PREFER_SPIRAM=y without CONFIG_CACHE_L2_CACHE_LINE_64B=y. The hosted transport's 1600-byte buffer stride is 64-aligned but not 128-aligned, so with 128-byte L2 cache lines the SDIO driver rejects the PSRAM buffers (ESP_ERR_INVALID_ARG, esp-hosted-mcu#219) and the co-processor link wedges. A 256 KB L2 cache forces 128-byte lines; use 128 KB."
             "CONFIG_CACHE_L2_CACHE_LINE_64B=y")
     endif()
+
+    # esp_hosted 3.x made the co-processor heartbeat opt-in and defaults it
+    # off. It is espos_wifi's only evidence that the radio link is alive, so
+    # without it wedge detection compiles out -- see hosted_watchdog.c. Checked
+    # here as well as there so a consumer gets the line to add rather than a
+    # #warning buried in a build log.
+    if(CONFIG_ESP_HOSTED AND NOT CONFIG_ESP_HOSTED_HOST_FEAT_HEARTBEAT)
+        _espos_lint_report(
+            "CONFIG_ESP_HOSTED is on but CONFIG_ESP_HOSTED_HOST_FEAT_HEARTBEAT is not. The heartbeat is the only signal espos_wifi has that the co-processor link is alive -- esp_hosted reports faults it detects itself but has no liveness query -- so a silently wedged SDIO link becomes undetectable and the device sits unreachable until it is power-cycled."
+            "CONFIG_ESP_HOSTED_HOST_FEAT_HEARTBEAT=y")
+    endif()
+
+    # esp_hosted 3.x renamed most host-side keys and REMOVED the 2.x
+    # spellings. IDF leaves KCONFIG_WARN_UNDEF_ASSIGN off, so an assignment to
+    # a symbol that no longer exists is dropped in silence: the SDIO pins fall
+    # back to the component's built-in defaults, the co-processor never
+    # answers, and the only symptom is a P4 with no WiFi. Nothing survives
+    # into CONFIG_* for a lint to test, so scan the defaults files themselves.
+    # The pairs are the ones espOS set through 0.13.x; docs/wifi.md has the
+    # full table.
+    set(_espos_hosted_renames
+        "ESP_HOSTED_ENABLED|ESP_HOSTED"
+        "ESP_HOSTED_SDIO_HOST_INTERFACE|ESP_HOSTED_HOST_TRANSPORT_BUS_SDIO"
+        "ESP_HOSTED_SDIO_4_BIT_BUS|ESP_HOSTED_HOST_SDIO_BUS_WIDTH_4"
+        "ESP_HOSTED_SDIO_PIN_CLK|ESP_HOSTED_HOST_SDIO_PIN_CLK"
+        "ESP_HOSTED_SDIO_PIN_CMD|ESP_HOSTED_HOST_SDIO_PIN_CMD"
+        "ESP_HOSTED_SDIO_PIN_D0|ESP_HOSTED_HOST_SDIO_PIN_D0"
+        "ESP_HOSTED_SDIO_PIN_D1|ESP_HOSTED_HOST_SDIO_PIN_D1"
+        "ESP_HOSTED_SDIO_PIN_D2|ESP_HOSTED_HOST_SDIO_PIN_D2"
+        "ESP_HOSTED_SDIO_PIN_D3|ESP_HOSTED_HOST_SDIO_PIN_D3"
+        "ESP_HOSTED_SDIO_GPIO_RESET_SLAVE|ESP_HOSTED_HOST_RESET_GPIO"
+        "ESP_HOSTED_SDIO_CLOCK_FREQ_KHZ|ESP_HOSTED_HOST_SDIO_CLK_KHZ"
+        "ESP_HOSTED_SDIO_OPTIMIZATION_RX_STREAMING_MODE|ESP_HOSTED_HOST_SDIO_RX_STREAMING_MODE"
+        "ESP_HOSTED_SLAVE_RESET_ON_EVERY_HOST_BOOTUP|ESP_HOSTED_HOST_CP_RESET_STRATEGY_ALWAYS"
+        "ESP_HOSTED_MEMPOOL_PREFER_SPIRAM|EH_HOST_PORT_DMA_PREFER_SPIRAM"
+        "ESP_HOSTED_TRANSPORT_RESTART_ON_FAILURE|ESP_HOSTED_HOST_TRANSPORT_RESTART_ON_FAILURE"
+        "ESP_HOSTED_ENABLE_BT_BLUEDROID|ESP_HOSTED_HOST_FEAT_BT"
+        "ESP_HOSTED_ENABLE_BT_NIMBLE|ESP_HOSTED_HOST_FEAT_BT")
+
+    # Removed in 3.x with no successor, so "set this instead" is the wrong
+    # advice -- and the two families are removed for different reasons, so they
+    # carry different messages. Reset polarity is no longer configurable: 3.x
+    # always drives park-high / 10 ms low / park-high (eh_host_port_power.c,
+    # "CP reset is its EN pin: LOW asserts reset, HIGH runs it"). That is the
+    # waveform 2.x produced from ACTIVE_HIGH, so a board on ACTIVE_HIGH is
+    # unaffected -- but a board that needed the other polarity has no knob any
+    # more and its co-processor will not come out of reset, which is a hardware
+    # fact no sdkconfig line can fix.
+    set(_espos_hosted_gone_reset
+        "ESP_HOSTED_SDIO_RESET_ACTIVE_HIGH"
+        "ESP_HOSTED_SDIO_RESET_ACTIVE_LOW"
+        "ESP_HOSTED_SPI_RESET_ACTIVE_HIGH"
+        "ESP_HOSTED_SPI_RESET_ACTIVE_LOW"
+        "ESP_HOSTED_SPI_HD_RESET_ACTIVE_HIGH"
+        "ESP_HOSTED_SPI_HD_RESET_ACTIVE_LOW"
+        "ESP_HOSTED_UART_RESET_ACTIVE_HIGH"
+        "ESP_HOSTED_UART_RESET_ACTIVE_LOW")
+    set(_espos_hosted_gone_reset_why
+        "esp_hosted 3.x removed it: reset polarity is now fixed at park-high / 10 ms low / park-high, which is what 2.x produced from ACTIVE_HIGH. A board that needed the opposite polarity will not bring its co-processor out of reset, and no sdkconfig line can change that.")
+
+    # The HCI-transport knobs went a different way: 3.x keeps the core a
+    # stack-agnostic HCI byte pipe and the application binds a stack with
+    # esp_hosted_bt_host_stack_setup(), which picks it from the IDF BT Kconfig.
+    # CONFIG_BT_{BLUEDROID,NIMBLE}_ENABLED is that selector, not a replacement
+    # for these -- a project already sets it.
+    set(_espos_hosted_gone_hci
+        "ESP_HOSTED_BLUEDROID_HCI_VHCI"
+        "ESP_HOSTED_NIMBLE_HCI_VHCI")
+    set(_espos_hosted_gone_hci_why
+        "esp_hosted 3.x removed it: the HCI binding moved into esp_hosted_bt_host_stack_setup(), which takes the stack from the IDF BT Kconfig the project already sets. Enable CONFIG_ESP_HOSTED_HOST_FEAT_BT and call that function after esp_hosted_connect_to_slave() (docs/ble.md).")
+
+    # The defaults files to scan. Taken from the SDKCONFIG_DEFAULTS build
+    # PROPERTY, not the same-named variable: project.cmake has already made
+    # every entry absolute by then (`get_filename_component(... ABSOLUTE)`) and
+    # folded in the $ENV{SDKCONFIG_DEFAULTS} and project-default cases, whereas
+    # the variable is whatever the caller wrote and may be relative. A relative
+    # path here would simply not exist from this scope, and the whole scan would
+    # skip in silence -- a lint that lints nothing. Falls back to the variable
+    # and then to the project's own file, each made absolute, in case a future
+    # IDF stops setting the property.
+    idf_build_get_property(_espos_defaults_seed SDKCONFIG_DEFAULTS)
+    if(NOT _espos_defaults_seed)
+        if(SDKCONFIG_DEFAULTS)
+            set(_espos_defaults_seed "${SDKCONFIG_DEFAULTS}")
+        else()
+            set(_espos_defaults_seed "${CMAKE_SOURCE_DIR}/sdkconfig.defaults")
+        endif()
+    endif()
+    # kconfig.cmake pairs each entry with its .<target> sibling; mirror that.
+    set(_espos_defaults_files)
+    foreach(_f IN LISTS _espos_defaults_seed)
+        get_filename_component(_f "${_f}" ABSOLUTE BASE_DIR "${CMAKE_SOURCE_DIR}")
+        list(APPEND _espos_defaults_files "${_f}" "${_f}.${IDF_TARGET}")
+    endforeach()
+
+    foreach(_f IN LISTS _espos_defaults_files)
+        if(NOT EXISTS "${_f}")
+            continue()
+        endif()
+        file(STRINGS "${_f}" _lines REGEX "^CONFIG_[A-Z0-9_]+=")
+        foreach(_fam "reset" "hci")
+            foreach(_gone IN LISTS _espos_hosted_gone_${_fam})
+                foreach(_line IN LISTS _lines)
+                    if(_line MATCHES "^CONFIG_${_gone}=")
+                        _espos_lint_report(
+                            "${_f} sets CONFIG_${_gone}. ${_espos_hosted_gone_${_fam}_why}"
+                            "(delete the CONFIG_${_gone} line)")
+                    endif()
+                endforeach()
+            endforeach()
+        endforeach()
+
+        foreach(_pair IN LISTS _espos_hosted_renames)
+            string(REPLACE "|" ";" _p "${_pair}")
+            list(GET _p 0 _old)
+            list(GET _p 1 _new)
+            foreach(_line IN LISTS _lines)
+                if(_line MATCHES "^CONFIG_${_old}=")
+                    _espos_lint_report(
+                        "${_f} sets CONFIG_${_old}, an esp_hosted 2.x key. 3.x removed it and IDF drops assignments to undefined symbols without a word, so the setting is simply lost."
+                        "CONFIG_${_new}=<the value CONFIG_${_old} had>   (and delete the CONFIG_${_old} line)")
+                endif()
+            endforeach()
+        endforeach()
+    endforeach()
 
     # From espos.defaults.esp32p4: "IDF defaults this to 6, but silently
     # raises it to 16 as soon as a project enables PSRAM
@@ -215,6 +340,13 @@ if(_espos_lint_problems)
         "${_espos_lint_fix}")
 endif()
 
+unset(_espos_hosted_renames)
+unset(_espos_hosted_gone_reset)
+unset(_espos_hosted_gone_reset_why)
+unset(_espos_hosted_gone_hci)
+unset(_espos_hosted_gone_hci_why)
+unset(_espos_defaults_files)
+unset(_espos_defaults_seed)
 unset(_espos_lint_fix)
 unset(_espos_lint_problems)
 unset(_espos_lint_lines)

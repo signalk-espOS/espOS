@@ -71,7 +71,12 @@ dependencies:
   # The ESP32-P4 has no radio: the backend routes HCI to the C6 co-processor
   # through esp_hosted, so it includes those headers on that target.
   espressif/esp_hosted:
-    version: "^2.12.0"
+    version: "==3.0.9"
+    # Exact, not a range: 3.0 renamed fourteen host-side Kconfig keys,
+    # and IDF drops an assignment to a symbol that no longer exists
+    # without a word -- so a minor bump that renames again gives a P4
+    # with no WiFi and no build error (docs/wifi.md). The weekly
+    # registry-smoke workflow is where a newer version gets tried.
     rules:
       - if: "target == esp32p4"
   signalk-espos/espos_event:

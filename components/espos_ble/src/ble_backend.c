@@ -28,9 +28,14 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 
-#if defined(CONFIG_ESP_HOSTED_ENABLE_BT_BLUEDROID)
+/* esp_hosted 3.x: the hosted BT feature flag is CONFIG_ESP_HOSTED_HOST_FEAT_BT.
+ * 2.x spelled it CONFIG_ESP_HOSTED_ENABLE_BT_BLUEDROID + ..._BLUEDROID_HCI_VHCI
+ * and 3.0 removed both, along with esp_hosted_bluedroid.h -- so a stale gate
+ * silently selects the NATIVE controller branch below on a P4, which has no
+ * radio of its own, and the gateway comes up scanning nothing. */
+#if defined(CONFIG_ESP_HOSTED_HOST_FEAT_BT)
 #include "esp_hosted.h"
-#include "esp_hosted_bluedroid.h"
+#include "esp_hosted_bt_host_stack.h"
 #else
 #include "esp_bt.h"
 #endif
@@ -159,23 +164,33 @@ static void gattc_trampoline(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if,
 
 static esp_err_t controller_up(void)
 {
-#if defined(CONFIG_ESP_HOSTED_ENABLE_BT_BLUEDROID)
-    /* ESP32-P4: the controller lives on the C6. Order is load-bearing -
-     * enabling the remote controller is what populates the VHCI driver's
-     * function pointers, so attaching the HCI driver first faults on the
-     * first call through them (verified 2026-08-21). */
+#if defined(CONFIG_ESP_HOSTED_HOST_FEAT_BT)
+    /* ESP32-P4: the controller lives on the C6, reached over esp_hosted's HCI
+     * byte pipe.
+     *
+     * esp_hosted 3.0 moved the stack glue out of the hosted core into an
+     * adapter with one entry point, and that entry point now owns the order
+     * this code used to get right by hand: enabling the remote controller is
+     * what populates the VHCI driver's function pointers, so attaching the
+     * HCI driver first faulted on the first call through them (verified
+     * 2026-08-21, espOS 0.2.x). esp_hosted_bt_host_stack_setup() does the
+     * controller init+enable and the HCI bind in that order, and adds the
+     * bounded wait for the co-processor's controller that the hand-rolled
+     * sequence never had -- so a slave that is slow to bring BT up is a
+     * retry rather than a fault.
+     *
+     * There is no hosted-side stack knob any more: 3.x picks the stack from
+     * the IDF BT Kconfig. The _CONFIG_BLUEDROID() initialiser is used rather
+     * than _CONFIG_DEFAULT() because the latter resolves to CUSTOM when
+     * neither BT stack is enabled, and a silent CUSTOM binding would be a
+     * gateway that scans nothing. Naming the stack makes the mismatch a
+     * compile-time fact instead. */
     ESP_RETURN_ON_ERROR(esp_hosted_init(), TAG, "esp_hosted_init");
     ESP_RETURN_ON_ERROR(esp_hosted_connect_to_slave(), TAG, "connect_to_slave");
-    ESP_RETURN_ON_ERROR(esp_hosted_bt_controller_init(), TAG, "bt_controller_init");
-    ESP_RETURN_ON_ERROR(esp_hosted_bt_controller_enable(), TAG, "bt_controller_enable");
 
-    hosted_hci_bluedroid_open();
-    esp_bluedroid_hci_driver_operations_t ops = {
-        .send = hosted_hci_bluedroid_send,
-        .check_send_available = hosted_hci_bluedroid_check_send_available,
-        .register_host_callback = hosted_hci_bluedroid_register_host_callback,
-    };
-    ESP_RETURN_ON_ERROR(esp_bluedroid_attach_hci_driver(&ops), TAG, "attach_hci");
+    esp_hosted_bt_host_stack_cfg_t bt_cfg = ESP_HOSTED_BT_HOST_STACK_CONFIG_BLUEDROID();
+    bt_cfg.controller_ready_timeout_ms = EH_BT_CTRL_DEFAULT_READY_TIMEOUT_MS;
+    ESP_RETURN_ON_ERROR(esp_hosted_bt_host_stack_setup(&bt_cfg), TAG, "bt_host_stack_setup");
 #else
     /* Native controller. Classic BT memory is released because this is a
      * BLE-only gateway and that RAM is scarce. */

@@ -67,6 +67,70 @@ esp_err_t espos_httpd_register_ex(const httpd_uri_t *uri, uint32_t flags);
 bool espos_httpd_request_authenticated(httpd_req_t *req);
 
 /**
+ * What a radio co-processor reports about itself, for
+ * `GET /api/v1/system/info`'s `hardware.coprocessor`.
+ *
+ * On a host whose radio is a separate chip (an ESP32-P4 with an ESP32-C6 over
+ * SDIO), esp_hosted compares its own version against the co-processor's and
+ * warns that a mismatch causes RPC timeouts -- once, into the log ring, which
+ * rotates. That left the standing precondition for a whole class of failure
+ * visible nowhere (espOS #164).
+ *
+ * The type is declared here rather than in espos_wifi because the consumer
+ * owns it: espos_wifi already includes this header, so the producer can fill
+ * it without espos_httpd naming a radio.
+ *
+ * A false return means there is nothing to report, which covers both a chip
+ * that is its own radio and a co-processor that has not answered -- the two are
+ * not distinguishable, and both mean the same thing to a reader.
+ */
+/* Every string in espos_httpd_coproc_t, including its NUL. 16 fits
+ * "255.255.255" and "esp32c61" with room to spare. Named because the producer
+ * lives in another component and should not spell the size again. */
+#define ESPOS_HTTPD_COPROC_STRING_MAX 16
+
+typedef struct {
+    char version[ESPOS_HTTPD_COPROC_STRING_MAX];      /* the co-processor's firmware,
+                                                         "2.12.3". "0.0.0" means it
+                                                         announced no version at all,
+                                                         which is what an image older
+                                                         than the version TLV looks
+                                                         like -- a fact, not a
+                                                         failure. */
+    char host_version[ESPOS_HTTPD_COPROC_STRING_MAX]; /* what this build's esp_hosted
+                                                         expects to talk to */
+    char target[ESPOS_HTTPD_COPROC_STRING_MAX];       /* the co-processor's chip,
+                                                         "esp32c6"; "" when unknown */
+    bool stale;            /* esp_hosted's verdict: the co-processor is behind */
+} espos_httpd_coproc_t;
+/* Layout is frozen. The consumer declares it and the producer -- a different
+ * component -- fills a caller-owned instance through the hook below, so
+ * appending a member makes a newer producer write past an older caller's
+ * buffer. espOS's components are version-locked within one firmware, which is
+ * why there is no size or version field; a change here is an
+ * ESPOS_ABI_VERSION bump, and a new field that is not worth one belongs in the
+ * JSON rather than the struct. */
+
+/**
+ * Fill `out` with the co-processor's identity; false when there is none to
+ * report. Weakly defined in espos_httpd and overridden by whichever component
+ * owns the transport (espos_wifi on a hosted target).
+ *
+ * Declared here so the weak stub and the strong definition are checked against
+ * one prototype: the linker accepts a mismatched pair in silence, and a hook
+ * whose object was never pulled in resolves to the stub just as silently --
+ * which is how espos_time's wallclock hook shipped broken (espOS #49). Verify
+ * the override with `nm` (T, not W) as well.
+ *
+ * Called on the httpd task. An override must answer from memory it already
+ * holds: no driver call, no RPC to the co-processor, no waiting on one. Not
+ * just "do not block" -- the RPC channel is the thing that wedges, and a
+ * status endpoint that can reach for it is a status endpoint that stops
+ * answering exactly when somebody is trying to find out why.
+ */
+bool espos_httpd_coprocessor_hook(espos_httpd_coproc_t *out);
+
+/**
  * Exempt requests arriving on the setup access point from the API key for
  * `seconds`, as proof that somebody is at the device. 0 closes the window.
  *

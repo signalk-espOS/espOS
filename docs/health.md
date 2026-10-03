@@ -118,6 +118,7 @@ resets, record contents.
 | `memoryTrough` | the policy tick | `WARN` | no (never) | the low-water mark of free internal RAM since boot is below `CONFIG_ESPOS_HEALTH_INTERNAL_TROUGH_WARN_KB` (10) |
 | `taskStalled` | the policy tick | `ALARM` | **yes** | a task registered with `espos_health_watch_task()` has not called `espos_health_kick()` for its timeout |
 | `netDown` | `espos_core` | `WARN` | no | `ESPOS_EVENT_NETWORK_DOWN`; cleared on `NETWORK_UP` |
+| `coprocessorStale` | `espos_wifi`, on the first co-processor heartbeat | `WARN` | no | `esp_hosted`'s own compatibility verdict (`eh_host_mcu_transport_verify_fw_compat()`) says the co-processor is behind this build, which `esp_hosted` warns causes RPC timeouts. Its verdict, not a comparison espOS makes, so the two cannot disagree. Reported once per boot; `NORMAL` whenever the host is **not** newer, which covers equal versions, a patch-level difference, and a host that is itself behind -- a different problem, and not this condition's. Hosted targets only ([hardware.md](hardware.md#updating-the-c6-co-processor-firmware)) |
 | `skLinkStalled` | `espos_sk` | `ALARM` | **yes** | WiFi reports connected, the stream has worked once this boot, yet it has been down for `sk.stall_s` (300 s, min 60) |
 
 ### `lowMemory` and `memoryTrough` answer different questions
@@ -322,9 +323,9 @@ For a drill that must end at a known moment, clear it explicitly with
 ## Sizing
 
 `CONFIG_ESPOS_HEALTH_MAX_CONDITIONS` (default 12) is the number of distinct
-keys; espOS itself uses up to five (`lowMemory`, `memoryTrough`, `taskStalled`,
-`netDown`, `skLinkStalled`), plus one slot per distinct `test.` key a drill has
-used — and a key keeps its slot for the life of the boot, so a test script should
+keys; espOS itself uses up to seven (`lowMemory`, `memoryTrough`, `taskStalled`,
+`netDown`, `skLinkStalled`, `skCertificate`, and `coprocessorStale` on a hosted
+target), plus one slot per distinct `test.` key a drill has used — and a key keeps its slot for the life of the boot, so a test script should
 reuse one rather than invent one per run.
 `CONFIG_ESPOS_HEALTH_MAX_SINKS` (default 4) is the number of
 consumers. Both are fixed tables — the set of conditions a firmware can raise

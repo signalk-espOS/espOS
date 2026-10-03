@@ -141,7 +141,7 @@ Everything espOS knows about that transport is in
 `sdkconfig.d/espos.defaults.esp32p4`, which every P4 build inherits:
 
 * **SDIO pinout** for the Waveshare family: slot 1, 4-bit bus, `CLK` 18,
-  `CMD` 19, `D0..D3` 14–17, C6 reset on GPIO 54 (active high), 40 MHz.
+  `CMD` 19, `D0..D3` 14–17, C6 reset on GPIO 54, 40 MHz.
   Another P4 board changes these lines in its own `sdkconfig.defaults`.
 * **Three load-bearing settings**, explained in [WiFi → Design
   notes](wifi.md#design-notes): the receive block-ack window
@@ -158,7 +158,51 @@ Everything espOS knows about that transport is in
   (`assert failed: vApplicationGetTimerTaskMemory`). The hosted mempool
   setting above also needs it, and IDF drops that one silently without.
 
-The co-processor needs no reflashing: a stock C6 slave reports
+### Updating the C6 co-processor firmware
+
+For what espOS uses, the co-processor needs no reflashing — but that is about
+its *capabilities*, not its version, and the two fail differently.
+
+`esp_hosted` compares its own version against the slave's at every boot and
+says so once, into the log ring, which rotates:
+
+```
+I transport: esp-hosted fw versions: host=3.0.9 coprocessor=0.0.0
+E transport: major version mismatch — OTA coprocessor from host
+```
+
+`0.0.0` means the slave's init event carried no `ESP_PRIV_FIRMWARE_VERSION`
+TLV — an image old enough not to announce itself. The same facts are also
+readable at any time as `hardware.coprocessor` in
+`GET /api/v1/system/info`, and raised as the `coprocessorStale` health
+condition, because the lines above are the only other evidence and a device
+that has been up for days has lost them to the log ring.
+
+espOS reads them from the TLVs `esp_hosted` already parsed, not from
+`esp_hosted_get_coprocessor_fwversion()`. The public API is an RPC to the
+co-processor, and a co-processor worth warning about is the one whose RPC
+times out — so the query would fail exactly when the answer matters. The
+`stale` flag is `esp_hosted`'s own comparison, not a second opinion.
+
+Whether it matters in practice is not something espOS can tell you: both P4
+panels here have run for months on a stock slave, and the one device seen with
+`0.0.0` also spent 45 hours failing to associate before a reboot cleared it
+([espOS #136](https://github.com/signalk-espOS/espOS/issues/136)) — suggestive,
+not demonstrated. Treat the condition as a precondition worth removing before
+chasing RPC timeouts, not as a diagnosis.
+
+The co-processor image is built and flashed from `esp_hosted`'s own tree, not
+from espOS, with the C6 on its own USB port. In 3.x that is `coprocessor/`
+plus a per-example `cp/` project (`examples/system/get_cp_fw_version/cp` is the
+smallest), which is a different layout from the `slave/` directory 2.x used —
+so follow Espressif's instructions for the version this build pins rather than
+a recipe from this page. **Not exercised here**: no co-processor has been
+reflashed on this bench. On the PoE board, remember that
+USB and Ethernet must not be connected at the same time.
+
+### Capabilities
+
+A stock C6 slave reports
 `capabilities: 0xd` — WLAN and BT over SDIO, BLE only — which is what the BLE
 gateway uses (HCI over SDIO, Bluedroid host on the P4). Two limits of that
 path, from [BLE gateway → Targets](ble.md#targets): **BLE 4.2 only** (the

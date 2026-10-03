@@ -409,6 +409,15 @@ export function startMock(port = 8484) {
           hardware: { mac: "60:55:f9:00:1a:2b", cpu_mhz: 160, flash_bytes: 8 * 1024 * 1024,
             ram_internal_bytes: 512 * 1024, ram_psram_bytes: 0,
             features: ["wifi", "ble", "802.15.4", "embedded-flash"],
+            // No hardware.coprocessor here on purpose. This mock is a C6
+            // DevKit -- chip, board and /ota/status target all say so -- and a
+            // C6 is its own radio, so the field cannot exist on it. Adding it
+            // would also contradict healthBody(), which raises no
+            // coprocessorStale. Nothing in ui/src reads the field today; when
+            // something does, turn this mock into a P4 as ONE change (chip,
+            // board, OTA target, the coprocessor object AND the matching
+            // health condition) rather than bolting the field onto a device
+            // that cannot have it.
             board: "Espressif ESP32-C6-DevKitC-1" } });
       }
       if (r === "/system/reboot" && m === "POST") { if (!needJson(req, res)) return; logAndMark("W", "espos_httpd", "restarting"); return json(res, 202, { status: "rebooting" }); }
