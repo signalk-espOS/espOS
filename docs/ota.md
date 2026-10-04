@@ -36,8 +36,8 @@ the certificate check for self-signed boat servers.
 
 Not to be confused with `httpd.api_key`, the password for the REST API
 ([rest-api.md](rest-api.md)) that a fleet manager such as
-signalk-espos-manager calls its "fleet API key". That key only guards the web
-API and can be changed at any time. The signing key decides which firmware a
+signalk-espos-manager calls its "fleet API key". That key guards the web API
+and the web UI login ([ui.md](ui.md)), and can be changed at any time. The signing key decides which firmware a
 device will install, and losing it means a USB reflash for every device.
 With hardware Secure Boot the keys in eFuse decide instead (see below), and
 even a USB reflash must be signed with one of them.
@@ -46,7 +46,8 @@ Who holds which signing key: a developer's own build signs with a key
 generated in their checkout, so only devices they flashed from it accept
 their updates. A published release is signed by its project owner with a
 key kept as a CI secret. The firmware registry neither signs nor verifies
-images; it records each project's key fingerprint (`signingKeyId`) so a
+images; it records a project's key fingerprint (`signingKeyId`), when the
+project supplies one, so a
 fleet manager can tell before downloading that a device without hardware
 Secure Boot would refuse an update.
 
