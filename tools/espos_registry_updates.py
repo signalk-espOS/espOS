@@ -222,13 +222,63 @@ def report(root: pathlib.Path, *, fetch=newest_published) -> list[dict]:
     return rows
 
 
+def bumpable(rows: list[dict]) -> list[dict]:
+    """The rows a job can turn into a pull request, as {name, from, to}.
+
+    Deliberately narrower than "behind". A row is bumpable only when the tree
+    speaks with one voice about it: a SINGLE exact pin, and a newest version
+    the registry actually answered with. The two excluded cases are excluded
+    on purpose --
+
+      * `unpinned` is a range. Bumping it would mean choosing to pin, which is
+        a decision about policy, not a version.
+      * `pinned inconsistently` is several different exact pins for one
+        component. Which one is right is exactly the question, and a tool that
+        picked would hide it.
+
+    Both still reach a human through the issue the workflow files.
+    """
+    out = []
+    for r in rows:
+        if r["state"] != "behind" or not r["newest"]:
+            continue
+        exact = {x[2:] for x in r["ranges"] if x.startswith("==")}
+        if len(exact) != 1 or len(exact) != len(r["ranges"]):
+            continue
+        out.append({"name": r["name"], "from": exact.pop(), "to": r["newest"]})
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--root", default=".", type=pathlib.Path)
     ap.add_argument("--json", action="store_true", help="machine-readable output")
+    ap.add_argument(
+        "--bumpable",
+        action="store_true",
+        help="print only the rows a workflow can open a pull request for",
+    )
+    ap.add_argument(
+        "--bumpable-out",
+        type=pathlib.Path,
+        metavar="PATH",
+        help="also write the bumpable rows as JSON to PATH, so one run of "
+        "this tool feeds both the report and the matrix built from it",
+    )
     args = ap.parse_args(argv)
 
     rows = report(args.root)
+    # Written before any early return, so the file and whatever is printed
+    # always describe the same registry pass. Querying twice could report a
+    # pin as behind and then hand an empty matrix to the job that acts on it,
+    # if a version landed or the registry faltered between the two runs.
+    if args.bumpable_out:
+        args.bumpable_out.write_text(json.dumps(bumpable(rows)), encoding="utf-8")
+    if args.bumpable:
+        # Always exit 0: "nothing to bump" is a normal week, not a failure,
+        # and this output feeds a matrix rather than a decision.
+        print(json.dumps(bumpable(rows)))
+        return 0
     if args.json:
         print(json.dumps(rows, indent=2))
     else:

@@ -183,9 +183,22 @@ however far behind the pins are.
 
 So `.github/workflows/dependency-drift.yml` asks the other question weekly —
 *is there anything newer than what we pinned?* — by querying the registry per
-dependency (`tools/espos_registry_updates.py`) and opening or updating one
-issue. It reports; it never commits, because a component bump changes the
-binary that goes on a boat.
+dependency (`tools/espos_registry_updates.py`).
+
+A pin it can bump on its own becomes a **pull request**, one per component:
+`tools/espos_apply_bump.py` rewrites every manifest that pins the component and
+`scripts/regen_lock.sh` regenerates `dependencies.lock`. It never pushes to
+`main` — a component bump changes the binary that goes on a boat, so it goes
+through a review and a build like any other change. One PR per component rather
+than one for all of them, so a bump that turns out to be risky can be held while
+the rest merge.
+
+What it will **not** bump on its own, and files as an issue instead:
+
+- a **range**, because bumping it means deciding to pin, which is policy;
+- several **different exact pins** for one component, because which one is
+  right is exactly the question;
+- a manifest it could not **read**.
 
 Run it by hand any time:
 
@@ -207,10 +220,39 @@ Exit status is 1 when anything is `behind`, `unpinned` or `unparsed`, and 0
 otherwise. Anything above 1 is the tool itself failing, which the workflow
 turns into a failed job rather than an empty report.
 
-Taking a bump is a pull request: edit the manifests, regenerate the lock, let
-the build prove it, and flash the result first where it touches the radio,
-display or audio path. A component bump can change behaviour without breaking
-the build, which is exactly how `esp_hosted` 2.x → 3.x behaved.
+### Reviewing a bump pull request
+
+Read the component's changelog. A bump can change behaviour without breaking
+the build, and two have:
+
+- **`esp_hosted` 2.x → 3.x** renamed fourteen host-side Kconfig keys, and IDF
+  drops an assignment to a symbol that no longer exists without a word — a
+  green build with no WiFi.
+- **`esp-sr` 2.5.3 → 2.5.5** moved 1.42 MB out of the `esp-dl` portion of the
+  speech stack and dropped `esp-dsp` on esp32p4 by a new target rule, with no
+  line of espOS changing.
+
+Flash it before merging where it touches the radio, display or audio path.
+
+### Regenerating the lock by hand
+
+```sh
+scripts/regen_lock.sh          # regenerate in place
+scripts/regen_lock.sh --check  # regenerate and fail if it differed
+```
+
+Always on **esp32s3**, the target the committed lock records, and always from
+the whole app: building a narrow project rewrites the lock to that project's
+closure and silently drops `esp-sr`, `esp-dl`, `dl_fft`, `esp_new_jpeg`,
+`esp_websocket_client`, `cjson`, `littlefs` and `mdns`. The script asserts both
+rather than trusting them.
+
+Nothing re-solves the lock on its own: the component manager rewrites only the
+entries a *changed* manifest touches, so an entry nobody edits keeps its old
+value indefinitely. A release is exactly that case — release-please rewrites
+every `espos_*` manifest and re-solves nothing, so 0.15.0 shipped with all
+fourteen lock entries still reading 0.14.0. **Run `scripts/regen_lock.sh` after
+a release bump and commit the result.**
 
 ## Versioning
 
