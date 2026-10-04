@@ -34,6 +34,20 @@ the certificate check for self-signed boat servers.
 
 ## Signing key
 
+Not to be confused with `httpd.api_key`, the password for the REST API
+([rest-api.md](rest-api.md)) that a fleet manager such as
+signalk-espos-manager calls its "fleet API key". That key only guards the web
+API and can be changed at any time. The signing key decides which firmware a
+device will install, and losing it means a USB reflash for every device.
+
+Who holds which signing key: a developer's own build signs with a key
+generated in their checkout, so only devices they flashed from it accept
+their updates. A published release is signed by its project owner with a
+key kept as a CI secret. The firmware registry neither signs nor verifies
+images; it records each project's key fingerprint (`signingKeyId`) so a
+fleet manager can tell before downloading that a device would refuse an
+update.
+
 `sdkconfig.d/espos.defaults` turns on *Require signed app images* with the RSA
 scheme and signs every build with `secure_boot_signing_key.pem` in the
 project root. That file is **git-ignored and never committed**. When it is
