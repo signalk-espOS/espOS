@@ -18,8 +18,19 @@
 # (tools/espos_registry_updates.py). On its first run it found mdns pinned
 # 1.11.3 against a published 1.14.0.
 #
-# Reports only, never commits. A component bump changes the binary that goes on
-# a boat, so it goes through a pull request and a build like any other change.
+# A `behind` pin now becomes a PULL REQUEST, one per component, with the
+# manifests edited and dependencies.lock regenerated. It never pushes to main:
+# a component bump changes the binary that goes on a boat, so it goes through a
+# review and a build like any other change -- and one PR per component means a
+# bump that turns out to be risky can be held while the others merge. esp-sr
+# 2.5.3 -> 2.5.5 moved 1.42 MB out of the esp-dl portion of the speech stack
+# without touching a line of espOS, which is the kind of thing a single
+# combined PR would have buried.
+#
+# What does NOT become a pull request, and still reaches the issue: a range
+# (bumping it means deciding to pin, which is policy), several different exact
+# pins for one component (which one is right IS the question), and a manifest
+# this tool could not read.
 name: Dependency drift
 
 # One at a time: a scheduled and a manual run overlapping could both see no
@@ -42,6 +53,9 @@ permissions:
 jobs:
   drift:
     name: registry versions against the pins
+    outputs:
+      bumpable: ${{ steps.check.outputs.bumpable }}
+      any: ${{ steps.check.outputs.any }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -74,7 +88,9 @@ jobs:
           # errexit exempts, so the exit code survives and the rest of the
           # script still fails loudly on a genuine error.
           rc=0
-          python3 tools/espos_registry_updates.py --root . > "$RUNNER_TEMP/report.txt" || rc=$?
+          python3 tools/espos_registry_updates.py --root . \
+            --bumpable-out "$RUNNER_TEMP/bumpable.json" \
+            > "$RUNNER_TEMP/report.txt" || rc=$?
           # 0 and 1 are the script's two answers. Anything else is a crash --
           # a traceback, a bad argument, an import error -- and `|| true` would
           # have turned that into an empty report, no matching lines, and a
@@ -130,6 +146,34 @@ jobs:
           else
             echo "inconclusive=false" >> "$GITHUB_OUTPUT"
           fi
+          # And a third distinct fact, not a re-derivation either: is there
+          # anything left for an ISSUE to carry? A `behind` row with one exact
+          # pin becomes a pull request, and filing an issue about it as well
+          # would be two notifications for one thing. What cannot become a
+          # pull request still needs somewhere to land:
+          #   unpinned  -- bumping it means deciding to pin, which is policy
+          #   unparsed  -- a manifest nothing is watching
+          #   behind, "pinned inconsistently" -- which pin is right IS the
+          #              question, so a tool that picked would hide it
+          if grep -qE '^(unpinned|unparsed) ' "$RUNNER_TEMP/report.txt" \
+             || grep -q 'pinned inconsistently' "$RUNNER_TEMP/report.txt"; then
+            echo "needs_issue=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "needs_issue=false" >> "$GITHUB_OUTPUT"
+          fi
+          # The rows a pull request can be opened for, chosen in Python where
+          # the rule is unit-tested, not re-derived from formatted text here --
+          # and written by the SAME run that produced the report above, so the
+          # two cannot disagree about what the registry said. A second query
+          # could report a pin as behind and then hand an empty matrix to the
+          # job that acts on it.
+          bumpable=$(cat "$RUNNER_TEMP/bumpable.json")
+          echo "bumpable=$bumpable" >> "$GITHUB_OUTPUT"
+          if [ "$bumpable" = "[]" ]; then
+            echo "any=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "any=true" >> "$GITHUB_OUTPUT"
+          fi
           cat "$RUNNER_TEMP/report.txt"
 
       # Runs on every outcome, not only when there is something to report: an
@@ -143,7 +187,7 @@ jobs:
           # otherwise be evaluated as JavaScript in a step holding
           # issues: write.
           REPORT: ${{ steps.check.outputs.report }}
-          ACT: ${{ steps.check.outputs.act }}
+          ACT: ${{ steps.check.outputs.needs_issue }}
           INCONCLUSIVE: ${{ steps.check.outputs.inconclusive }}
         with:
           script: |
@@ -160,6 +204,9 @@ jobs:
               '```',
               '',
               '- **behind** -- an exact pin with something newer published.',
+              '  A single exact pin gets its own pull request instead of a line',
+              '  here; one listed below is pinned INCONSISTENTLY across',
+              '  manifests, and which pin is right is the question.',
               '- **unpinned** -- a range, so the solver will take the newest it',
               '  permits whenever it next runs, without anyone deciding to.',
               '- **unparsed** -- a manifest declares dependencies this tool could',
@@ -167,10 +214,8 @@ jobs:
               '- **current** / **unknown** -- nothing to do; `unknown` is a',
               '  registry that did not answer, never a claim that something moved.',
               '',
-              'To take a bump: edit the manifests, regenerate the lock, and let the',
-              'PR build prove it. Flash the result before merging if it touches the',
-              'radio, display or audio path -- a component bump can change behaviour',
-              'without breaking the build, which is how esp_hosted 2.x to 3.x went.',
+              'Everything listed here needs a decision a tool cannot make. Bumps',
+              'that CAN be taken automatically are already open as pull requests.',
               '',
               '_Raised by `.github/workflows/dependency-drift.yml`; re-runs weekly._'
             ].join('\n')
@@ -220,3 +265,150 @@ jobs:
             } else {
               await github.rest.issues.create({ ...context.repo, title, body })
             }
+
+  # One pull request per component, so a bump that turns out to change
+  # behaviour can be held while the others merge.
+  bump:
+    name: "bump ${{ matrix.dep.name }} -> ${{ matrix.dep.to }}"
+    needs: drift
+    if: needs.drift.outputs.any == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      pull-requests: write
+    strategy:
+      fail-fast: false
+      # Serial on purpose: every one of these regenerates the same
+      # dependencies.lock and pushes to the same remote. Parallel runs would
+      # race on the push and interleave in the logs for no gain -- a week with
+      # three bumps is a busy week.
+      max-parallel: 1
+      matrix:
+        dep: ${{ fromJSON(needs.drift.outputs.bumpable) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # A PAT or App token when one exists, the workflow token otherwise.
+          # This matters and the step below says so loudly: a pull request
+          # opened with GITHUB_TOKEN does not start any workflow, by design, so
+          # the build that is meant to prove the bump never runs.
+          token: ${{ secrets.DRIFT_PR_TOKEN || github.token }}
+
+      - name: name the branch
+        id: n
+        run: |
+          set -euo pipefail
+          # The component name carries a slash, which cannot go in a branch
+          # component without creating a directory level that collides with
+          # other refs.
+          slug=$(printf '%s' '${{ matrix.dep.name }}' | tr '/' '-')
+          echo "branch=deps/$slug-${{ matrix.dep.to }}" >> "$GITHUB_OUTPUT"
+
+      - name: skip if this bump has already been proposed
+        id: exists
+        env:
+          GH_TOKEN: ${{ secrets.DRIFT_PR_TOKEN || github.token }}
+          BRANCH: ${{ steps.n.outputs.branch }}
+        run: |
+          set -euo pipefail
+          # Idempotent across weeks, on two counts.
+          #
+          # The branch still being there means a review is in progress, and a
+          # later run must not force-push over it or open a second pull
+          # request for the same version.
+          if git ls-remote --exit-code --heads origin "refs/heads/$BRANCH" >/dev/null 2>&1; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::$BRANCH exists; leaving it alone"
+            exit 0
+          fi
+          # A pull request for this branch in ANY state means the bump was
+          # already put to a human. Merging deletes the branch, and so does
+          # rejecting one -- without this, a bump that was deliberately closed
+          # would be reopened every Monday for as long as the pin stood, and
+          # the weekly job would be arguing with the person who declined it.
+          seen=$(gh pr list --head "$BRANCH" --state all --limit 1 --json number \
+                   --jq 'length')
+          if [ "$seen" != '0' ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::$BRANCH already had a pull request; not proposing it again"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        if: steps.exists.outputs.skip == 'false'
+        with:
+          python-version: "3.12"
+
+      - name: edit the manifests
+        if: steps.exists.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          # Exits non-zero when it matched nothing, which is the case that
+          # would otherwise commit an empty diff and open a pull request
+          # claiming a bump it never made.
+          python3 tools/espos_apply_bump.py --root . \
+            --name '${{ matrix.dep.name }}' \
+            --from '${{ matrix.dep.from }}' \
+            --to '${{ matrix.dep.to }}'
+
+      - name: read pinned IDF version
+        if: steps.exists.outputs.skip == 'false'
+        id: idf
+        run: echo "version=$(cat .idf-version)" >> "$GITHUB_OUTPUT"
+
+      # The lock has to be regenerated by the component manager itself; there
+      # is no way to edit it by hand that stays honest.
+      - uses: espressif/esp-idf-ci-action@v1
+        if: steps.exists.outputs.skip == 'false'
+        with:
+          esp_idf_version: ${{ steps.idf.outputs.version }}
+          target: esp32s3
+          command: scripts/regen_lock.sh
+
+      - name: commit and open the pull request
+        if: steps.exists.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.DRIFT_PR_TOKEN || github.token }}
+          BORROWED: ${{ secrets.DRIFT_PR_TOKEN == '' }}
+          NAME: ${{ matrix.dep.name }}
+          FROM: ${{ matrix.dep.from }}
+          TO: ${{ matrix.dep.to }}
+          BRANCH: ${{ steps.n.outputs.branch }}
+        run: |
+          set -euo pipefail
+          # The IDF container runs as root, so anything it wrote is root-owned
+          # and git would refuse to add it.
+          sudo chown -R "$(id -u):$(id -g)" .
+          git config user.name 'espOS dependency drift'
+          git config user.email 'noreply@github.com'
+          git checkout -b "$BRANCH"
+          git add -A -- '*idf_component.yml' dependencies.lock
+          # Nothing staged means the edit and the regeneration both did
+          # nothing, which is a bug in this workflow rather than a quiet week.
+          if git diff --cached --quiet; then
+            echo "::error::nothing to commit after a bump that reported success"
+            exit 1
+          fi
+          git commit \
+            -m "chore(deps): $NAME $FROM -> $TO" \
+            -m "The registry publishes $TO and this tree pinned $FROM." \
+            -m "Manifests edited by tools/espos_apply_bump.py, dependencies.lock regenerated by scripts/regen_lock.sh on esp32s3. Nothing here has been built for a device or flashed."
+          git push origin "$BRANCH"
+          # Values appended rather than interpolated into the template, so a
+          # version string cannot be read as markdown structure.
+          body="$RUNNER_TEMP/body.md"
+          cp .github/drift-pr-body.md "$body"
+          printf '\n`%s`: `%s` -> `%s`\n' "$NAME" "$FROM" "$TO" >> "$body"
+          if [ "$BORROWED" = 'true' ]; then
+            {
+              printf '\n> [!WARNING]\n'
+              printf '> Opened with `GITHUB_TOKEN`, so **no workflow ran on this pull request**.\n'
+              printf '> GitHub suppresses that so a workflow cannot trigger itself, which means\n'
+              printf '> the build meant to prove this bump has not run. Close and reopen the\n'
+              printf '> pull request to start it, or set a `DRIFT_PR_TOKEN` secret.\n'
+            } >> "$body"
+          fi
+          gh pr create --base main --head "$BRANCH" \
+            --title "chore(deps): $NAME $FROM -> $TO" --body-file "$body"

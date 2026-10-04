@@ -11,6 +11,7 @@ import unittest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 from espos_registry_updates import (  # noqa: E402
+    bumpable,
     classify,
     manifest_deps,
     newest_published,
@@ -350,3 +351,90 @@ class RootPathWithBuildInIt(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Bumpable(unittest.TestCase):
+    """Only a row the tree speaks with one voice about becomes a pull request."""
+
+    def _row(self, **kw):
+        base = {"name": "espressif/mdns", "ranges": ['==1.11.3'],
+                "newest": "1.14.0", "state": "behind", "detail": ""}
+        base.update(kw)
+        return base
+
+    def test_a_single_exact_pin_behind_is_bumpable(self):
+        self.assertEqual(
+            bumpable([self._row()]),
+            [{"name": "espressif/mdns", "from": "1.11.3", "to": "1.14.0"}],
+        )
+
+    def test_current_is_not(self):
+        self.assertEqual(bumpable([self._row(state="current")]), [])
+
+    def test_a_range_is_not(self):
+        # Bumping it would mean deciding to pin, which is policy, not a version.
+        self.assertEqual(
+            bumpable([self._row(state="unpinned", ranges=["^1.11.0"])]), []
+        )
+
+    def test_a_mixed_exact_and_range_is_not(self):
+        self.assertEqual(
+            bumpable([self._row(ranges=["==1.11.3", "^1.11.0"])]), []
+        )
+
+    def test_inconsistent_exact_pins_are_not(self):
+        # Which pin is right is the question; picking one would hide it.
+        self.assertEqual(
+            bumpable([self._row(ranges=["==1.11.3", "==1.12.0"])]), []
+        )
+
+    def test_no_registry_answer_is_not(self):
+        self.assertEqual(bumpable([self._row(newest=None)]), [])
+
+    def test_unparsed_is_not(self):
+        self.assertEqual(
+            bumpable([self._row(state="unparsed", ranges=[], newest=None)]), []
+        )
+
+
+class BumpableOut(unittest.TestCase):
+    """One run writes the matrix and the report, so they cannot disagree."""
+
+    def test_the_file_and_stdout_come_from_one_pass(self):
+        import contextlib
+        import io
+        import json
+        import unittest.mock
+
+        import espos_registry_updates as m
+
+        with tempfile.TemporaryDirectory() as d:
+            root = pathlib.Path(d)
+            (root / "main").mkdir()
+            (root / "main" / "idf_component.yml").write_text(
+                'dependencies:\n  espressif/mdns: "==1.11.3"\n', encoding="utf-8"
+            )
+            out_path = root / "bumpable.json"
+
+            # report() binds fetch=newest_published as a DEFAULT, evaluated at
+            # definition, so patching the module attribute would not reach it
+            # and the test would quietly query the real registry -- which is
+            # what this test did before, making it both a network call in a
+            # unit test and an assertion too weak to say anything.
+            real = m.report
+            with unittest.mock.patch.object(
+                m, "report", lambda root, **kw: real(root, fetch=lambda n: "1.14.0")
+            ):
+                text = io.StringIO()
+                with contextlib.redirect_stdout(text):
+                    m.main(["--root", str(root), "--bumpable-out", str(out_path)])
+
+            # The report still goes to stdout...
+            self.assertIn("behind", text.getvalue())
+            self.assertIn("espressif/mdns", text.getvalue())
+            # ...and the matrix lands in the file, from that same pass, with
+            # the content the fixture and the stubbed registry imply.
+            self.assertEqual(
+                json.loads(out_path.read_text()),
+                [{"name": "espressif/mdns", "from": "1.11.3", "to": "1.14.0"}],
+            )
