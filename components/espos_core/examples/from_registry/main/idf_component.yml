@@ -28,21 +28,3 @@ dependencies:
     version: "^0.14.0"
     # x-release-please-end
     override_path: "../../../../espos_ota"
-
-  ## The ESP32-P4 has no radio: WiFi is an ESP32-C6 co-processor over SDIO
-  ## (esp_hosted) behind the esp_wifi_remote shim, which gives it the same
-  ## esp_wifi_* API. esp_hosted does not declare the shim itself, so a P4
-  ## build needs both lines; the rules keep them out of every other target.
-  espressif/esp_wifi_remote:
-    version: "==1.6.5"
-    rules:
-      - if: "target == esp32p4"
-  espressif/esp_hosted:
-    version: "==3.0.9"
-    # Exact, not a range: 3.0 renamed fourteen host-side Kconfig keys,
-    # and IDF drops an assignment to a symbol that no longer exists
-    # without a word -- so a minor bump that renames again gives a P4
-    # with no WiFi and no build error (docs/wifi.md). The weekly
-    # registry-smoke workflow is where a newer version gets tried.
-    rules:
-      - if: "target == esp32p4"
