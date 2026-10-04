@@ -67,6 +67,6 @@ dependencies:
   # browses through it and gets the headers via this component's REQUIRES.
   # Not on the linux target, where the component does not exist.
   espressif/mdns:
-    version: "==1.11.3"
+    version: "==1.14.0"
     rules:
       - if: "target != linux"

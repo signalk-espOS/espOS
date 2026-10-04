@@ -49,6 +49,6 @@ dependencies:
   idf: ">=6.0.0,<6.1.0"
   # mDNS left the IDF core in 5.0; exact-pinned like the other registry deps.
   espressif/mdns:
-    version: "==1.11.3"
+    version: "==1.14.0"
     rules:
       - if: "target != linux"
