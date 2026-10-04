@@ -829,8 +829,10 @@ slot holds an image that failed. `key_fp` names the key the running image
 is signed with, which is the key it accepts updates from: the first 16 hex
 characters of the Secure Boot V2 public-key digest of its first signature
 block (what `espsecure signature-info-v2` prints), `null` when the image
-carries no signature block or the OTA task has not read it yet. An image
-signed with several keys accepts any of them and reports the first
+carries no signature block or the OTA task has not read it yet. It
+predicts acceptance for espOS's signed-apps-without-hardware-Secure-Boot
+setup, where the running image's first signature block is the trusted key;
+with hardware Secure Boot the eFuse digests decide instead
 ([ota.md](ota.md#signing-key)). `available` is `null` until a manifest
 check found something. `last_check_s`/`next_check_s` are `null` before the
 first check / when auto-check is off.

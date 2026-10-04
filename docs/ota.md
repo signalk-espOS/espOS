@@ -80,7 +80,11 @@ od -An -tx1 digest.bin | tr -d ' \n' | cut -c1-16    # the digest file is raw by
 ```
 
 The firmware registry's `signingKeyId` uses the same fingerprint, so a fleet
-manager can see that an update will be refused before sending it.
+manager can see that an update will be refused before sending it. That
+holds for signed apps without hardware Secure Boot, where the running
+image's first signature block is the key updates are checked against.
+With hardware Secure Boot enabled the keys burned into eFuse decide, and
+`key_fp` only names the key the running image was signed with.
 
 The fix is to name the key rather than let a directory invent one, which is
 what `SIGNING_KEY` below is for.

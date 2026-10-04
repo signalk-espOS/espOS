@@ -369,8 +369,9 @@ static void tick_confirm(void)
  * so a fleet manager can tell before installing that an update signed with
  * another key would be refused. Here rather than in espos_ota_port_info:
  * the digest wants ~1.5 KB of stack, which this task has and an httpd handler
- * may not. A transient flash error is retried on the next tick. */
-static void read_key_fp(void)
+ * may not. A transient flash error is retried on the next tick, and a retry
+ * that lands publishes, so an SSE client that saw null does not keep it. */
+static void read_key_fp(bool announce)
 {
     char fp[17];
     esp_err_t err = espos_ota_port_key_fp(fp);
@@ -384,13 +385,16 @@ static void read_key_fp(void)
     snprintf(s.key_fp, sizeof(s.key_fp), "%s", fp);
     unlock();
     s.key_fp_done = true;
+    if (announce) {
+        publish();
+    }
 }
 
 static void ota_task(void *arg)
 {
     (void)arg;
     load_config();
-    read_key_fp();
+    read_key_fp(false);
     uint32_t boot_check_at = espos_ota_port_uptime_s() + BOOT_CHECK_DELAY_S;
     bool boot_check_done = false;
     while (1) {
@@ -437,7 +441,7 @@ static void ota_task(void *arg)
             load_config();
         }
         if (!s.key_fp_done) {
-            read_key_fp();
+            read_key_fp(true);
         }
         tick_confirm();
         /* periodic manifest checks: after boot once the network is up, then every check_h */
