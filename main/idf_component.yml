@@ -1,19 +1,6 @@
 ## Example app manifest. ESP32-P4 has no radio: WiFi is provided by an
 ## ESP32-C6 co-processor over SDIO through Espressif's esp_hosted transport
-## and the esp_wifi_remote shim (same esp_wifi_* API). Other targets use the
-## native driver and pull nothing.
+## and the esp_wifi_remote shim (same esp_wifi_* API). Both are espos_wifi's
+## dependencies and are pinned there; other targets use the native driver.
 dependencies:
   idf: ">=6.0.0"
-  espressif/esp_wifi_remote:
-    version: "==1.6.5"
-    rules:
-      - if: "target == esp32p4"
-  espressif/esp_hosted:
-    version: "==3.0.9"
-    # Exact, not a range: 3.0 renamed fourteen host-side Kconfig keys,
-    # and IDF drops an assignment to a symbol that no longer exists
-    # without a word -- so a minor bump that renames again gives a P4
-    # with no WiFi and no build error (docs/wifi.md). The weekly
-    # registry-smoke workflow is where a newer version gets tried.
-    rules:
-      - if: "target == esp32p4"
