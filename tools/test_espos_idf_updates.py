@@ -62,6 +62,10 @@ class Compare(unittest.TestCase):
         with self.assertRaises(ValueError):
             compare("release/v6.0", TAGS)
 
+    def test_render_names_a_new_major(self):
+        self.assertTrue(render(compare("v6.1", TAGS + ["v7.0"])).splitlines()[1].startswith("major   v7.0"))
+        self.assertTrue(render(compare("v6.0.3", TAGS)).splitlines()[1].startswith("minor   v6.1"))
+
     def test_render_says_current(self):
         self.assertIn("current", render(compare("v6.1", TAGS)))
 

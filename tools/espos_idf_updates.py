@@ -82,8 +82,10 @@ def render(result: dict) -> str:
     if result["patch"]:
         lines.append(f"patch   {result['patch']}  move .idf-version; the manifests' idf range already allows it")
     if result["minor"]:
+        # "minor" holds any later X.Y, including a new major; say which it is.
+        kind = "major" if result["minor"].split(".")[0] != result["pinned"].split(".")[0] else "minor"
         lines.append(
-            f"minor   {result['minor']}  needs .idf-version, ESPOS_IDF_MAX_EXCL in "
+            f"{kind:<7} {result['minor']}  needs .idf-version, ESPOS_IDF_MAX_EXCL in "
             "cmake/espos_version.cmake AND the idf range in the manifests"
         )
     if not result["patch"] and not result["minor"]:
