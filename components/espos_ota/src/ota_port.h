@@ -25,6 +25,7 @@ typedef struct {
     bool pending_verify;      /* rollback armed for this boot */
     bool rolled_back;         /* an invalid image is recorded in the other slot */
     char other_version[32];   /* version in the other slot, if readable */
+    char key_fp[17];          /* signing key: first 16 hex of its public-key digest, "" if unknown */
 } espos_ota_port_info_t;
 
 void espos_ota_port_info(espos_ota_port_info_t *out);

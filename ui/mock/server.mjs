@@ -211,7 +211,7 @@ export function startMock(port = 8484) {
   // ---- OTA
   const ota = {
     state: "idle", last_error: "",
-    running: { version: "0.5.0-mock", project: "espos", target: "esp32c6", slot: "ota_0", image_state: "valid", pending_verify: false, confirmed: true, other_slot: "ota_1", other_version: "0.4.9", rolled_back: false, built: "Aug 18 2026 12:00:00", idf: "v6.0.2" },
+    running: { version: "0.5.0-mock", project: "espos", target: "esp32c6", slot: "ota_0", image_state: "valid", pending_verify: false, confirmed: true, other_slot: "ota_1", other_version: "0.4.9", rolled_back: false, built: "Aug 18 2026 12:00:00", idf: "v6.0.2", key_fp: "b3381b48b9cc9941" },
     manifest: { url: "", channel: "stable", auto_check: true, auto_install: false, last_check_s: null, next_check_s: null },
     progress: { received: 0, total: 0 }, available: null,
   };
