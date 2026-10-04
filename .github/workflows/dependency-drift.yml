@@ -266,6 +266,109 @@ jobs:
               await github.rest.issues.create({ ...context.repo, title, body })
             }
 
+  # ESP-IDF itself. The job above watches the components; nothing watched the
+  # IDF release that .idf-version names and every build uses.
+  idf:
+    name: ESP-IDF release against .idf-version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Opens, edits and closes the one tracking issue; nothing else.
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+
+      - name: ask upstream
+        id: check
+        run: |
+          set -uo pipefail
+          # Same exit-code contract as the registry check: 0 current, 1 newer,
+          # anything else a crash that must not read as "current".
+          rc=0
+          python3 tools/espos_idf_updates.py --root . > "$RUNNER_TEMP/idf.txt" || rc=$?
+          cat "$RUNNER_TEMP/idf.txt"
+          if [ "$rc" -gt 1 ]; then
+            echo "::error::espos_idf_updates.py exited $rc; report not usable"
+            exit "$rc"
+          fi
+          delim="ESPOS_$(openssl rand -hex 16)"
+          {
+            echo "report<<$delim"
+            cat "$RUNNER_TEMP/idf.txt"
+            echo "$delim"
+          } >> "$GITHUB_OUTPUT"
+          if [ "$rc" -eq 1 ]; then
+            echo "act=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "act=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: open, update or close the issue
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          REPORT: ${{ steps.check.outputs.report }}
+          ACT: ${{ steps.check.outputs.act }}
+        with:
+          script: |
+            const title = 'ESP-IDF release newer than .idf-version'
+            const act = process.env.ACT === 'true'
+            const body = [
+              'Compared the ESP-IDF release tags upstream with `.idf-version`.',
+              '',
+              '```',
+              process.env.REPORT ?? '',
+              '```',
+              '',
+              '- **patch** -- move `.idf-version` (and the from_registry',
+              '  example\'s copy, which CI compares). The manifests\' `idf`',
+              '  range already allows it.',
+              '- **minor** or **major** -- also bump `ESPOS_IDF_MAX_EXCL` in',
+              '  `cmake/espos_version.cmake` (the build refuses any IDF at or',
+              '  above it) and widen the `idf` range in the manifests, which',
+              '  changes what espOS tells every consumer it supports. The',
+              '  consumers\' own `.idf-version` pins follow with their espOS bump.',
+              '',
+              'Either way it is a pull request and a full CI run: a new IDF',
+              'changes the firmware that goes on a boat.',
+              '',
+              '_Raised by `.github/workflows/dependency-drift.yml`; re-runs weekly._'
+            ].join('\n')
+
+            const existing = await github.paginate(
+              github.rest.issues.listForRepo,
+              { ...context.repo, state: 'open', per_page: 100 }
+            )
+            const mine = existing.find(i => i.title === title && !i.pull_request)
+
+            if (!act) {
+              if (mine) {
+                await github.rest.issues.createComment({
+                  ...context.repo, issue_number: mine.number,
+                  body: '`.idf-version` names the newest ESP-IDF release. Closing.'
+                })
+                await github.rest.issues.update(
+                  { ...context.repo, issue_number: mine.number, state: 'closed' })
+              }
+              return
+            }
+
+            // Edit in place rather than comment: the same release reported
+            // every Monday would bury the issue in identical comments.
+            if (mine) {
+              if (mine.body !== body) {
+                await github.rest.issues.update(
+                  { ...context.repo, issue_number: mine.number, body })
+              }
+            } else {
+              await github.rest.issues.create({ ...context.repo, title, body })
+            }
+
   # One pull request per component, so a bump that turns out to change
   # behaviour can be held while the others merge.
   bump:
