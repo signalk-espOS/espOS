@@ -15,6 +15,20 @@ pull request. The `[Unreleased]` block below was written by hand before the
 switch; its entries belong to the next feature release and are folded into
 that section when it is cut.
 
+## 0.15.0 (2026-10-04)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Added
+* feat(ci): watch the registry for versions newer than the pins by @dirkwa in https://github.com/signalk-espOS/espOS/pull/170
+* feat(net): mdns 1.11.3 -> 1.14.0, and regenerate the lock it invalidated by @dirkwa in https://github.com/signalk-espOS/espOS/pull/175
+### Fixed
+* fix(ci): the drift workflow died on the exit code that means "act on this" by @dirkwa in https://github.com/signalk-espOS/espOS/pull/173
+
+
+**Full Changelog**: https://github.com/signalk-espOS/espOS/compare/v0.14.0...v0.15.0
+
 ## 0.14.0 (2026-10-03)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
