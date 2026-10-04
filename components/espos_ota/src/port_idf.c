@@ -38,33 +38,6 @@ static const char *state_name(esp_ota_img_states_t s)
     }
 }
 
-/* The registry names each project's key by this fingerprint (signingKeyId),
- * so a fleet manager can tell before installing that an update signed with
- * another key would be refused. Same digest espsecure prints with
- * signature-info-v2 / digest-sbv2-public-key; the running image cannot change
- * under us, so read the flash once. */
-static void key_fp(char *out, size_t size)
-{
-    out[0] = '\0';
-#if CONFIG_SECURE_SIGNED_ON_UPDATE && (CONFIG_SECURE_SIGNED_APPS_RSA_SCHEME || CONFIG_SECURE_SIGNED_APPS_ECDSA_V2_SCHEME) && \
-    (!CONFIG_IDF_TARGET_ESP32 || CONFIG_ESP32_REV_MIN_FULL >= 300)
-    static char cached[17];
-    static bool done;
-    if (!done) {
-        esp_image_sig_public_key_digests_t d = { 0 };
-        if (esp_secure_boot_get_signature_blocks_for_running_app(true, &d) == ESP_OK && d.num_digests > 0) {
-            for (int i = 0; i < 8; i++) {
-                snprintf(cached + 2 * i, 3, "%02x", d.key_digests[0][i]);
-            }
-        } else {
-            ESP_LOGW(TAG, "running image carries no signature block");
-        }
-        done = true;
-    }
-    snprintf(out, size, "%s", cached);
-#endif
-}
-
 void espos_ota_port_info(espos_ota_port_info_t *out)
 {
     memset(out, 0, sizeof(*out));
@@ -74,7 +47,6 @@ void espos_ota_port_info(espos_ota_port_info_t *out)
     snprintf(out->idf, sizeof(out->idf), "%s", d->idf_ver);
     snprintf(out->date, sizeof(out->date), "%s", d->date);
     snprintf(out->time, sizeof(out->time), "%s", d->time);
-    key_fp(out->key_fp, sizeof(out->key_fp));
     const esp_partition_t *run = esp_ota_get_running_partition();
     const esp_partition_t *next = esp_ota_get_next_update_partition(NULL);
     if (run) {
@@ -98,6 +70,28 @@ void espos_ota_port_info(espos_ota_port_info_t *out)
             out->rolled_back = true;
         }
     }
+}
+
+esp_err_t espos_ota_port_key_fp(char out[17])
+{
+    out[0] = '\0';
+#if CONFIG_SECURE_SIGNED_ON_UPDATE && (CONFIG_SECURE_SIGNED_APPS_RSA_SCHEME || CONFIG_SECURE_SIGNED_APPS_ECDSA_V2_SCHEME) && \
+    (!CONFIG_IDF_TARGET_ESP32 || CONFIG_ESP32_REV_MIN_FULL >= 300)
+    esp_image_sig_public_key_digests_t d = { 0 };
+    esp_err_t err = esp_secure_boot_get_signature_blocks_for_running_app(true, &d);
+    if (err != ESP_OK) {
+        return err;
+    }
+    if (d.num_digests == 0) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    for (int i = 0; i < 8; i++) {
+        snprintf(out + 2 * i, 3, "%02x", d.key_digests[0][i]);
+    }
+    return ESP_OK;
+#else
+    return ESP_ERR_NOT_FOUND;
+#endif
 }
 
 static void http_cfg(esp_http_client_config_t *c, const char *url, bool allow_insecure)

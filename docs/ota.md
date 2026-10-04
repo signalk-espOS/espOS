@@ -68,13 +68,15 @@ espsecure verify-signature --version 2 --keyfile <key>.pem <image>.bin
 
 Without the key file, `GET /api/v1/ota/status` names the key too:
 `running.key_fp` is the first 16 hex characters of the SHA-256 digest of
-the public key in the running image's signature block (`null` when the
-image carries none). It is the same digest espsecure prints, so it can be
+the public key in the running image's first signature block (`null` when
+the image carries none; an image signed with more than one key, mid
+rotation, reports the first). It is the same digest espsecure prints, so it can be
 compared with an image or a key without a device:
 
 ```sh
 espsecure signature-info-v2 <image>.bin          # "Public key digest for block 0: …"
 espsecure digest-sbv2-public-key --keyfile <key>.pem -o digest.bin
+od -An -tx1 digest.bin | tr -d ' \n' | cut -c1-16    # the digest file is raw bytes
 ```
 
 The firmware registry's `signingKeyId` uses the same fingerprint, so a fleet

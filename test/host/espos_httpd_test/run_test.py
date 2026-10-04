@@ -1628,7 +1628,9 @@ class OtaTests(unittest.TestCase):
         self.assertEqual(js["running"]["version"], "0.6.0")
         self.assertEqual(js["running"]["target"], "linux")
         self.assertEqual(js["running"]["slot"], "ota_0")
-        self.assertEqual(js["running"]["key_fp"], "b3381b48b9cc9941")
+        # Read by the OTA task once it starts, which can be after httpd answers.
+        fp = wait_for(lambda: self.ota()["running"]["key_fp"], timeout=5)
+        self.assertEqual(fp, "b3381b48b9cc9941")
         self.assertIsNone(js["available"])
         # boots PENDING_VERIFY; WiFi is unconfigured → no confirmation yet
         self.assertTrue(js["running"]["pending_verify"])
