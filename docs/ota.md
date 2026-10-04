@@ -38,8 +38,9 @@ Not to be confused with `httpd.api_key`, the password for the REST API
 ([rest-api.md](rest-api.md)) that a fleet manager such as
 signalk-espos-manager calls its "fleet API key". That key only guards the web
 API and can be changed at any time. The signing key decides which firmware a
-device will install (with hardware Secure Boot, the keys in eFuse do; see
-below), and losing it means a USB reflash for every device.
+device will install, and losing it means a USB reflash for every device.
+With hardware Secure Boot the keys in eFuse decide instead (see below), and
+even a USB reflash must be signed with one of them.
 
 Who holds which signing key: a developer's own build signs with a key
 generated in their checkout, so only devices they flashed from it accept
