@@ -94,8 +94,14 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--root", type=pathlib.Path, default=pathlib.Path("."))
     args = ap.parse_args(argv)
-    pinned = (args.root / ".idf-version").read_text().strip()
-    result = compare(pinned, upstream_tags())
+    try:
+        pinned = (args.root / ".idf-version").read_text().strip()
+        result = compare(pinned, upstream_tags())
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        # An uncaught exception exits 1, which the workflow would read as
+        # "newer release" and file an empty issue.
+        print(f"ESP-IDF release check failed: {exc}", file=sys.stderr)
+        return 2
     print(render(result))
     # 1 means "something to act on", mirroring espos_registry_updates.py, so
     # the workflow can tell it from a crash (anything above 1).

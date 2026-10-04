@@ -3,12 +3,18 @@
 """A newer IDF release is reported as patch or minor, a pre-release never is,
 and a pin that is not a release tag fails instead of reading as current."""
 
+import contextlib
+import io
 import pathlib
+import subprocess
 import sys
+import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
+import espos_idf_updates  # noqa: E402
 from espos_idf_updates import compare, parse_release, render  # noqa: E402
 
 TAGS = [
@@ -58,6 +64,35 @@ class Compare(unittest.TestCase):
 
     def test_render_says_current(self):
         self.assertIn("current", render(compare("v6.1", TAGS)))
+
+
+class ExitStatus(unittest.TestCase):
+    """1 tells the workflow to file an issue, so a failed check must not use it."""
+
+    def run_main(self, root, tags=None, error=None):
+        with mock.patch.object(espos_idf_updates, "upstream_tags", return_value=tags, side_effect=error), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            return espos_idf_updates.main(["--root", str(root)])
+
+    def test_newer_release_is_1(self):
+        with tempfile.TemporaryDirectory() as d:
+            pathlib.Path(d, ".idf-version").write_text("v6.0.3\n")
+            self.assertEqual(self.run_main(d, TAGS), 1)
+
+    def test_upstream_failure_is_2(self):
+        with tempfile.TemporaryDirectory() as d:
+            pathlib.Path(d, ".idf-version").write_text("v6.0.3\n")
+            err = subprocess.CalledProcessError(128, "git ls-remote")
+            self.assertEqual(self.run_main(d, error=err), 2)
+
+    def test_missing_pin_is_2(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(self.run_main(d, TAGS), 2)
+
+    def test_unreadable_pin_is_2(self):
+        with tempfile.TemporaryDirectory() as d:
+            pathlib.Path(d, ".idf-version").write_text("release/v6.0\n")
+            self.assertEqual(self.run_main(d, TAGS), 2)
 
 
 if __name__ == "__main__":
