@@ -10,8 +10,9 @@ look.
 Two answers, because they need different work:
   patch  -- a newer X.Y.Z on the same X.Y. `.idf-version` moves; the
             `idf: ">=X.Y.0,<X.(Y+1).0"` range in the manifests already allows it.
-  minor  -- a newer X.Y (or major). The manifests' idf range has to move too,
-            and that is a statement to every consumer about what espOS supports.
+  minor  -- a newer X.Y (or major). ESPOS_IDF_MAX_EXCL (the build refuses an
+            IDF at or above it) and the manifests' idf range move too, and that
+            is a statement to every consumer about what espOS supports.
 
 Release tags only (vX.Y or vX.Y.Z). Betas, release candidates and `-dev` tags
 are not releases, and reporting one would invite a move to it.
@@ -82,8 +83,8 @@ def render(result: dict) -> str:
         lines.append(f"patch   {result['patch']}  move .idf-version; the manifests' idf range already allows it")
     if result["minor"]:
         lines.append(
-            f"minor   {result['minor']}  needs .idf-version AND the idf range in the "
-            "manifests, which tells every consumer what espOS supports"
+            f"minor   {result['minor']}  needs .idf-version, ESPOS_IDF_MAX_EXCL in "
+            "cmake/espos_version.cmake AND the idf range in the manifests"
         )
     if not result["patch"] and not result["minor"]:
         lines.append("current no newer ESP-IDF release")

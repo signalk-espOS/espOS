@@ -47,9 +47,9 @@ generated in their checkout, so only devices they flashed from it accept
 their updates. A published release is signed by its project owner with a
 key kept as a CI secret. The firmware registry neither signs nor verifies
 images; it records a project's key fingerprint (`signingKeyId`), when the
-project supplies one, so a
-fleet manager can tell before downloading that a device without hardware
-Secure Boot would refuse an update.
+project supplies one. When both that and the device's `running.key_fp` are
+known, a fleet manager can tell before downloading that a device without
+hardware Secure Boot would refuse an update; with either missing it cannot.
 
 `sdkconfig.d/espos.defaults` turns on *Require signed app images* with the RSA
 scheme and signs every build with `secure_boot_signing_key.pem` in the
