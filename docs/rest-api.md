@@ -808,7 +808,7 @@ document when the pinned certificate changes).
  "running": {"version": "0.6.1", "project": "espos", "target": "esp32p4", "slot": "ota_1",
              "image_state": "valid", "pending_verify": false, "confirmed": true,
              "other_slot": "ota_0", "other_version": "0.6.0", "rolled_back": false,
-             "built": "Aug 18 2026 14:20:25", "idf": "v6.0.2"},
+             "built": "Aug 18 2026 14:20:25", "idf": "v6.0.2", "key_fp": "b3381b48b9cc9941"},
  "manifest": {"url": "http://…/manifest.json", "channel": "stable", "auto_check": true,
               "auto_install": false, "last_check_s": 120, "next_check_s": 86280},
  "progress": {"received": 0, "total": 0},
@@ -825,7 +825,15 @@ back to the configured `manifest_url`.
 (`ready` = installed, rebooting in ~1.5 s). `image_state` ∈ `valid
 pending_verify new invalid aborted undefined`; `pending_verify` is true
 while a fresh image has not confirmed itself; `rolled_back` when the other
-slot holds an image that failed. `available` is `null` until a manifest
+slot holds an image that failed. `key_fp` names the key the running image
+is signed with, which is the key it accepts updates from: the first 16 hex
+characters of the Secure Boot V2 public-key digest of its first signature
+block (what `espsecure signature-info-v2` prints), `null` when the image
+carries no signature block or the OTA task has not read it yet. It
+predicts acceptance for espOS's signed-apps-without-hardware-Secure-Boot
+setup, where the running image's first signature block is the trusted key;
+with hardware Secure Boot the eFuse digests decide instead
+([ota.md](ota.md#signing-key)). `available` is `null` until a manifest
 check found something. `last_check_s`/`next_check_s` are `null` before the
 first check / when auto-check is off.
 

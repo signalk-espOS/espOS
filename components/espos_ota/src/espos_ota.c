@@ -67,6 +67,8 @@ static struct {
     uint32_t next_check_at;
     bool ever_connected;
     bool confirmed_this_boot;
+    char key_fp[17];        /* "" until known, or when the image has no signature block */
+    bool key_fp_done;       /* OTA task only */
     /* config snapshot */
     char manifest_url[168];
     /* What the last check actually fetched. With manifest_src = "signalk"
@@ -363,10 +365,36 @@ static void tick_confirm(void)
     }
 }
 
+/* The registry names each project's key by this fingerprint (signingKeyId),
+ * so a fleet manager can tell before installing that an update signed with
+ * another key would be refused. Here rather than in espos_ota_port_info:
+ * the digest wants ~1.5 KB of stack, which this task has and an httpd handler
+ * may not. A transient flash error is retried on the next tick, and a retry
+ * that lands publishes, so an SSE client that saw null does not keep it. */
+static void read_key_fp(bool announce)
+{
+    char fp[17];
+    esp_err_t err = espos_ota_port_key_fp(fp);
+    if (err != ESP_OK && err != ESP_ERR_NOT_FOUND) {
+        return;
+    }
+    if (err == ESP_ERR_NOT_FOUND) {
+        ESP_LOGW(TAG, "running image carries no signature block");
+    }
+    lock();
+    snprintf(s.key_fp, sizeof(s.key_fp), "%s", fp);
+    unlock();
+    s.key_fp_done = true;
+    if (announce) {
+        publish();
+    }
+}
+
 static void ota_task(void *arg)
 {
     (void)arg;
     load_config();
+    read_key_fp(false);
     uint32_t boot_check_at = espos_ota_port_uptime_s() + BOOT_CHECK_DELAY_S;
     bool boot_check_done = false;
     while (1) {
@@ -411,6 +439,9 @@ static void ota_task(void *arg)
         }
         if (s.cfg_dirty) {
             load_config();
+        }
+        if (!s.key_fp_done) {
+            read_key_fp(true);
         }
         tick_confirm();
         /* periodic manifest checks: after boot once the network is up, then every check_h */
@@ -567,11 +598,25 @@ static void json_str(char *dst, size_t n, const char *src)
     dst[o] = '\0';
 }
 
+/* Every field at its escaped maximum, the available build included, is ~2.2 KiB,
+ * past the 2048 this used to be. */
+#define STATUS_JSON_MAX 2560
+
+/* snprintf returns what it WOULD have written; left unclamped, the next
+ * append's STATUS_JSON_MAX - n goes negative and becomes a huge size_t. */
+static int clamp_len(int n)
+{
+    if (n < 0) {
+        return 0;
+    }
+    return n >= STATUS_JSON_MAX ? STATUS_JSON_MAX - 1 : n;
+}
+
 char *espos_ota_status_json(void)
 {
     espos_ota_port_info_t info;
     espos_ota_port_info(&info);
-    char *out = malloc(2048);
+    char *out = malloc(STATUS_JSON_MAX);
     if (!out) {
         return NULL;
     }
@@ -585,17 +630,21 @@ char *espos_ota_status_json(void)
     uint32_t now = espos_ota_port_uptime_s();
     int n;
     char last[16] = "null", next[16] = "null";
+    char key_fp[20] = "null";
+    if (s.key_fp[0]) {
+        snprintf(key_fp, sizeof(key_fp), "\"%s\"", s.key_fp);
+    }
     if (s.last_check_at) {
         snprintf(last, sizeof(last), "%u", (unsigned)(now - s.last_check_at));
     }
     if (s.next_check_at && s.auto_check) {
         snprintf(next, sizeof(next), "%d", (int)(s.next_check_at - now));
     }
-    n = snprintf(out, 2048,
+    n = snprintf(out, STATUS_JSON_MAX,
                  "{\"state\":\"%s\",\"last_error\":\"%s\","
                  "\"running\":{\"version\":\"%s\",\"project\":\"%s\",\"target\":\"%s\",\"slot\":\"%s\",\"image_state\":\"%s\","
                  "\"pending_verify\":%s,\"confirmed\":%s,\"other_slot\":\"%s\",\"other_version\":\"%s\",\"rolled_back\":%s,"
-                 "\"built\":\"%s %s\",\"idf\":\"%s\"},"
+                 "\"built\":\"%s %s\",\"idf\":\"%s\",\"key_fp\":%s},"
                  "\"manifest\":{\"url\":\"%s\",\"channel\":\"%s\",\"auto_check\":%s,\"auto_install\":%s,"
                  "\"last_check_s\":%s,\"next_check_s\":%s},"
                  "\"progress\":{\"received\":%u,\"total\":%u}",
@@ -604,17 +653,19 @@ char *espos_ota_status_json(void)
                  info.pending_verify && !s.confirmed_this_boot ? "true" : "false",
                  s.confirmed_this_boot || !info.pending_verify ? "true" : "false",
                  info.other_slot, info.other_version, info.rolled_back ? "true" : "false",
-                 info.date, info.time, info.idf,
+                 info.date, info.time, info.idf, key_fp,
                  murl, s.channel, s.auto_check ? "true" : "false", s.auto_install ? "true" : "false",
                  last, next,
                  (unsigned)s.received, (unsigned)s.total);
+    n = clamp_len(n);
     if (s.have_avail) {
-        n += snprintf(out + n, 2048 - n, ",\"available\":{\"version\":\"%s\",\"url\":\"%s\",\"size\":%u,\"sha256\":\"%s\",\"notes\":\"%s\",\"newer\":%s}",
+        n += snprintf(out + n, STATUS_JSON_MAX - n, ",\"available\":{\"version\":\"%s\",\"url\":\"%s\",\"size\":%u,\"sha256\":\"%s\",\"notes\":\"%s\",\"newer\":%s}",
                       s.avail.version, url, (unsigned)s.avail.size, s.avail.sha256, notes, s.avail.newer ? "true" : "false");
     } else {
-        n += snprintf(out + n, 2048 - n, ",\"available\":null");
+        n += snprintf(out + n, STATUS_JSON_MAX - n, ",\"available\":null");
     }
-    snprintf(out + n, 2048 - n, "}");
+    n = clamp_len(n);
+    snprintf(out + n, STATUS_JSON_MAX - n, "}");
     unlock();
     return out;
 }

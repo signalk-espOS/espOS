@@ -29,6 +29,15 @@ typedef struct {
 
 void espos_ota_port_info(espos_ota_port_info_t *out);
 
+/**
+ * Fingerprint of the key the running image is signed with: the first 16 hex
+ * characters of the Secure Boot V2 public-key digest of its first signature
+ * block. Reads flash and hashes on the caller's stack (~1.5 KB), so it runs on
+ * the OTA task. ESP_ERR_NOT_FOUND: the image carries no signature block (out
+ * is ""); any other error is worth retrying.
+ */
+esp_err_t espos_ota_port_key_fp(char out[17]);
+
 typedef void (*espos_ota_progress_cb_t)(size_t received, size_t total, void *arg);
 
 /**

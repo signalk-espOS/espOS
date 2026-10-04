@@ -16,6 +16,7 @@
 #include "esp_https_ota.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
+#include "esp_secure_boot.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -69,6 +70,28 @@ void espos_ota_port_info(espos_ota_port_info_t *out)
             out->rolled_back = true;
         }
     }
+}
+
+esp_err_t espos_ota_port_key_fp(char out[17])
+{
+    out[0] = '\0';
+#if CONFIG_SECURE_SIGNED_ON_UPDATE && (CONFIG_SECURE_SIGNED_APPS_RSA_SCHEME || CONFIG_SECURE_SIGNED_APPS_ECDSA_V2_SCHEME) && \
+    (!CONFIG_IDF_TARGET_ESP32 || CONFIG_ESP32_REV_MIN_FULL >= 300)
+    esp_image_sig_public_key_digests_t d = { 0 };
+    esp_err_t err = esp_secure_boot_get_signature_blocks_for_running_app(true, &d);
+    if (err != ESP_OK) {
+        return err;
+    }
+    if (d.num_digests == 0) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    for (int i = 0; i < 8; i++) {
+        snprintf(out + 2 * i, 3, "%02x", d.key_digests[0][i]);
+    }
+    return ESP_OK;
+#else
+    return ESP_ERR_NOT_FOUND;
+#endif
 }
 
 static void http_cfg(esp_http_client_config_t *c, const char *url, bool allow_insecure)

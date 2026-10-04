@@ -7,6 +7,7 @@
  * environment variables so the harness can test the policy:
  *   ESPOS_SIM_OTA_PENDING=1     boot as PENDING_VERIFY (rollback armed)
  *   ESPOS_SIM_OTA_PROJECT=name  project name the sim image "is" (default espos)
+ *   ESPOS_SIM_OTA_KEY_FP=hex    signing-key fingerprint the sim image reports (16 hex)
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -47,6 +48,17 @@ void espos_ota_port_info(espos_ota_port_info_t *out)
                                                                                          : "valid");
     out->pending_verify = s_pending && !s_invalidated;
     out->rolled_back = s_rolled_back;
+}
+
+esp_err_t espos_ota_port_key_fp(char out[17])
+{
+    out[0] = '\0';
+    const char *fp = getenv("ESPOS_SIM_OTA_KEY_FP");
+    if (!fp || strlen(fp) != 16 || strspn(fp, "0123456789abcdef") != 16) {
+        return ESP_ERR_NOT_FOUND;   /* only ever what the chip could report */
+    }
+    memcpy(out, fp, 17);
+    return ESP_OK;
 }
 
 esp_err_t espos_ota_port_install(const char *url, bool allow_insecure, const char *expect_project,

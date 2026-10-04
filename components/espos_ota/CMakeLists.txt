@@ -7,7 +7,7 @@ if(target STREQUAL "linux")
     list(APPEND srcs src/port_sim.c)
 else()
     list(APPEND srcs src/port_idf.c)
-    list(APPEND priv_reqs esp_https_ota app_update esp_app_format esp_timer mbedtls)
+    list(APPEND priv_reqs esp_https_ota app_update esp_app_format esp_timer mbedtls bootloader_support)
 endif()
 # "Is the network up" comes from espos_net, so OTA works over any transport.
 idf_component_register(

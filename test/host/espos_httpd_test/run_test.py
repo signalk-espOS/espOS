@@ -1609,7 +1609,8 @@ class OtaTests(unittest.TestCase):
             {"version": "0.6.0", "target": "linux", "url": "old.bin"},
             {"version": "9.9.9", "target": "esp32p4", "url": "p4.bin"},
         ])
-        cls.h = Harness(fresh=True, extra_env={"ESPOS_SIM_OTA_PENDING": "1", "ESPOS_SIM_WIFI": "connect"})
+        cls.h = Harness(fresh=True, extra_env={"ESPOS_SIM_OTA_PENDING": "1", "ESPOS_SIM_WIFI": "connect",
+                                               "ESPOS_SIM_OTA_KEY_FP": "b3381b48b9cc9941"})
 
     @classmethod
     def tearDownClass(cls):
@@ -1627,6 +1628,9 @@ class OtaTests(unittest.TestCase):
         self.assertEqual(js["running"]["version"], "0.6.0")
         self.assertEqual(js["running"]["target"], "linux")
         self.assertEqual(js["running"]["slot"], "ota_0")
+        # Read by the OTA task once it starts, which can be after httpd answers.
+        fp = wait_for(lambda: self.ota()["running"]["key_fp"], timeout=5)
+        self.assertEqual(fp, "b3381b48b9cc9941")
         self.assertIsNone(js["available"])
         # boots PENDING_VERIFY; WiFi is unconfigured → no confirmation yet
         self.assertTrue(js["running"]["pending_verify"])
@@ -1718,6 +1722,7 @@ class OtaRollbackTimeoutTests(unittest.TestCase):
         self.assertEqual(st, 200)
         js = req("GET", "/api/v1/ota/status")[3]
         self.assertTrue(js["running"]["pending_verify"])
+        self.assertIsNone(js["running"]["key_fp"], "an unknown key reads null, never an empty fingerprint")
         js = wait_for(lambda: (lambda o: o if o["running"]["rolled_back"] else None)(req("GET", "/api/v1/ota/status")[3]), timeout=45, step=1)
         self.assertIsNotNone(js, req("GET", "/api/v1/ota/status")[3])
         self.assertIn("rollback", js["last_error"])

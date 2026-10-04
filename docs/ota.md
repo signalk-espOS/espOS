@@ -37,7 +37,7 @@ the certificate check for self-signed boat servers.
 `sdkconfig.d/espos.defaults` turns on *Require signed app images* with the RSA
 scheme and signs every build with `secure_boot_signing_key.pem` in the
 project root. That file is **git-ignored and never committed**. When it is
-missing the root `CMakeLists.txt` generates a *development* key
+missing, `espos_project_prologue()` generates a *development* key
 (`espsecure generate_signing_key --version 2 --scheme rsa3072`) with a
 warning, so a fresh checkout builds — but a device flashed with a
 dev-key build only accepts updates signed with that same dev key.
@@ -65,6 +65,26 @@ running image with the one you signed with:
 ```sh
 espsecure verify-signature --version 2 --keyfile <key>.pem <image>.bin
 ```
+
+Without the key file, `GET /api/v1/ota/status` names the key too:
+`running.key_fp` is the first 16 hex characters of the SHA-256 digest of
+the public key in the running image's first signature block (`null` when
+the image carries none; an image signed with more than one key, mid
+rotation, reports the first). It is the same digest espsecure prints, so it can be
+compared with an image or a key without a device:
+
+```sh
+espsecure signature-info-v2 <image>.bin          # "Public key digest for block 0: …"
+espsecure digest-sbv2-public-key --keyfile <key>.pem -o digest.bin
+od -An -tx1 digest.bin | tr -d ' \n' | cut -c1-16    # the digest file is raw bytes
+```
+
+The firmware registry's `signingKeyId` uses the same fingerprint, so a fleet
+manager can see that an update will be refused before sending it. That
+holds for signed apps without hardware Secure Boot, where the running
+image's first signature block is the key updates are checked against.
+With hardware Secure Boot enabled the keys burned into eFuse decide, and
+`key_fp` only names the key the running image was signed with.
 
 The fix is to name the key rather than let a directory invent one, which is
 what `SIGNING_KEY` below is for.
@@ -129,8 +149,10 @@ what other people install.
   OTA. It is the one thing worth backing up.
 
 - **You just want a flashable binary** — release without a key, and say so
-  in the release. The convention is a repository *variable*
-  `<APP>_ALLOW_UNSIGNED_RELEASE=true`: the build uses a throwaway key and
+  in the release. Set the repository *variable*
+  `ESPOS_ALLOW_UNSIGNED_RELEASE=true`, which `build-firmware.yml` and
+  `release-firmware.yml` read (a workflow of your own may use its own name,
+  as the cockpit's `COCKPIT_ALLOW_UNSIGNED_RELEASE` does): the build uses a throwaway key and
   the release notes are marked USB-only. Devices flashed from it reject
   every OTA, including later releases from the same fork.
 
