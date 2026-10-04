@@ -252,8 +252,7 @@ entries a *changed* manifest touches, so an entry nobody edits keeps its old
 value indefinitely. A release is exactly that case — release-please rewrites
 every `espos_*` manifest and re-solves nothing, so 0.15.0 shipped with all
 fourteen lock entries still reading 0.14.0. **Run `scripts/regen_lock.sh` after
-a release bump and commit the result**, until the check in #176 does it for
-you.
+a release bump and commit the result.**
 
 ## Versioning
 
