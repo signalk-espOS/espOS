@@ -15,6 +15,21 @@ pull request. The `[Unreleased]` block below was written by hand before the
 switch; its entries belong to the next feature release and are folded into
 that section when it is cut.
 
+## 0.16.0 (2026-10-05)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### ⚠ Breaking changes
+* chore(deps)!: espOS owns the co-processor pins (#177 never reached main), and the lock the 0.15.0 release left stale by @dirkwa in https://github.com/signalk-espOS/espOS/pull/178
+### Added
+* feat(ci): the drift watcher opens bump pull requests instead of an issue by @dirkwa in https://github.com/signalk-espOS/espOS/pull/180
+* feat(ota): report the signing key fingerprint in /ota/status by @dirkwa in https://github.com/signalk-espOS/espOS/pull/181
+* feat(n2k): let espOS join the bus as an NMEA 2000 node by @dirkwa in https://github.com/signalk-espOS/espOS/pull/188
+
+
+**Full Changelog**: https://github.com/signalk-espOS/espOS/compare/v0.15.0...v0.16.0
+
 ## 0.15.0 (2026-10-04)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
