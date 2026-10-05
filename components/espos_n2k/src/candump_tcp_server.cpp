@@ -7,6 +7,7 @@
 
 #include "mdns.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "lwip/sockets.h"
 #include "sdkconfig.h"
 
@@ -72,6 +73,13 @@ void CandumpTcpServer::start() {
   // on the same receiver keeps receiving too.
   listener_ = receiver_->add_listener(
       [this](const CanMessage& m) { this->on_frame(m); });
+  if (listener_ == TwaiReceiver::kNoListener) {
+    // The receiver logged why. A server that serves no frames would still
+    // advertise and accept clients, and look healthy doing it.
+    ESP_LOGE(kTag, "no frame listener for the candump server -- not started");
+    running_.store(false);
+    return;
+  }
 
   // Checked: an unstarted server task is a gateway that accepts nothing and
   // says nothing, and the caller has no other way to find out. Undo the
@@ -424,7 +432,13 @@ void CandumpTcpServer::client_task(void* arg) {
           CanMessage tx_msg = {};
           if (candump_decode(line_buf, &tx_msg) && self->transmitter_) {
             if (!self->tx_filter_ || self->tx_filter_(tx_msg.frame)) {
-              self->transmitter_->set(tx_msg);
+              // Looped back to the receiver's other listeners, as CAN does
+              // not echo it: an NMEA 2000 node on this device must see the
+              // client's address claims to contest them.
+              if (self->transmitter_->transmit(tx_msg) && self->receiver_) {
+                tx_msg.timestamp_us = esp_timer_get_time();
+                self->receiver_->loopback(tx_msg, self->listener_);
+              }
             } else if (self->tx_filtered_.fetch_add(1) == 0) {
               ESP_LOGW(kTag,
                        "dropped a client frame the TX filter refused "

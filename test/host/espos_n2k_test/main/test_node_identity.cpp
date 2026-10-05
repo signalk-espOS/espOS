@@ -55,9 +55,12 @@ TEST_CASE("a client frame with the node's own source address is refused", "[node
     /* 127501 from source 34, priority 3. */
     TEST_ASSERT_FALSE(foreign_frame_allowed(frame(0x0DF20D22), 34));
     TEST_ASSERT_TRUE(foreign_frame_allowed(frame(0x0DF20D23), 34));
-    /* An address claim (60928) in the node's name is refused the same way:
-     * it would be the node contesting its own address. */
-    TEST_ASSERT_FALSE(foreign_frame_allowed(frame(0x18EEFF22), 34));
+    /* An address claim (60928) passes whatever its source: it is the client
+     * contesting the address, and the node settles that by NAME. */
+    TEST_ASSERT_TRUE(foreign_frame_allowed(frame(0x18EEFF22), 34));
+    /* ...but not other PDU1 traffic from the node's address, e.g. an ISO
+     * request (59904, PF 0xEA). */
+    TEST_ASSERT_FALSE(foreign_frame_allowed(frame(0x18EAFF22), 34));
 }
 
 TEST_CASE("without an address the node guards nothing", "[node]")

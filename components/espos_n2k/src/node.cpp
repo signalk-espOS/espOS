@@ -90,6 +90,16 @@ class Bus : public tNMEA2000 {
   TwaiReceiver::ListenerId own_ = TwaiReceiver::kNoListener;
 };
 
+// What send() queues. tN2kMsg has a virtual member, so it is not something
+// to copy byte-wise through a FreeRTOS queue; this is.
+struct Outgoing {
+  uint32_t pgn;
+  uint8_t priority;
+  uint8_t destination;
+  uint8_t len;
+  uint8_t data[tN2kMsg::MaxDataLen];
+};
+
 }  // namespace
 
 class Node::Impl : public tNMEA2000::tMsgHandler {
@@ -109,6 +119,7 @@ class Node::Impl : public tNMEA2000::tMsgHandler {
   void apply_settings();
   void store_instances();
   void publish_state();
+  esp_err_t undo_start(esp_err_t err);
 
   TwaiReceiver* rx;
   NodeConfig config;
@@ -119,6 +130,7 @@ class Node::Impl : public tNMEA2000::tMsgHandler {
   QueueHandle_t outbox = nullptr;
   TwaiReceiver::ListenerId rx_listener = TwaiReceiver::kNoListener;
   nvs_handle_t nvs = 0;
+  bool subscribed = false;
 
   std::mutex listeners_lock;
   detail::ListenerTable<MsgFn, CONFIG_ESPOS_N2K_MAX_LISTENERS> listeners;
@@ -133,6 +145,24 @@ class Node::Impl : public tNMEA2000::tMsgHandler {
   std::atomic<uint32_t> frames_dropped{0};
 };
 
+// Releases what a failed start() had acquired, so a retry starts clean. The
+// library objects are left configured: a retry sets them again.
+esp_err_t Node::Impl::undo_start(esp_err_t err) {
+  if (subscribed) espos_config_unsubscribe(&Impl::on_config, this);
+  subscribed = false;
+  if (rx_listener != TwaiReceiver::kNoListener)
+    rx->remove_listener(rx_listener);
+  rx_listener = TwaiReceiver::kNoListener;
+  bus.set_frames(nullptr, TwaiReceiver::kNoListener);
+  if (frames) vQueueDelete(frames);
+  if (outbox) vQueueDelete(outbox);
+  frames = outbox = nullptr;
+  if (nvs) nvs_close(nvs);
+  nvs = 0;
+  started.store(false);
+  return err;
+}
+
 void Node::Impl::task(void* arg) { static_cast<Impl*>(arg)->loop(); }
 
 // On the writer's task: only note it, the node task applies it.
@@ -142,12 +172,15 @@ void Node::Impl::on_config(const char* ns, const char*, void* arg) {
   }
 }
 
-// Settings -> NAME. A NAME that changed is announced with a fresh address
-// claim, which is how every other node learns the new instance.
+// Settings -> NAME. The library announces a changed NAME with a fresh
+// address claim itself, which is how every other node learns the new
+// instance; it does so on every call, so it is called only on a change.
 void Node::Impl::apply_settings() {
   int32_t di = 0, si = 0;
   espos_config_get_i32(kNs, "device_instance", &di);
   espos_config_get_i32(kNs, "system_instance", &si);
+  const tNMEA2000::tDeviceInformation cur = bus.GetDeviceInformation();
+  if (cur.GetDeviceInstance() == di && cur.GetSystemInstance() == si) return;
   const auto inst = static_cast<uint8_t>(di);
   bus.SetDeviceInformationInstances(detail::device_instance_lower(inst),
                                     detail::device_instance_upper(inst),
@@ -180,8 +213,10 @@ void Node::Impl::loop() {
   const TickType_t began = xTaskGetTickCount();
   bool opened = false, warned = false;
   bool was_on_bus = false;
+  Outgoing out;
   tN2kMsg pending;
   bool have_pending = false;
+  uint32_t dropped_seen = 0;
 
   for (;;) {
     // Also opens the bus: until it is open, ParseMessages() retries Open().
@@ -198,25 +233,42 @@ void Node::Impl::loop() {
     }
     if (!opened) {
       opened = true;
+      // What queued while the library was opening is stale, and a queue
+      // that filled in that window is not a node falling behind.
+      xQueueReset(frames);
+      frames_dropped.store(0, std::memory_order_relaxed);
       ESP_LOGI(kTag, "open; claiming address %u", (unsigned)bus.GetN2kSource());
     }
 
     if (settings_changed.exchange(false)) apply_settings();
+    // Also raised for a heartbeat interval change, so look at what changed.
+    // An instance set by an MFD through a group function, or bumped by the
+    // library on a NAME collision, is what the bus now knows this device by:
+    // keep it.
     if (bus.ReadResetDeviceInformationChanged()) {
+      const uint8_t di = device_instance.load(), si = system_instance.load();
       publish_state();
-      store_instances();
-      bus.SendIsoAddressClaim();
-      ESP_LOGI(kTag, "device instance %u, system instance %u",
-               (unsigned)device_instance.load(),
-               (unsigned)system_instance.load());
+      if (device_instance.load() != di || system_instance.load() != si) {
+        store_instances();
+        ESP_LOGI(kTag, "device instance %u, system instance %u",
+                 (unsigned)device_instance.load(),
+                 (unsigned)system_instance.load());
+      }
     }
 
     const uint8_t src = bus.GetN2kSource();
     address.store(src);
-    if (bus.ReadResetAddressChanged()) {
-      // Back on the same address next boot, as the standard expects.
+    // Back on the same address next boot, as the standard expects. Not 254:
+    // a node that found no free address starts over from its preferred one.
+    if (bus.ReadResetAddressChanged() && src <= N2kMaxCanBusAddress) {
       nvs_set_u8(nvs, kNvsAddress, src);
       nvs_commit(nvs);
+    }
+    const uint32_t dropped = frames_dropped.load(std::memory_order_relaxed);
+    if (dropped != dropped_seen) {
+      ESP_LOGW(kTag, "%lu frame(s) dropped: the node task is behind the bus",
+               (unsigned long)(dropped - dropped_seen));
+      dropped_seen = dropped;
     }
     const bool now_on_bus = src <= N2kMaxCanBusAddress && !bus.claiming();
     on_bus.store(now_on_bus);
@@ -232,10 +284,16 @@ void Node::Impl::loop() {
     // Drained only while the address is held: the library refuses messages
     // during a claim, and a refused one would be gone.
     while (now_on_bus) {
-      if (!have_pending && xQueueReceive(outbox, &pending, 0) != pdTRUE) {
-        break;
+      if (!have_pending) {
+        if (xQueueReceive(outbox, &out, 0) != pdTRUE) break;
+        pending.Clear();
+        pending.SetPGN(out.pgn);
+        pending.Priority = out.priority;
+        pending.Destination = out.destination;
+        pending.DataLen = out.len;
+        memcpy(pending.Data, out.data, out.len);
+        have_pending = true;
       }
-      have_pending = true;
       if (!bus.SendMsg(pending)) {
         // Either the transmit path is full (the library buffers what it
         // can) or the message is invalid; neither improves by retrying in a
@@ -265,9 +323,11 @@ Node::~Node() {
 esp_err_t Node::start() {
   Impl& s = *impl_;
   const NodeConfig& c = s.config;
-  if (!c.model_id || !c.device_class || !c.device_function) {
+  if (!c.model_id || !c.device_class || !c.device_function ||
+      c.preferred_address > N2kMaxCanBusAddress) {
     ESP_LOGE(kTag,
-             "NodeConfig needs model_id, device_class and device_function");
+             "NodeConfig needs model_id, device_class, device_function and a "
+             "preferred_address of 0..251");
     return ESP_ERR_INVALID_ARG;
   }
   if (s.started.exchange(true)) return ESP_ERR_INVALID_STATE;
@@ -279,7 +339,10 @@ esp_err_t Node::start() {
     return err;
   }
   uint8_t address = c.preferred_address;
-  nvs_get_u8(s.nvs, kNvsAddress, &address);
+  if (nvs_get_u8(s.nvs, kNvsAddress, &address) != ESP_OK ||
+      address > N2kMaxCanBusAddress) {
+    address = c.preferred_address;
+  }
 
   uint8_t mac[6] = {};
   esp_read_mac(mac, ESP_MAC_BASE);
@@ -289,11 +352,8 @@ esp_err_t Node::start() {
                               : detail::unique_number_from_mac(mac);
 
   s.frames = xQueueCreate(CONFIG_ESPOS_N2K_RX_QUEUE_DEPTH, sizeof(CanFrame));
-  s.outbox = xQueueCreate(CONFIG_ESPOS_N2K_NODE_TX_QUEUE, sizeof(tN2kMsg));
-  if (!s.frames || !s.outbox) {
-    s.started.store(false);
-    return ESP_ERR_NO_MEM;
-  }
+  s.outbox = xQueueCreate(CONFIG_ESPOS_N2K_NODE_TX_QUEUE, sizeof(Outgoing));
+  if (!s.frames || !s.outbox) return s.undo_start(ESP_ERR_NO_MEM);
 
   s.bus.SetProductInformation(
       s.serial, c.product_code, c.model_id, esp_app_get_description()->version,
@@ -303,6 +363,10 @@ esp_err_t Node::start() {
   s.apply_settings();
   s.bus.ReadResetDeviceInformationChanged();  // the boot value, not a change
   s.publish_state();
+  // The library's default is 5 fast packets in assembly at once; a boat's
+  // bus interleaves more (AIS, GNSS, product information answers), and the
+  // oldest would be dropped half-assembled.
+  s.bus.SetN2kCANMsgBufSize(CONFIG_ESPOS_N2K_NODE_FAST_PACKETS);
   s.bus.SetMode(tNMEA2000::N2km_NodeOnly, address);
   s.bus.EnableForward(false);
   if (c.transmit_pgns) s.bus.ExtendTransmitMessages(c.transmit_pgns);
@@ -312,27 +376,26 @@ esp_err_t Node::start() {
 
   // Copy and return: this runs on the receiver's task, which every other
   // listener on the bus is waiting behind.
+  // Only extended data frames: the library's frame interface has no flag
+  // for the rest, and would read an 11-bit or remote frame's ID as a PGN.
   s.rx_listener = s.rx->add_listener([&s](const CanMessage& m) {
+    if (!m.frame.extended || m.frame.remote) return;
     if (xQueueSend(s.frames, &m.frame, 0) != pdTRUE) {
       s.frames_dropped.fetch_add(1, std::memory_order_relaxed);
     }
   });
   if (s.rx_listener == TwaiReceiver::kNoListener) {
-    s.started.store(false);
-    return ESP_ERR_NO_MEM;
+    return s.undo_start(ESP_ERR_NO_MEM);
   }
   s.bus.set_frames(s.frames, s.rx_listener);
-  espos_config_subscribe(&Impl::on_config, &s);
+  s.subscribed = espos_config_subscribe(&Impl::on_config, &s) == ESP_OK;
 
   // Not Open() here: the library opens only once a millisecond has passed
   // since it was made, so an Open() this early returns false without trying.
   // The task's ParseMessages() opens it and keeps retrying.
   if (xTaskCreate(&Impl::task, "n2k_node", CONFIG_ESPOS_N2K_NODE_TASK_STACK, &s,
                   4, nullptr) != pdPASS) {
-    s.rx->remove_listener(s.rx_listener);
-    espos_config_unsubscribe(&Impl::on_config, &s);
-    s.started.store(false);
-    return ESP_ERR_NO_MEM;
+    return s.undo_start(ESP_ERR_NO_MEM);
   }
   ESP_LOGI(kTag, "%s: class %u function %u, unique number %lu, serial %s",
            c.model_id, (unsigned)c.device_class, (unsigned)c.device_function,
@@ -342,8 +405,17 @@ esp_err_t Node::start() {
 
 bool Node::send(const tN2kMsg& msg) {
   if (!impl_->started.load() || !impl_->outbox) return false;
-  return xQueueSend(impl_->outbox, &msg, 0) == pdTRUE;
+  if (msg.DataLen < 0 || msg.DataLen > tN2kMsg::MaxDataLen) return false;
+  Outgoing out;
+  out.pgn = msg.PGN;
+  out.priority = msg.Priority;
+  out.destination = msg.Destination;
+  out.len = static_cast<uint8_t>(msg.DataLen);
+  memcpy(out.data, msg.Data, out.len);
+  return xQueueSend(impl_->outbox, &out, 0) == pdTRUE;
 }
+
+uint32_t Node::frames_dropped() const { return impl_->frames_dropped.load(); }
 
 Node::ListenerId Node::add_listener(MsgFn fn) {
   std::lock_guard<std::mutex> g(impl_->listeners_lock);

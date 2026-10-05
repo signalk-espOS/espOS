@@ -84,6 +84,17 @@ menu "espOS NMEA 2000"
             slot is one tN2kMsg (about 250 bytes), so the default costs
             about 2 KB of RAM.
 
+    config ESPOS_N2K_NODE_FAST_PACKETS
+        int "Fast-packet messages in assembly at once"
+        default 12
+        range 5 64
+        help
+            Multi-frame (fast-packet) messages the node reassembles in
+            parallel. A busy bus interleaves several -- AIS, GNSS, product
+            information answers -- and when the slots run out the oldest
+            half-assembled message is dropped. The library's own default is
+            5; each slot is one message buffer (about 250 bytes).
+
     endif
 
 endmenu

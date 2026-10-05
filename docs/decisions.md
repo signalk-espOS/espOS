@@ -182,8 +182,9 @@ was retired.
   The design question #163 raised — two logical nodes, the node and whatever
   drives the bridge, on one interface — is settled as: allowed, and kept
   apart by address. A candump client may not transmit with the node's
-  address (`CandumpTcpServer::set_tx_filter(node.tx_filter())`), and the
-  node's own frames are looped back to the other listeners so candump
-  clients see them. That needed the receiver to feed several listeners
+  address (`CandumpTcpServer::set_tx_filter(node.tx_filter())`), except an
+  address claim, which is a contest the node settles by NAME; frames each
+  side transmits are looped back to the other, since CAN does not echo them,
+  so the node sees the clients' claims and the clients see the node. That needed the receiver to feed several listeners
   (`TwaiReceiver::add_listener()`), which is also what lets a firmware keep
   the candump server next to N2K code of its own.

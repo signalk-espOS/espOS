@@ -49,14 +49,23 @@ inline uint8_t device_instance_upper(uint8_t instance) { return instance >> 3; }
 /// Source address of an NMEA 2000 frame: the low byte of the 29-bit ID.
 inline uint8_t source_address(const CanFrame& f) { return f.id & 0xFF; }
 
+/// PDU format of an NMEA 2000 frame's PGN: bits 16..23 of the 29-bit ID.
+inline uint8_t pdu_format(const CanFrame& f) { return (f.id >> 16) & 0xFF; }
+
+/// PDU format of PGN 60928, the ISO address claim.
+inline constexpr uint8_t kAddressClaimPf = 0xEE;
+
 /// Whether a frame from another sender (a candump client) may go on the bus
 /// while the node holds `own`. Refused: an extended frame carrying the
 /// node's own source address. On the wire it would be the node's frame, so a
-/// peer would read it as the node speaking -- or, for an address claim, as
-/// the node changing its NAME. Allowed: everything else, including any
-/// address while the node holds none.
+/// peer would read it as the node speaking. Allowed: everything else,
+/// including any address while the node holds none -- and an address claim,
+/// whatever its source: that is how the client contests the address, and the
+/// node sees it (CandumpTcpServer loops client frames back) and settles the
+/// contest by NAME, as it would with any other device.
 inline bool foreign_frame_allowed(const CanFrame& f, uint8_t own) {
   if (!f.extended || own >= kNullAddress) return true;
+  if (pdu_format(f) == kAddressClaimPf) return true;
   return source_address(f) != own;
 }
 

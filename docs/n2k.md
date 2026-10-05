@@ -187,8 +187,9 @@ What `Node` does and what it leaves to you:
 
 It costs about 28 KB of flash over a bridge-only build (`libespos_n2k.a`
 is 8.8 KB in `n2k_candump` and 36.8 KB in `n2k_switch_bank`, esp32s3) and,
-by estimate, about 10 KB of RAM: the node task's 4 KB stack, the frame and
-send queues (3 KB) and the library's buffers. Off, none of it is compiled and
+by estimate, about 13 KB of RAM: the node task's 4 KB stack, the frame and
+send queues (3 KB), 12 fast-packet assembly buffers (3 KB,
+`CONFIG_ESPOS_N2K_NODE_FAST_PACKETS`) and the library's other buffers. Off, none of it is compiled and
 the settings page does not appear.
 
 Settings, namespace `n2k` (the "NMEA 2000" page; only with the node built):
@@ -205,7 +206,7 @@ logical devices on one physical interface, which NMEA 2000 allows. The node's
 frames carry its own address; the server's clients send with whatever address
 *their* node claimed (canboatjs's, typically). The one combination that must
 not happen is a client frame with the node's address — on the wire it is the
-node speaking, and an address claim in it would contest the node's own. So:
+node speaking. So:
 
 ```cpp
 static espos_n2k::CandumpTcpServer server(&rx, &tx, {});
@@ -213,11 +214,14 @@ server.set_tx_filter(node.tx_filter());   // before start()
 server.start();
 ```
 
-drops those frames and counts them (`tx_filtered()`).
+drops those frames and counts them (`tx_filtered()`). Address claims are the
+exception and always pass: a client's claim for the node's address is a
+contest, settled by NAME like any other.
 
-The other direction needs no setup. CAN does not echo a node's frames back to
-it, so the controller never reports what the node sends; the node hands each
-frame it transmits to the receiver's other listeners itself
+That only works if each side sees the other, and CAN does not echo a node's
+frames back to it: the controller never reports what this device itself
+sends. So both directions are looped back to the receiver's other listeners
 (`TwaiReceiver::loopback()`), the way Linux socketcan loops local frames back.
-A candump client — signalk-server reading this device — sees the node's PGNs
-like any other device's.
+The node sees the frames candump clients send — their address claims above
+all — and candump clients see the node's PGNs, so signalk-server reading this
+device sees the node like any other device on the bus.

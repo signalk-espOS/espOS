@@ -46,7 +46,8 @@ struct NodeConfig {
   /// Load equivalency number: current drawn from the bus, in 50 mA units.
   uint8_t load_equivalency = 1;
 
-  /// Source address to claim first on a board that has never claimed one;
+  /// Source address (0..251) to claim first on a board that has never
+  /// claimed one;
   /// after that the address it last held is stored and claimed again, as the
   /// standard expects. Another node with a higher-priority NAME wins it, and
   /// the library moves on to a free one.
@@ -119,6 +120,10 @@ class Node {
   uint64_t name() const;
   uint8_t device_instance() const;
   uint8_t system_instance() const;
+
+  /// Frames the node could not take because its task was behind the bus
+  /// (CONFIG_ESPOS_N2K_RX_QUEUE_DEPTH deep). Also logged as they happen.
+  uint32_t frames_dropped() const;
 
   /// For CandumpTcpServer::set_tx_filter(): refuses client frames that carry
   /// the node's own source address.
