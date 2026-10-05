@@ -256,6 +256,11 @@ fourteen lock entries still reading 0.14.0. The `release-lock` job in
 release-please rewrites it, and CI's `dependencies.lock matches the manifests`
 check fails any pull request, and `main`, whose lock has fallen behind.
 
+That job pushes with `DRIFT_PR_TOKEN` so the push starts CI on the release
+PR. Without the secret it falls back to the workflow token, whose pushes start
+no workflow: the job then warns, and closing and reopening the release PR runs
+CI on the new head.
+
 ## Versioning
 
 Semantic-ish, judged against what a *consumer firmware* sees:

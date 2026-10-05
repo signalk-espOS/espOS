@@ -120,6 +120,7 @@ jobs:
   # token starts no workflow, so the release PR's checks would never run on
   # the corrected lock and the lock check would stay red on the commit before.
   release-lock:
+    name: regenerate dependencies.lock on the release branch
     needs: release-please
     if: needs.release-please.outputs.pr_branch != ''
     concurrency:
@@ -127,10 +128,11 @@ jobs:
       cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Pushes the regenerated lock to the release branch.
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.release-please.outputs.pr_branch }}
           persist-credentials: false
@@ -145,6 +147,7 @@ jobs:
       - name: commit the regenerated lock to the release branch
         env:
           GH_TOKEN: ${{ secrets.DRIFT_PR_TOKEN || github.token }}
+          BORROWED: ${{ secrets.DRIFT_PR_TOKEN == '' }}
           BRANCH: ${{ needs.release-please.outputs.pr_branch }}
         run: |
           set -euo pipefail
@@ -169,6 +172,11 @@ jobs:
           trap 'rm -f "$askpass"' EXIT
           GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 \
             git push "https://x-access-token@github.com/$GITHUB_REPOSITORY.git" "HEAD:$BRANCH"
+          # Still pushed: a correct lock that waits for a check beats a stale
+          # one. But nothing re-runs CI on it, so say what is needed.
+          if [ "$BORROWED" = "true" ]; then
+            echo "::warning::DRIFT_PR_TOKEN is not set, so CI does not run on the regenerated lock. Close and reopen the release PR to run CI on its new head."
+          fi
 
   # Called here rather than triggered by the tag: a tag release-please creates
   # with the workflow's own GITHUB_TOKEN starts no other workflow, so a
