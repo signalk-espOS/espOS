@@ -41,10 +41,10 @@ void TwaiTransmitter::stop() {
   detail::TwaiNode::instance().release();
 }
 
-void TwaiTransmitter::set(const CanMessage& msg) {
+bool TwaiTransmitter::transmit(const CanMessage& msg) {
   if (!running_.load()) {
     tx_fail_count_.fetch_add(1, std::memory_order_relaxed);
-    return;
+    return false;
   }
   // Straight into the driver's own queue rather than through one of ours:
   // esp_twai queues internally (tx_queue_depth), so the task and queue this
@@ -53,10 +53,11 @@ void TwaiTransmitter::set(const CanMessage& msg) {
   esp_err_t err = detail::TwaiNode::instance().transmit(msg.frame, 0);
   if (err == ESP_OK) {
     last_tx_us_.store(esp_timer_get_time(), std::memory_order_relaxed);
-  } else {
-    tx_fail_count_.fetch_add(1, std::memory_order_relaxed);
-    ESP_LOGD(kTag, "TX failed: %s", esp_err_to_name(err));
+    return true;
   }
+  tx_fail_count_.fetch_add(1, std::memory_order_relaxed);
+  ESP_LOGD(kTag, "TX failed: %s", esp_err_to_name(err));
+  return false;
 }
 
 }  // namespace espos_n2k

@@ -37,4 +37,64 @@ menu "espOS NMEA 2000"
             to _espos-n2k._tcp / model=espos-n2k-gateway, which no released
             client looks for yet.
 
+    config ESPOS_N2K_MAX_LISTENERS
+        int "Frame listeners per receiver"
+        default 4
+        range 1 16
+        help
+            How many consumers TwaiReceiver::add_listener() can feed from one
+            bus: the candump server takes one, an NMEA 2000 node one, and the
+            application whatever it adds. Each slot is a std::function
+            (16 bytes on these targets) whether used or not.
+
+    config ESPOS_N2K_NODE
+        bool "NMEA 2000 node (espos_n2k::Node)"
+        default n
+        help
+            Build espos_n2k::Node, which makes the device a node on the bus
+            in its own right: a NAME, the ISO address claim, answers to ISO
+            requests, product information, the PGN lists, a heartbeat and the
+            device/system instances an MFD can set. It is the NMEA2000
+            library (Timo Lappalainen, MIT), vendored under third_party/,
+            over this component's receiver and transmitter.
+
+            Off by default because it is not free and a bridge does not need
+            it: on adds the library (about 28 KB of flash on esp32s3 with what a
+            node uses) and the "NMEA 2000" settings page with the instance keys.
+            A pure candump gateway leaves it off and lets the server supply
+            the identity.
+
+    if ESPOS_N2K_NODE
+
+    config ESPOS_N2K_NODE_TASK_STACK
+        int "Node task stack (bytes)"
+        default 4096
+        range 3072 16384
+        help
+            The node task runs the library's ParseMessages() and every
+            message listener the application adds to the node.
+
+    config ESPOS_N2K_NODE_TX_QUEUE
+        int "Messages Node::send() can queue"
+        default 8
+        range 2 64
+        help
+            Node::send() is callable from any task: it copies the message
+            into this queue and the node task hands it to the library. Each
+            slot is one tN2kMsg (about 250 bytes), so the default costs
+            about 2 KB of RAM.
+
+    config ESPOS_N2K_NODE_FAST_PACKETS
+        int "Fast-packet messages in assembly at once"
+        default 12
+        range 5 64
+        help
+            Multi-frame (fast-packet) messages the node reassembles in
+            parallel. A busy bus interleaves several -- AIS, GNSS, product
+            information answers -- and when the slots run out the oldest
+            half-assembled message is dropped. The library's own default is
+            5; each slot is one message buffer (about 250 bytes).
+
+    endif
+
 endmenu

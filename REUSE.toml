@@ -24,3 +24,12 @@ path = [
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Dirk Wahrheit"
 SPDX-License-Identifier = "Apache-2.0"
+
+# Timo Lappalainen's NMEA2000 library, vendored unmodified under MIT. Its
+# files carry the MIT text but no SPDX tags, and gain none here so an update
+# stays a plain copy (third_party/NMEA2000/README.md).
+[[annotations]]
+path = ["components/espos_n2k/third_party/NMEA2000/src/**", "components/espos_n2k/third_party/NMEA2000/LICENSE"]
+precedence = "override"
+SPDX-FileCopyrightText = "2015-2025 Timo Lappalainen, Kave Oy"
+SPDX-License-Identifier = "MIT"

@@ -10,11 +10,29 @@
 # src/twai_node.cpp, which owns the node handle the receiver and the
 # transmitter share; everything else — including the candump codec, which
 # is why this component now has host tests — is driver-free.
-idf_component_register(
-    SRCS src/twai_node.cpp src/twai_receiver.cpp src/twai_transmitter.cpp
+set(srcs src/twai_node.cpp src/twai_receiver.cpp src/twai_transmitter.cpp
          src/api_n2k.cpp
-         src/candump_tcp_server.cpp src/candump_format.cpp
-    INCLUDE_DIRS include
+         src/candump_tcp_server.cpp src/candump_format.cpp)
+set(include_dirs include)
+# The node's requirements are listed whether or not it is built: IDF expands
+# requirements before sdkconfig exists, so a CONFIG_ test cannot choose them.
+set(priv_reqs lwip espressif__mdns espos_config nvs_flash esp_app_format)
+# espos_n2k::Node and the NMEA2000 library under it, only when asked for: a
+# bridge does not need either, and the node brings a settings page with it.
+# The library's directory is public because node.h hands out tN2kMsg.
+if(CONFIG_ESPOS_N2K_NODE)
+    set(n2klib third_party/NMEA2000/src)
+    list(APPEND srcs src/node.cpp
+         ${n2klib}/NMEA2000.cpp ${n2klib}/N2kMsg.cpp ${n2klib}/N2kTimer.cpp
+         ${n2klib}/N2kStream.cpp ${n2klib}/N2kGroupFunction.cpp
+         ${n2klib}/N2kGroupFunctionDefaultHandlers.cpp
+         ${n2klib}/N2kMessages.cpp ${n2klib}/N2kDeviceList.cpp)
+    list(APPEND include_dirs ${n2klib})
+endif()
+
+idf_component_register(
+    SRCS ${srcs}
+    INCLUDE_DIRS ${include_dirs}
     # esp_driver_gpio is PUBLIC, not private: twai_receiver.h is a public
     # header and its TwaiReceiverConfig exposes gpio_num_t, so every consumer
     # needs driver/gpio.h on its include path. As a PRIV_REQUIRES it did not
@@ -22,7 +40,7 @@ idf_component_register(
     # on the component's own header -- which the cockpit never hit only because
     # its HAL happens to require esp_driver_gpio too.
     REQUIRES esp_driver_twai esp_timer esp_driver_gpio
-    PRIV_REQUIRES lwip espressif__mdns)
+    PRIV_REQUIRES ${priv_reqs})
 
 # GET /api/v1/n2k is worth having but not worth requiring: a headless N2K
 # gateway with no web server is a legitimate firmware, and api_n2k.cpp guards
@@ -37,3 +55,7 @@ idf_component_register(
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/espos_components.cmake")
 
 espos_optional_requires(PRIVATE espos_httpd espressif__cjson)
+
+if(CONFIG_ESPOS_N2K_NODE)
+    espos_config_add_descriptor(config/n2k.json)
+endif()

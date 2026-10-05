@@ -10,6 +10,7 @@ writing; the lock files are authoritative.
 | [ESP-IDF](https://github.com/espressif/esp-idf) 6.0.x | everything | Apache-2.0 |
 | [espressif/cjson](https://components.espressif.com/components/espressif/cjson) (cJSON) | config, httpd, sk, ota, ble, voice | MIT |
 | [espressif/mdns](https://components.espressif.com/components/espressif/mdns) | wifi (responder, `espos_mdns.h`), sk (discovery), n2k | Apache-2.0 |
+| [NMEA2000](https://github.com/ttlappalainen/NMEA2000) (Timo Lappalainen, vendored in `components/espos_n2k/third_party/NMEA2000`) | n2k, only with `CONFIG_ESPOS_N2K_NODE` | MIT |
 | [joltwallet/littlefs](https://components.espressif.com/components/joltwallet/littlefs) | httpd (UI partition) | BSD-3-Clause (littlefs) / Apache-2.0 (port) |
 | [espressif/esp_websocket_client](https://components.espressif.com/components/espressif/esp_websocket_client) | ble | Apache-2.0 |
 | [espressif/esp_hosted](https://components.espressif.com/components/espressif/esp_hosted), [espressif/esp_wifi_remote](https://components.espressif.com/components/espressif/esp_wifi_remote) | wifi/ble on ESP32-P4 | Apache-2.0 |

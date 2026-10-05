@@ -35,10 +35,11 @@ the bitrate — and the transmitter joins it. A transmitter started on its own
 logs that the bus is not up and stays stopped, rather than dropping every
 frame in silence the way it used to.
 
-`start()` on the server wires itself to the receiver, so **do not call
-`TwaiReceiver::set_on_frame()` afterwards** — it replaces the server's
-callback and no frame reaches a client. Set your own callback before
-starting the server if you also want frames in the application.
+One receiver feeds several consumers. The server adds a listener of its own
+when it starts, and anything else on the bus — an [NMEA 2000 node](#the-device-as-an-nmea-2000-node),
+the application — adds its own with `TwaiReceiver::add_listener()`, before or
+after, without taking frames from the others. There are
+`CONFIG_ESPOS_N2K_MAX_LISTENERS` slots (4 by default).
 
 N2K is 250 kbit/s; the transceiver (SN65HVD230 or similar) is the
 board's business, not this component's.
@@ -105,9 +106,122 @@ client, which is not worth tidiness.
 
 ## Callbacks
 
-`TwaiReceiver::set_on_frame()` takes a plain `std::function`, called on
-the receiver's own task. Do not do slow work there and do not touch UI
-state directly — copy what you need and hand it to the task that owns
-it. The predecessor to this component inherited a SensESP observable
-base class for the same job; the callback is the whole reason this code
-no longer needs SensESP at all.
+`TwaiReceiver::add_listener()` takes a plain `std::function`, called on the
+receiver's own task for every frame, after the listeners added before it. It
+returns a handle for `remove_listener()`, which returns only once the
+listener is not running and will not run again, so what it captured can then
+be destroyed. Do not do slow work in a listener and do not touch UI state
+directly — copy what you need and hand it to the task that owns it: every
+other listener on the bus waits behind yours. Do not add or remove listeners
+from inside one.
+
+`set_on_frame()`, the single-callback API this class had before, still
+works: it replaces the listener the previous `set_on_frame()` installed and
+leaves the others alone. Before, it replaced the candump server's callback
+too, which is why a firmware could not run its own NMEA 2000 code and the
+server on one bus.
+
+The predecessor to this component inherited a SensESP observable base class
+for the same job; the callback is the whole reason this code no longer needs
+SensESP at all.
+
+## The device as an NMEA 2000 node
+
+Everything above is a bridge: frames go through with whatever source address
+they carry, and the NMEA 2000 identity belongs to whatever drives the bridge
+(canboatjs on the Signal K side). A device that transmits *as itself* — a
+switch bank an MFD can switch, a sensor that shows up in the MFD's device
+list — has to be a node: a NAME, the ISO address claim and its contest,
+answers to ISO requests, product information, the PGN lists, a heartbeat and
+the device and system instances.
+
+`espos_n2k::Node` (`espos_n2k/node.h`, built with `CONFIG_ESPOS_N2K_NODE=y`)
+is that node. The protocol is Timo Lappalainen's
+[NMEA2000](https://github.com/ttlappalainen/NMEA2000) library (MIT), vendored
+under `components/espos_n2k/third_party/NMEA2000/`; `Node` gives it the
+receiver and transmitter, a task of its own, the settings and the stored
+address.
+
+```cpp
+#include "espos_n2k/node.h"
+#include "N2kMessages.h"
+
+static espos_n2k::TwaiReceiver rx({.tx_pin = GPIO_NUM_20, .rx_pin = GPIO_NUM_21});
+static espos_n2k::TwaiTransmitter tx;
+rx.start();
+tx.start();
+
+static const unsigned long kTx[] = {127501, 0}, kRx[] = {127502, 0};
+espos_n2k::NodeConfig cfg;
+cfg.device_class = 30;        // Electrical Distribution
+cfg.device_function = 140;    // Load Controller
+cfg.model_id = "My switch bank";
+cfg.transmit_pgns = kTx;
+cfg.receive_pgns = kRx;
+static espos_n2k::Node node(&rx, &tx, cfg);
+
+node.add_listener([](const tN2kMsg& msg) {   // on the node task
+  if (msg.PGN == 127502) { /* ParseN2kSwitchbankControl(...) */ }
+});
+ESP_ERROR_CHECK(node.start());                // after espos_start()
+
+tN2kMsg msg;
+SetN2kBinaryStatus(msg, node.device_instance(), status);
+node.send(msg);                               // from any task
+```
+
+[`n2k_switch_bank`](https://github.com/signalk-espOS/espOS/tree/main/components/espos_n2k/examples/n2k_switch_bank)
+is the whole of it: eight channels on PGN 127501/127502, with the candump
+server on the same bus.
+
+What `Node` does and what it leaves to you:
+
+| | |
+|---|---|
+| **NAME** | Device class and function, manufacturer code (2046 by default, the code for uncertified devices), industry group from `NodeConfig`; the 21-bit unique number from the base MAC unless `NodeConfig::unique_number` says otherwise. |
+| **Address** | Claims `NodeConfig::preferred_address` on first boot, then whatever it held last (stored in NVS, namespace `espos_n2k`). A node with a higher-priority NAME wins the address; the library moves on to a free one, and `address()` follows. |
+| **Instances** | `n2k.device_instance` and `n2k.system_instance` (settings, below). An MFD that sets them through a group function changes the settings too, so the value survives a reboot and shows in the web UI. A change from either side is announced with a fresh address claim. |
+| **Product information** | `model_id`, `model_version`, `product_code` and the load equivalency from `NodeConfig`; the software version is the app's (`esp_app_desc_t::version`), the serial code the base MAC. |
+| **Answers** | ISO requests for the address claim, product and configuration information and the PGN lists, the heartbeat (60 s), and the group functions for them. |
+| **Your PGNs** | `send()` from any task: it queues (`CONFIG_ESPOS_N2K_NODE_TX_QUEUE`) and the node task sends once the address is held. Listeners receive messages assembled, a fast-packet PGN once and whole — for the PGNs the library knows as fast packets; others go to `library().ExtendFastPacketMessages()` before `start()`. `N2kMessages.h` has encoders and decoders for most standard PGNs. |
+
+It costs about 28 KB of flash over a bridge-only build (`libespos_n2k.a`
+is 8.8 KB in `n2k_candump` and 36.8 KB in `n2k_switch_bank`, esp32s3) and,
+by estimate, about 13 KB of RAM: the node task's 4 KB stack, the frame and
+send queues (3 KB), 12 fast-packet assembly buffers (3 KB,
+`CONFIG_ESPOS_N2K_NODE_FAST_PACKETS`) and the library's other buffers. Off, none of it is compiled and
+the settings page does not appear.
+
+Settings, namespace `n2k` (the "NMEA 2000" page; only with the node built):
+
+| Key | Default | |
+|---|---|---|
+| `device_instance` | 0 | tells this device from others of the same type (0–255) |
+| `system_instance` | 0 | which of several separate systems on one bus (0–15) |
+
+### Node and bridge on one bus
+
+A node and a candump server can share the receiver and transmitter: two
+logical devices on one physical interface, which NMEA 2000 allows. The node's
+frames carry its own address; the server's clients send with whatever address
+*their* node claimed (canboatjs's, typically). The one combination that must
+not happen is a client frame with the node's address — on the wire it is the
+node speaking. So:
+
+```cpp
+static espos_n2k::CandumpTcpServer server(&rx, &tx, {});
+server.set_tx_filter(node.tx_filter());   // before start()
+server.start();
+```
+
+drops those frames and counts them (`tx_filtered()`). Address claims are the
+exception and always pass: a client's claim for the node's address is a
+contest, settled by NAME like any other.
+
+That only works if each side sees the other, and CAN does not echo a node's
+frames back to it: the controller never reports what this device itself
+sends. So both directions are looped back to the receiver's other listeners
+(`TwaiReceiver::loopback()`), the way Linux socketcan loops local frames back.
+The node sees the frames candump clients send — their address claims above
+all — and candump clients see the node's PGNs, so signalk-server reading this
+device sees the node like any other device on the bus.

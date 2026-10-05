@@ -2,10 +2,12 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 #include "espos_n2k/candump_tcp_server.h"
 
+#include <cinttypes>
 #include <cstring>
 
 #include "mdns.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "lwip/sockets.h"
 #include "sdkconfig.h"
 
@@ -67,8 +69,17 @@ void CandumpTcpServer::start() {
   // run's completion and return from stop() immediately.
   server_task_done_.store(false, std::memory_order_release);
 
-  // Subscribe to TwaiReceiver's output.
-  receiver_->set_on_frame([this](const CanMessage& m) { this->on_frame(m); });
+  // A listener of its own, so an application callback or an NMEA 2000 node
+  // on the same receiver keeps receiving too.
+  listener_ = receiver_->add_listener(
+      [this](const CanMessage& m) { this->on_frame(m); });
+  if (listener_ == TwaiReceiver::kNoListener) {
+    // The receiver logged why. A server that serves no frames would still
+    // advertise and accept clients, and look healthy doing it.
+    ESP_LOGE(kTag, "no frame listener for the candump server -- not started");
+    running_.store(false);
+    return;
+  }
 
   // Checked: an unstarted server task is a gateway that accepts nothing and
   // says nothing, and the caller has no other way to find out. Undo the
@@ -77,7 +88,8 @@ void CandumpTcpServer::start() {
   if (xTaskCreate(&CandumpTcpServer::server_task, "candump_srv", 4096, this, 3,
                   &server_task_) != pdPASS) {
     ESP_LOGE(kTag, "could not create the candump server task -- not started");
-    receiver_->set_on_frame(nullptr);
+    receiver_->remove_listener(listener_);
+    listener_ = TwaiReceiver::kNoListener;
     server_task_ = nullptr;
     running_.store(false);
     return;
@@ -115,7 +127,8 @@ void CandumpTcpServer::stop() {
 
   // Stop feeding the fan-out before anything is torn down: on_frame() walks
   // client_queues_, and the receiver's task is not this one.
-  if (receiver_) receiver_->set_on_frame(nullptr);
+  if (receiver_) receiver_->remove_listener(listener_);
+  listener_ = TwaiReceiver::kNoListener;
 
   // Wait for the server task to actually finish rather than assuming it has.
   // The old fixed 200 ms was shorter than one pass of the accept loop (a
@@ -418,7 +431,20 @@ void CandumpTcpServer::client_task(void* arg) {
           // the stack garbage in the rest reached the driver.
           CanMessage tx_msg = {};
           if (candump_decode(line_buf, &tx_msg) && self->transmitter_) {
-            self->transmitter_->set(tx_msg);
+            if (!self->tx_filter_ || self->tx_filter_(tx_msg.frame)) {
+              // Looped back to the receiver's other listeners, as CAN does
+              // not echo it: an NMEA 2000 node on this device must see the
+              // client's address claims to contest them.
+              if (self->transmitter_->transmit(tx_msg) && self->receiver_) {
+                tx_msg.timestamp_us = esp_timer_get_time();
+                self->receiver_->loopback(tx_msg, self->listener_);
+              }
+            } else if (self->tx_filtered_.fetch_add(1) == 0) {
+              ESP_LOGW(kTag,
+                       "dropped a client frame the TX filter refused "
+                       "(id 0x%08" PRIx32 "); counting the rest silently",
+                       tx_msg.frame.id);
+            }
           }
           line_pos = 0;
         } else {
