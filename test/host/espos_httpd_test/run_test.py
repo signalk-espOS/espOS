@@ -192,17 +192,11 @@ class ApiTests(unittest.TestCase):
                   "free_internal", "min_internal_free", "reset_reason",
                   "config_storage_reset", "schema_etag"):
             self.assertIn(k, js, k)
-        # The whole "hardware" object is absent on the host: nothing in it is
+        # The whole "hardware" object is absent on the host while the
+        # co-processor hook has nothing to report: nothing else in it is
         # meaningful there and an object full of zeros would be worse than its
-        # absence (add_hardware() in api_system.c). That is all this asserts.
-        #
-        # It is NOT a check that the co-processor hook linked: on linux
-        # hosted_watchdog.c compiles its no-co-processor branch, so no strong
-        # definition exists to pull in and only the weak stub is ever called.
-        # A hook whose object the linker never pulled in resolves to the stub
-        # in silence -- which is how espos_time's wallclock hook shipped broken
-        # (#49) -- and the only thing that catches it is `nm` on a device
-        # image: T, not W. Done for this hook on an esp32p4 build.
+        # absence (add_hardware() in api_system.c). The harness hook stays
+        # silent until a test sets a report; test_02b covers the other side.
         self.assertNotIn("hardware", js)
         # free_internal/min_internal_free are the live and low-water halves of one
         # measurement, and min_internal_free is what memoryTrough is raised from;
@@ -240,6 +234,43 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(hd2.get("ETag"), '"%s"' % js["schema_etag"])
 
     # ---- config GET
+    def test_02b_system_info_coprocessor(self):
+        # The harness's main.c defines espos_httpd_coprocessor_hook strongly,
+        # overriding the weak stub in espos_httpd. A report arriving here at all
+        # proves the override linked -- a hook whose object the linker never
+        # pulled in resolves to the stub in silence, which is how espos_time's
+        # wallclock hook shipped broken (#49). The production override in
+        # hosted_watchdog.c still needs `nm` on a device image (T, not W).
+        def coprocessor():
+            st, _, _, js = req("GET", "/api/v1/system/info")
+            self.assertEqual(st, 200)
+            # On the host the co-processor is the only thing "hardware" holds.
+            self.assertEqual(set(js.get("hardware", {})), {"coprocessor"}, js.get("hardware"))
+            return js["hardware"]["coprocessor"]
+
+        try:
+            st, _, _, js = req("POST", "/__harness/coproc", {
+                "version": "2.12.3", "host_version": "3.0.9", "target": "esp32c6", "stale": True})
+            self.assertEqual(st, 200, js)
+            self.assertEqual(coprocessor(), {
+                "version": "2.12.3", "host_version": "3.0.9", "target": "esp32c6", "stale": True})
+
+            # An unknown chip id leaves target empty, and the field is then
+            # omitted rather than sent blank; "0.0.0" is a co-processor that
+            # named no version, which is still a report.
+            st, _, _, js = req("POST", "/__harness/coproc", {
+                "version": "0.0.0", "host_version": "3.0.9", "target": "", "stale": False})
+            self.assertEqual(st, 200, js)
+            co = coprocessor()
+            self.assertEqual(co, {"version": "0.0.0", "host_version": "3.0.9", "stale": False})
+            self.assertIs(co["stale"], False)
+        finally:
+            req("DELETE", "/__harness/coproc")
+
+        # Back to nothing to report: no "hardware" at all, not an empty one.
+        _, _, _, js = req("GET", "/api/v1/system/info")
+        self.assertNotIn("hardware", js)
+
     def test_03_config_get_defaults(self):
         st, hd, raw, js = req("GET", "/api/v1/config")
         self.assertEqual(st, 200)

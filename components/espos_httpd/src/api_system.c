@@ -197,6 +197,43 @@ static void add_time(cJSON *root)
     cJSON_AddNumberToObject(t, "now", (double)unix_ms);
 }
 
+/* Absent on a chip that is its own radio -- most of them -- and absent too
+ * while a co-processor has not answered yet. Those two are NOT
+ * distinguishable from the document, which is the honest shape: a
+ * co-processor that answers without naming a version is present with
+ * "0.0.0", so the only ambiguity left is "no radio chip" versus "one that
+ * never replied", and both mean there is nothing to report.
+ *
+ * `hw` NULL means "hardware" does not exist yet and is created only if the
+ * hook answers -- the linux host, where nothing else would go in it. */
+static void add_coprocessor(cJSON *j, cJSON *hw)
+{
+    espos_httpd_coproc_t cp;
+    memset(&cp, 0, sizeof(cp));
+    if (!espos_httpd_coprocessor_hook(&cp)) {
+        return;
+    }
+    if (!hw) {
+        hw = cJSON_AddObjectToObject(j, "hardware");
+        if (!hw) {
+            return;
+        }
+    }
+    cJSON *co = cJSON_AddObjectToObject(hw, "coprocessor");
+    if (!co) {
+        return;
+    }
+    cJSON_AddStringToObject(co, "version", cp.version);
+    cJSON_AddStringToObject(co, "host_version", cp.host_version);
+    if (cp.target[0]) {
+        cJSON_AddStringToObject(co, "target", cp.target);
+    }
+    /* The answer to "is this the thing causing my RPC timeouts", decided
+     * where both numbers are known rather than left to every client to
+     * compare two version strings correctly. */
+    cJSON_AddBoolToObject(co, "stale", cp.stale);
+}
+
 /* Which board is this? -- the question someone with a drawer of dev boards
  * actually asks, answered from what the chip and the build already know.
  *
@@ -222,10 +259,13 @@ static void add_time(cJSON *root)
 static void add_hardware(cJSON *j, const esp_chip_info_t *chip)
 {
 #if CONFIG_IDF_TARGET_LINUX
-    /* Nothing here is meaningful on the host, and a "hardware" object full of
-     * zeros would be worse than its absence. */
-    (void)j;
+    /* Nothing else here is meaningful on the host, and a "hardware" object
+     * full of zeros would be worse than its absence. The co-processor is the
+     * exception: it comes from a hook, so the host test can link a strong one
+     * and cover both the JSON and the weak/strong override (#168). With no
+     * hook answering, "hardware" stays absent, as before. */
     (void)chip;
+    add_coprocessor(j, NULL);
 #else
     cJSON *hw = cJSON_AddObjectToObject(j, "hardware");
     if (!hw) {
@@ -297,28 +337,7 @@ static void add_hardware(cJSON *j, const esp_chip_info_t *chip)
         cJSON_AddStringToObject(hw, "board", board);
     }
 
-    /* Absent on a chip that is its own radio -- most of them -- and absent too
-     * while a co-processor has not answered yet. Those two are NOT
-     * distinguishable from the document, which is the honest shape: a
-     * co-processor that answers without naming a version is present with
-     * "0.0.0", so the only ambiguity left is "no radio chip" versus "one that
-     * never replied", and both mean there is nothing to report. */
-    espos_httpd_coproc_t cp;
-    memset(&cp, 0, sizeof(cp));
-    if (espos_httpd_coprocessor_hook(&cp)) {
-        cJSON *co = cJSON_AddObjectToObject(hw, "coprocessor");
-        if (co) {
-            cJSON_AddStringToObject(co, "version", cp.version);
-            cJSON_AddStringToObject(co, "host_version", cp.host_version);
-            if (cp.target[0]) {
-                cJSON_AddStringToObject(co, "target", cp.target);
-            }
-            /* The answer to "is this the thing causing my RPC timeouts",
-             * decided where both numbers are known rather than left to every
-             * client to compare two version strings correctly. */
-            cJSON_AddBoolToObject(co, "stale", cp.stale);
-        }
-    }
+    add_coprocessor(j, hw);
 #endif /* !CONFIG_IDF_TARGET_LINUX */
 }
 

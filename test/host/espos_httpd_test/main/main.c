@@ -320,6 +320,66 @@ static esp_err_t sse_probe_get(httpd_req_t *req)
     return espos_httpd_send_json(req, NULL, buf);
 }
 
+/* ---- Co-processor hook: the strong override of espos_httpd's weak stub ----
+ *
+ * On linux espos_wifi compiles its no-co-processor branch, so without this the
+ * stub is all that links and hardware.coprocessor can never be seen on the
+ * host. Defining the hook here covers the JSON shape and, more to the point,
+ * that a strong definition in another component beats the weak one -- the
+ * override espos_time's wallclock hook got wrong (#49).
+ *
+ * Silent until the runner sets a report, so a harness that never asks still
+ * has no "hardware" object at all. The setter and the hook both run on the
+ * httpd task, which serves one request at a time, so there is nothing to lock.
+ *
+ * POST {"version":"..","host_version":"..","target":"..","stale":bool} → report it
+ * DELETE                                                               → report nothing */
+static espos_httpd_coproc_t s_cp;
+static bool s_cp_set;
+
+bool espos_httpd_coprocessor_hook(espos_httpd_coproc_t *out)
+{
+    if (!out || !s_cp_set) {
+        return false;
+    }
+    *out = s_cp;
+    return true;
+}
+
+static void copy_field(char *dst, const cJSON *j, const char *key)
+{
+    const cJSON *v = cJSON_GetObjectItem(j, key);
+    snprintf(dst, ESPOS_HTTPD_COPROC_STRING_MAX, "%s", cJSON_IsString(v) ? v->valuestring : "");
+}
+
+static esp_err_t coproc_post(httpd_req_t *req)
+{
+    char *body = NULL;
+    size_t len = 0;
+    if (espos_httpd_read_body(req, &body, &len) != ESP_OK) {
+        return ESP_FAIL;
+    }
+    cJSON *j = cJSON_ParseWithLength(body, len);
+    free(body);
+    if (!cJSON_IsObject(j)) {
+        cJSON_Delete(j);
+        return espos_httpd_send_error(req, "400 Bad Request", "validation", "object");
+    }
+    copy_field(s_cp.version, j, "version");
+    copy_field(s_cp.host_version, j, "host_version");
+    copy_field(s_cp.target, j, "target");
+    s_cp.stale = cJSON_IsTrue(cJSON_GetObjectItem(j, "stale"));
+    s_cp_set = true;
+    cJSON_Delete(j);
+    return espos_httpd_send_json(req, NULL, "{\"status\":\"set\"}");
+}
+
+static esp_err_t coproc_clear(httpd_req_t *req)
+{
+    s_cp_set = false;
+    return espos_httpd_send_json(req, NULL, "{\"status\":\"cleared\"}");
+}
+
 static void harness_sk_inbound_init(void)
 {
     s_rx_lock = xSemaphoreCreateMutex();
@@ -332,6 +392,8 @@ static void harness_sk_inbound_init(void)
         { .uri = "/__harness/sk/put", .method = HTTP_GET, .handler = put_result_get },
         { .uri = "/__harness/sk/http", .method = HTTP_POST, .handler = http_probe_post },
         { .uri = "/__harness/sse/cbs", .method = HTTP_GET, .handler = sse_probe_get },
+        { .uri = "/__harness/coproc", .method = HTTP_POST, .handler = coproc_post },
+        { .uri = "/__harness/coproc", .method = HTTP_DELETE, .handler = coproc_clear },
     };
     for (size_t i = 0; i < sizeof(uris) / sizeof(uris[0]); i++) {
         ESP_ERROR_CHECK(espos_httpd_register(&uris[i]));
