@@ -4,6 +4,7 @@
 #define COCKPIT_N2K_CANDUMP_TCP_SERVER_H_
 
 #include <atomic>
+#include <functional>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -35,6 +36,16 @@ class CandumpTcpServer {
 
   uint32_t connected_clients() const { return connected_clients_; }
 
+  /// Decides, per frame a client sends, whether it goes on the bus: true
+  /// sends it, false drops it and counts it in tx_filtered(). Set before
+  /// start(). An NMEA 2000 node sharing the bus installs Node::tx_filter()
+  /// here, so a client cannot transmit with the node's own source address.
+  using TxFilter = std::function<bool(const CanFrame&)>;
+  void set_tx_filter(TxFilter filter) { tx_filter_ = std::move(filter); }
+
+  /// Frames from clients the filter refused.
+  uint32_t tx_filtered() const { return tx_filtered_; }
+
  private:
   static void server_task(void* arg);
   static void client_task(void* arg);
@@ -47,8 +58,11 @@ class CandumpTcpServer {
   bool advertised_ = false;
 
   TwaiReceiver* receiver_;
+  TwaiReceiver::ListenerId listener_ = TwaiReceiver::kNoListener;
   TwaiTransmitter* transmitter_;
   CandumpTcpServerConfig config_;
+  TxFilter tx_filter_;
+  std::atomic<uint32_t> tx_filtered_{0};
 
   TaskHandle_t server_task_ = nullptr;
   // Set by the server task as its last act, waited on by stop(). A fixed

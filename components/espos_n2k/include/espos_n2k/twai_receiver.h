@@ -36,12 +36,42 @@ class TwaiReceiver {
   using FrameFn = std::function<void(const CanMessage&)>;
   explicit TwaiReceiver(const TwaiReceiverConfig& config = {});
   ~TwaiReceiver();
+  TwaiReceiver(const TwaiReceiver&) = delete;
+  TwaiReceiver& operator=(const TwaiReceiver&) = delete;
 
   void start();
   void stop();
 
-  /// Called on the receiver task for every frame. Set before start().
-  void set_on_frame(FrameFn fn) { on_frame_ = std::move(fn); }
+  /// Handle of a listener added with add_listener(); kNoListener is none.
+  using ListenerId = uint32_t;
+  static constexpr ListenerId kNoListener = 0;
+
+  /// Adds a listener called on the receiver task for every frame, after the
+  /// ones added before it. Several consumers can share one bus this way --
+  /// the candump server and an NMEA 2000 node, say. Safe at any time, before
+  /// or after start(). Returns kNoListener when `fn` is empty or all
+  /// CONFIG_ESPOS_N2K_MAX_LISTENERS slots are taken.
+  ///
+  /// Listeners run one after another on the one task: return quickly and
+  /// never block (copy the frame into a queue of your own). Do not add or
+  /// remove listeners from inside one.
+  ListenerId add_listener(FrameFn fn);
+
+  /// Removes a listener. When this returns, the listener is not running and
+  /// will not be called again, so whatever it captured can be destroyed.
+  void remove_listener(ListenerId id);
+
+  /// Hands a frame this device transmitted to every listener but `skip` (its
+  /// sender's own), as if it had been received. CAN does not echo a node's
+  /// frames back to it, so without this a candump client never sees what an
+  /// NMEA 2000 node on the same device sends -- Linux socketcan loops local
+  /// frames back for the same reason. Not counted as received.
+  void loopback(const CanMessage& msg, ListenerId skip);
+
+  /// The single-callback API this class had before add_listener(): replaces
+  /// the listener the previous set_on_frame() call installed (nullptr just
+  /// removes it) and leaves every other listener alone.
+  void set_on_frame(FrameFn fn);
 
   /// True if we have received at least one frame since boot.
   bool ever_received() const {
@@ -85,8 +115,11 @@ class TwaiReceiver {
  private:
   static void sink(void* ctx, const CanMessage& msg);
 
+  struct Listeners;  // src/twai_receiver.cpp: the table and its lock
+
   TwaiReceiverConfig config_;
-  FrameFn on_frame_;
+  Listeners* listeners_;
+  ListenerId on_frame_id_ = kNoListener;
   std::atomic<bool> running_{false};
   // Microseconds-since-boot of last RX frame; 0 = nothing received yet.
   std::atomic<int64_t> last_rx_us_{0};

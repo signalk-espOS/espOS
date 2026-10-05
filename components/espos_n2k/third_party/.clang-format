@@ -1,0 +1,8 @@
+# SPDX-FileCopyrightText: 2026 Dirk Wahrheit
+# SPDX-License-Identifier: Apache-2.0
+#
+# Vendored code keeps its upstream formatting, so an update stays a plain copy
+# and its diff against upstream stays empty.
+---
+DisableFormat: true
+SortIncludes: Never

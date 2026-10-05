@@ -1,0 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Dirk Wahrheit
+# SPDX-License-Identifier: Apache-2.0
+#
+# espos_n2k::Node and the NMEA2000 library under it; off unless asked for.
+CONFIG_ESPOS_N2K_NODE=y

@@ -27,7 +27,11 @@ class TwaiTransmitter {
 
   /// ValueConsumer interface — queues a frame for transmission. Does not
   /// block: a full transmit queue drops the frame and counts a failure.
-  void set(const CanMessage& msg);
+  void set(const CanMessage& msg) { (void)transmit(msg); }
+
+  /// set(), saying whether the frame was queued. Comparing tx_fail_count()
+  /// before and after cannot answer that once two tasks share a transmitter.
+  bool transmit(const CanMessage& msg);
 
   /// True if we have queued at least one frame since boot. (Queued, not
   /// acknowledged on the wire — the driver reports that asynchronously and

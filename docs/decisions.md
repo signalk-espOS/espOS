@@ -161,3 +161,29 @@ was retired.
   reported, and espos_wifi is itself one of the reporters, so its own drainer
   would have re-entered it. `ESPOS_ABI_VERSION` 5 → 6.
 
+
+* **espOS can be an NMEA 2000 node, on the NMEA2000 library, vendored**
+  (2026-10-05, espOS #163). `espos_n2k` was a bridge only: no NAME, no
+  address claim, no instance, so a device could not transmit as itself — an
+  N2K switch bank an MFD switches was impossible without each firmware
+  bringing its own protocol layer (signalk-espOS-8relay did, and had to give
+  up the candump server for it). `espos_n2k::Node` closes that with Timo
+  Lappalainen's NMEA2000 library (MIT), the protocol layer most ESP32 N2K
+  devices already run, rather than a hand-written stack: address claim and
+  its contest, ISO requests, group functions and fast packets are easy to get
+  subtly wrong and have no host test until a second device disagrees on a
+  boat. Considered and not taken: canboat's analyzer, which decodes but is no
+  node, and whose generated PGN table is about 3 MB of writable data, larger
+  than an app slot. The library is **vendored** under
+  `components/espos_n2k/third_party/` rather than a git dependency: upstream
+  tags no releases, its CMakeLists fails under CMake 4, and a registry copy
+  of espos_n2k should not need a second fetch to build. It is compiled only
+  with `CONFIG_ESPOS_N2K_NODE`, so a bridge pays nothing.
+  The design question #163 raised — two logical nodes, the node and whatever
+  drives the bridge, on one interface — is settled as: allowed, and kept
+  apart by address. A candump client may not transmit with the node's
+  address (`CandumpTcpServer::set_tx_filter(node.tx_filter())`), and the
+  node's own frames are looped back to the other listeners so candump
+  clients see them. That needed the receiver to feed several listeners
+  (`TwaiReceiver::add_listener()`), which is also what lets a firmware keep
+  the candump server next to N2K code of its own.

@@ -1,0 +1,12 @@
+{
+  "namespace": "n2k",
+  "version": 1,
+  "title": "NMEA 2000",
+  "description": "This device as a node on the NMEA 2000 bus. The instances tell it apart from other devices of the same kind; an MFD can also set them over the bus, and a value set there shows up here.",
+  "keys": [
+    {"name": "device_instance", "type": "int", "default": 0, "min": 0, "max": 255, "title": "Device instance",
+     "description": "Tells this device from others of the same type, e.g. a second switch bank. Every device of one type on a bus needs its own. Takes effect immediately: the device announces itself again with the new value."},
+    {"name": "system_instance", "type": "int", "default": 0, "min": 0, "max": 15, "title": "System instance",
+     "description": "Which of several separate systems on one bus this device belongs to. Leave at 0 unless the boat's installation uses system instances."}
+  ]
+}
