@@ -165,6 +165,7 @@ nav:
       - Hardware: hardware.md
   - Project:
       - Development: development.md
+      - Branding: assets/branding/README.md
       - Releasing: releasing.md
       - Security: security.md
       - Roadmap: roadmap.md
