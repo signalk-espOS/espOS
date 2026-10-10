@@ -5,7 +5,7 @@
 # host, so nothing here names the board's wiring.
 
 # Byte-identical output from the same sources: the pinned
-# CONFIG_ESPOS_WIFI_COPROC_FW_SHA256 is checked against a fresh build in CI.
+# ESPOS_COPROC_FW_SHA256 (coproc_image.h) is checked against a fresh build in CI.
 CONFIG_APP_REPRODUCIBLE_BUILD=y
 
 # Role: co-processor for an MCU host.
