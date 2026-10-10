@@ -197,14 +197,15 @@ A P4 board updates its own co-processor: `POST /api/v1/system/coprocessor/update
 ([REST API](rest-api.md#get-systemcoprocessorupdate-post-systemcoprocessorupdate-protected))
 downloads the C6 image into PSRAM, checks it and streams it to the C6 through
 `esp_hosted`'s OTA calls (begin, write, end, activate). The C6 restarts itself
-into the new image a moment after `activate()`, and the hosted watchdog
-restarts the P4 when it sees the co-processor come back, so both chips start
-together on the new pair. The heartbeat watchdog is held for the transfer:
-`begin()` erases a 1.75 MB slot before it answers, which is not the wedge it
-exists for. The update is refused while the P4's own firmware is still pending
-verification, because that restart would roll it back, and while a P4 firmware
-update runs (and the other way round), because each ends in a restart. The
-download parks the same real-time work an OTA download does
+into the new image a moment after `activate()`, and the P4 follows as soon as it
+notices (esp_hosted restarts it on the broken link, the hosted watchdog when the
+C6 announces itself, or a fallback timer); its start resets the C6 again, so
+both chips start together on the new pair. The heartbeat watchdog is held for
+the transfer: `begin()` erases a 1.75 MB slot before it answers, which is not
+the wedge it exists for. The update is refused while the P4's own firmware is
+still pending verification, because that restart would roll it back, and while a
+P4 firmware update runs (and the other way round), because each ends in a
+restart. The download parks the same real-time work an OTA download does
 (`espos_ota_quiesce_hook()`). A client such as the Signal K manager can offer it
 whenever `coprocessor.stale` is set.
 
@@ -223,13 +224,15 @@ Why it is safe to offer to someone who cannot reach the C6 with a cable:
 - **Two slots.** The C6 writes into its inactive app slot. An interrupted
   transfer, a refused image or a power cut leaves the running image in place,
   and the next attempt erases the slot again.
-- **Confirmed once a host talks to it.** An update does not replace the C6's
-  bootloader. If the one it shipped with has app rollback on, an unconfirmed
-  image is rolled back at the next reset, so the image confirms itself when a
-  host has negotiated with it over the transport (esp_hosted's
-  `EH_CP_EVT_PRIVATE_RPC_READY`). One that boots but never reaches the P4 stays
-  unconfirmed, and the P4's next reset takes the C6 back to the image that
-  worked. Without rollback in that bootloader there is no such net.
+- **Confirmed once it boots.** An update does not replace the C6's bootloader.
+  If the one it shipped with has app rollback on, an image still unconfirmed at
+  its second boot is rolled back. The image cannot wait for a host to talk to it
+  first: it usually first boots when the C6 restarts itself, which breaks the
+  link, and the P4's restart then resets the C6 again, so the first boot a host
+  negotiates with is the second. It confirms itself once it has booted and
+  opened NVS instead. One that crashes before that goes back to the image that
+  worked, where the bootloader has rollback; one that boots but cannot talk to
+  the P4 needs the cable route below.
 
 Rolling the P4 back after updating the C6 is the one way to lose the radio
 this way: the 3.x image speaks only to an esp_hosted 3.x host, and the P4's

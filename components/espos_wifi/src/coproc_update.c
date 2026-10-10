@@ -20,9 +20,11 @@
  *
  * Applying it: the co-processor restarts itself into the new image a moment
  * after activate() (after end() on one older than 2.6, which has no activate),
- * and the hosted watchdog restarts this host when it sees the co-processor
- * come back (ESP_HOSTED_EVENT_CP_INIT), so both chips start together on the
- * new pair. A restart of our own follows if that does not happen.
+ * and this host follows as soon as it notices: esp_hosted restarts it on the
+ * transport failure that leaves behind, the hosted watchdog on
+ * ESP_HOSTED_EVENT_CP_INIT, and a restart of our own if neither does. Its
+ * start resets the co-processor again, so both chips start together on the
+ * new pair.
  *
  * Not before the running firmware is confirmed: a restart while it is still
  * pending verification would roll this host back to the previous image, which
@@ -89,8 +91,8 @@ extern bool espos_ota_busy(void) __attribute__((weak));
 #define CHUNK         1400
 #define READ_CHUNK    4096
 #define REDIRECTS_MAX 5
-/* The co-processor restarts itself about 2 s after activate() and the hosted
- * watchdog restarts this host on seeing it return; this is the fallback. */
+/* The co-processor restarts itself about 2 s after activate() and this host
+ * follows it (see "Applying it" above); this is the fallback. */
 #define RESTART_FALLBACK_MS 15000
 
 typedef enum {
