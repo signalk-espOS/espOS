@@ -84,9 +84,9 @@ Design points from the plan, all implemented:
   second server configured with the boat's MMSI (a test VM, a spare Pi)
   advertises the same one. Selection and the discovery list therefore anchor
   on the token's (or pending request's) host:port first and fall back to self
-  only when that address has been silent for two discovery intervals (the
-  discovery list's own carry-over window; until then a server with the same
-  self is not elected at all). Without that, mDNS answer order picked
+  only when discovery has not heard that address for two discovery
+  intervals plus 5 s (the discovery list's own carry-over window; until then
+  a server with the same self is not elected at all). Without that, mDNS answer order picked
   between the twins every round: a pending request polled on the other one
   came back 404 and was dropped, so the approval was never collected and the
   device kept asking. Among servers with the same self the one in use stays,

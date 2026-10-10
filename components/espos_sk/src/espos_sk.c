@@ -406,24 +406,39 @@ static uint32_t carry_window_ms(void)
     return 2 * s.discover_interval_ms + 5000;
 }
 
-/* May the anchor fall back to its self URN? Yes when it has no address (older
- * firmware stored none), or when that address has been absent from the list
- * for a whole carry window. Lock held. */
-static bool anchor_self_fallback(const espos_sk_anchor_t *a, uint32_t t)
+/* Track whether this round's mDNS answers include the anchored address. Only
+ * fresh answers count: a carried-over entry is exactly what a silent server
+ * leaves behind, and letting it reset the clock would add a whole carry window
+ * to the wait. Lock held; run_discovery() only. */
+static void anchor_note_answers(const espos_sk_anchor_t *a, const espos_sk_discovered_t *found, size_t n, uint32_t t)
 {
     if (!a->host[0]) {
-        return true;
+        s.anchor_missing_ms = 0;
+        return;
     }
-    for (size_t i = 0; i < s.server_count; i++) {
-        if (espos_sk_same_addr(&s.servers[i], a->host, a->port)) {
+    for (size_t k = 0; k < n; k++) {
+        if (espos_sk_same_addr(&found[k], a->host, a->port)) {
             s.anchor_missing_ms = 0;
-            return false;
+            return;
         }
     }
     if (!s.anchor_missing_ms || strcmp(s.anchor_missing_host, a->host) != 0 || s.anchor_missing_port != a->port) {
         snprintf(s.anchor_missing_host, sizeof(s.anchor_missing_host), "%s", a->host);
         s.anchor_missing_port = a->port;
         s.anchor_missing_ms = t ? t : 1;
+    }
+}
+
+/* May the anchor fall back to its self URN? Yes when it has no address (older
+ * firmware stored none), or when discovery has not heard that address for a
+ * whole carry window. Lock held. */
+static bool anchor_self_fallback(const espos_sk_anchor_t *a, uint32_t t)
+{
+    if (!a->host[0]) {
+        return true;
+    }
+    if (!s.anchor_missing_ms || strcmp(s.anchor_missing_host, a->host) != 0 || s.anchor_missing_port != a->port) {
+        return false;
     }
     return (int32_t)(t - s.anchor_missing_ms) >= (int32_t)carry_window_ms();
 }
@@ -595,6 +610,7 @@ static void run_discovery(void)
      * address match and the device would never follow it. */
     espos_sk_anchor_t anchor;
     espos_sk_store_anchor(&s.sm.store, &anchor);
+    anchor_note_answers(&anchor, found, n, t);
     int keep = espos_sk_find_anchored(s.servers, s.server_count, &anchor, s.have_server ? s.server.host : "",
                                       s.have_server ? s.server.port : 0, anchor_self_fallback(&anchor, t));
     bool keep_reserved = false;
