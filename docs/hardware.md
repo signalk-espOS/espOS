@@ -191,14 +191,64 @@ panels here have run for months on a stock slave, and the one device seen with
 not demonstrated. Treat the condition as a precondition worth removing before
 chasing RPC timeouts, not as a diagnosis.
 
-The co-processor image is built and flashed from `esp_hosted`'s own tree, not
-from espOS, with the C6 on its own USB port. In 3.x that is `coprocessor/`
-plus a per-example `cp/` project (`examples/system/get_cp_fw_version/cp` is the
-smallest), which is a different layout from the `slave/` directory 2.x used —
-so follow Espressif's instructions for the version this build pins rather than
-a recipe from this page. **Not exercised here**: no co-processor has been
-reflashed on this bench. On the PoE board, remember that
-USB and Ethernet must not be connected at the same time.
+#### Over the link
+
+A P4 board updates its own co-processor: `POST /api/v1/system/coprocessor/update`
+([REST API](rest-api.md#get-systemcoprocessorupdate-post-systemcoprocessorupdate-protected))
+downloads the C6 image into PSRAM, checks it and streams it to the C6 through
+`esp_hosted`'s OTA calls (begin, write, end, activate). The C6 restarts itself
+into the new image a moment after `activate()`, and the hosted watchdog
+restarts the P4 when it sees the co-processor come back, so both chips start
+together on the new pair. The heartbeat watchdog is held for the transfer:
+`begin()` erases a 1.75 MB slot before it answers, which is not the wedge it
+exists for. The update is refused while the P4's own firmware is still pending
+verification, because that restart would roll it back. A client such as the Signal K manager can offer it
+whenever `coprocessor.stale` is set.
+
+Why it is safe to offer to someone who cannot reach the C6 with a cable:
+
+- **One image only.** The C6 image carries no signature the P4 can check, so
+  the trust is in the P4 firmware, which is signed: it accepts exactly the image
+  whose SHA-256 is `CONFIG_ESPOS_WIFI_COPROC_FW_SHA256`, from whatever URL it
+  was fetched. A mirror serving the wrong file fails the hash, not the radio.
+- **Checked before written.** The whole image (about 1.4 MB) is hashed in PSRAM
+  before the first byte goes over SDIO. A co-processor older than esp_hosted
+  2.6 switches its boot slot at `end()` with no separate `activate()`, so
+  hashing while streaming would be too late.
+- **Two slots.** The C6 writes into its inactive app slot. An interrupted
+  transfer, a refused image or a power cut leaves the running image in place,
+  and the next attempt erases the slot again.
+- **Confirmed on boot.** An update does not replace the C6's bootloader. If the
+  one it shipped with has app rollback on, an unconfirmed image would be rolled
+  back at the next reset, so the image confirms itself once esp_hosted is up.
+
+The image is `tools/coprocessor`: `esp_hosted`'s Wi-Fi + BLE co-existence
+co-processor (BLE as HCI over SDIO, which is what the [BLE gateway](ble.md)
+uses), built with `CONFIG_APP_REPRODUCIBLE_BUILD`. The `coprocessor` workflow
+rebuilds it on every change, fails if the result differs from the pinned hash,
+and on `main` publishes it to the `coprocessor-assets` branch under a name
+carrying its version and the first 12 hex digits of its hash, so a published
+file is never replaced. Any change to the image's bytes (an IDF bump, an
+sdkconfig change) is a new hash and a new file name in
+`CONFIG_ESPOS_WIFI_COPROC_FW_SHA256` and `CONFIG_ESPOS_WIFI_COPROC_FW_URL`; the
+workflow's error says what to set. Bumping `esp_hosted` also moves four
+versions the workflow checks agree: `components/espos_wifi/idf_component.yml`,
+`tools/coprocessor/main/idf_component.yml`, `PROJECT_VER` in
+`tools/coprocessor/CMakeLists.txt` and `CONFIG_ESPOS_WIFI_COPROC_FW_VERSION`.
+
+Two things a bench has to show before this is offered widely, because no C6
+has yet been updated this way here: that a stock Waveshare C6 (esp_hosted
+2.x) accepts the 3.x image over the link, and that its app slots are large
+enough for it (the image is 1.4 MB; esp_hosted's own 4 MB table gives 1.75 MB).
+A C6 whose partition table has no second slot refuses at `begin()` and keeps
+running.
+
+#### Over USB
+
+The same image can be flashed by hand from `tools/coprocessor` with
+`idf.py -p <port> flash`, with the C6 on its own USB port, where the board
+exposes one. On the PoE board, remember that USB and Ethernet must not be
+connected at the same time.
 
 ### Capabilities
 

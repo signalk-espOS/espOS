@@ -348,6 +348,42 @@ the wall-clock time (`at`, ISO 8601 UTC; `null` when the clock was never set).
 `/system/coredump`), an OTA reboot, `POST /system/reboot`. It stays for the
 whole boot and is gone after the next reset, whatever its cause.
 
+### `GET /system/coprocessor/update`, `POST /system/coprocessor/update` · protected
+
+Only on a host whose radio is a separate chip (an ESP32-P4 with an ESP32-C6):
+a build without one has no such route, so a 404 means there is nothing to
+update. The POST installs the co-processor image this firmware was built for
+over the existing link and restarts the device to apply it
+([hardware.md](hardware.md#updating-the-c6-co-processor-firmware)):
+
+```json
+{}                                                           → 202 {"status":"updating"}
+{"url": "http://signalk.local:3000/fw/espos-coprocessor-esp32c6-3.0.9-2eb7634e3321.bin"}
+```
+
+With no `url` the image comes from `CONFIG_ESPOS_WIFI_COPROC_FW_URL`. Either
+way the device accepts only the image whose SHA-256 is
+`CONFIG_ESPOS_WIFI_COPROC_FW_SHA256`, checked before the first byte is written
+to the co-processor; any other file ends in `failed`. Redirects are followed;
+the server must send a `Content-Length`. 409 `busy` while an update runs, and
+409 `unconfirmed` while the running firmware is still pending verification
+after an OTA: the restart that applies the co-processor image would roll it
+back.
+
+The GET is the progress and the image on offer:
+
+```json
+{"state": "writing", "done": 524288, "total": 1427568,
+ "image": {"version": "3.0.9", "sha256": "2eb7634e…", "url": "https://…"}}
+```
+
+`state` is `idle`, `downloading`, `verifying`, `writing`, `restarting` or
+`failed` (with `error`). Compare `image.version` with
+`hardware.coprocessor.version` in `GET /system/info` to decide whether to offer
+the update. `restarting` is the last state a client sees: the co-processor
+restarts itself into the new image and the device follows it, so the next
+answer comes from a fresh boot.
+
 ### `POST /system/reboot` — M1 · protected
 
 `202 {"status": "rebooting"}` — the device restarts ~500 ms after

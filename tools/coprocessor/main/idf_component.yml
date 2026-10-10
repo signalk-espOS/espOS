@@ -1,0 +1,8 @@
+# Exact, like espos_wifi's host-side pin: the image and the host it serves
+# are one pair, and CONFIG_ESPOS_WIFI_COPROC_FW_SHA256 is the hash of THIS
+# build. Bumping it means bumping all three together.
+dependencies:
+  idf:
+    version: ">=6.0"
+  espressif/esp_hosted:
+    version: "==3.0.9"

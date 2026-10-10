@@ -1,0 +1,152 @@
+name: Co-processor image
+
+# The ESP32-C6 radio image that an ESP32-P4 board installs over its SDIO link
+# (POST /api/v1/system/coprocessor/update, docs/hardware.md). The P4 firmware
+# accepts exactly one image: the one whose SHA-256 is pinned in
+# components/espos_wifi/Kconfig. So this workflow is what makes that pin
+# auditable: it rebuilds tools/coprocessor reproducibly on every change and
+# fails when the result is not byte-for-byte the pinned image.
+#
+# On main it also publishes the image to the coprocessor-assets branch, where
+# CONFIG_ESPOS_WIFI_COPROC_FW_URL points, under a name carrying its version and
+# hash. A published file is never replaced: a device built against one hash
+# must keep finding that image.
+on:
+  pull_request:
+    paths:
+      - "tools/coprocessor/**"
+      - "components/espos_wifi/Kconfig"
+      - "components/espos_wifi/idf_component.yml"
+      - ".idf-version"
+      - ".github/workflows/coprocessor.yml"
+  push:
+    branches: [main]
+    paths:
+      - "tools/coprocessor/**"
+      - "components/espos_wifi/Kconfig"
+      - "components/espos_wifi/idf_component.yml"
+      - ".idf-version"
+      - ".github/workflows/coprocessor.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: coprocessor-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build and check the pin
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      version: ${{ steps.pin.outputs.version }}
+      name: ${{ steps.pin.outputs.name }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: read the pins
+        id: pin
+        run: |
+          set -euo pipefail
+          kconfig() {
+            awk -v sym="config $1" '
+              $0 ~ "^[[:space:]]*"sym"[[:space:]]*$" { found = 1; next }
+              found && /^[[:space:]]*default[[:space:]]/ { gsub(/.*default[[:space:]]+"|".*/, ""); print; exit }
+            ' components/espos_wifi/Kconfig
+          }
+          version=$(kconfig ESPOS_WIFI_COPROC_FW_VERSION)
+          sha=$(kconfig ESPOS_WIFI_COPROC_FW_SHA256)
+          url=$(kconfig ESPOS_WIFI_COPROC_FW_URL)
+          # The image, the host's esp_hosted and the version the P4 offers are
+          # one pair; a bump that misses one of the three is caught here.
+          host=$(grep -A1 'espressif/esp_hosted:' components/espos_wifi/idf_component.yml | sed -n 's/.*version: "==\(.*\)".*/\1/p')
+          image=$(grep -A1 'espressif/esp_hosted:' tools/coprocessor/main/idf_component.yml | sed -n 's/.*version: "==\(.*\)".*/\1/p')
+          project=$(sed -n 's/^set(PROJECT_VER "\(.*\)")/\1/p' tools/coprocessor/CMakeLists.txt)
+          echo "Kconfig $version, host esp_hosted $host, image esp_hosted $image, PROJECT_VER $project"
+          for v in "$host" "$image" "$project"; do
+            [ "$v" = "$version" ] || { echo "::error::co-processor versions disagree: Kconfig $version, espos_wifi $host, image $image, PROJECT_VER $project"; exit 1; }
+          done
+          # Named by version AND hash: a rebuild with different bytes is a new
+          # file, so a published image is never replaced under a device built
+          # against it.
+          name="espos-coprocessor-esp32c6-$version-${sha:0:12}.bin"
+          case "$url" in
+            */esp32c6/"$version"/"$name") ;;
+            *) echo "::error::CONFIG_ESPOS_WIFI_COPROC_FW_URL should end in esp32c6/$version/$name: $url"; exit 1 ;;
+          esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "idf=$(cat .idf-version)" >> "$GITHUB_OUTPUT"
+      - uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: ${{ steps.pin.outputs.idf }}
+          target: esp32c6
+          path: tools/coprocessor
+          command: idf.py build
+      - name: compare with the pinned hash
+        run: |
+          set -euo pipefail
+          bin=tools/coprocessor/build/espos_coprocessor.bin
+          actual=$(sha256sum "$bin" | cut -d' ' -f1)
+          echo "built $(stat -c %s "$bin") bytes, sha256 $actual"
+          if [ "$actual" != "${{ steps.pin.outputs.sha }}" ]; then
+            echo "::error::the built image is not the pinned one: if this change is meant to produce a new image, set CONFIG_ESPOS_WIFI_COPROC_FW_SHA256 to $actual and the file name in CONFIG_ESPOS_WIFI_COPROC_FW_URL to end in -${actual:0:12}.bin (components/espos_wifi/Kconfig)"
+            exit 1
+          fi
+          mkdir -p out
+          cp "$bin" "out/${{ steps.pin.outputs.name }}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.pin.outputs.name }}
+          path: out/
+          if-no-files-found: error
+
+  publish:
+    name: publish to coprocessor-assets
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency:
+      group: coprocessor-assets
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.build.outputs.name }}
+          path: out
+      - name: commit the image unless it is already there
+        run: |
+          set -euo pipefail
+          version="${{ needs.build.outputs.version }}"
+          file="esp32c6/$version/${{ needs.build.outputs.name }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git fetch -q origin coprocessor-assets; then
+            git checkout -q -B coprocessor-assets FETCH_HEAD
+          else
+            git checkout -q --orphan coprocessor-assets
+            git rm -rq --cached . && git clean -fdq -e out
+          fi
+          if [ -e "$file" ]; then
+            if cmp -s "$file" "out/$(basename "$file")"; then
+              echo "$file is already published."
+              exit 0
+            fi
+            echo "::error::$file is published with different bytes, which its name (version and hash) should make impossible"
+            exit 1
+          fi
+          mkdir -p "$(dirname "$file")"
+          cp "out/$(basename "$file")" "$file"
+          git add "$file"
+          git commit -q -m "chore: publish co-processor image $version"
+          git push -q origin HEAD:coprocessor-assets
+          echo "published $file"
