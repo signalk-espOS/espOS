@@ -26,7 +26,8 @@ typedef struct {
 } espos_sk_anchor_t;
 
 void espos_sk_store_anchor(const espos_sk_tok_store_t *st, espos_sk_anchor_t *out);
-/* The anchored entry of list[0..n): the one at the anchor's address, else --
+/* The anchored entry of list[0..n): the one at the anchor's address (with a
+ * self URN that does not contradict the anchor's), else --
  * when the anchor has no address, or self_fallback says it has been gone long
  * enough to have moved -- among those with its self URN the current server,
  * else the lowest address. -1 when none matches. */
@@ -34,6 +35,9 @@ int espos_sk_find_anchored(const espos_sk_discovered_t *list, size_t n, const es
                            const char *cur_host, uint16_t cur_port, bool self_fallback);
 /* d is at host:port. An empty host matches nothing. */
 bool espos_sk_same_addr(const espos_sk_discovered_t *d, const char *host, uint16_t port);
+/* d is the anchored server: at its address, with a self URN that does not
+ * contradict the anchor's. */
+bool espos_sk_is_anchor(const espos_sk_discovered_t *d, const espos_sk_anchor_t *anchor);
 /* Election order: self URN, then the current server, then the address. */
 bool espos_sk_disc_before(const espos_sk_discovered_t *a, const espos_sk_discovered_t *b,
                           const char *cur_host, uint16_t cur_port);

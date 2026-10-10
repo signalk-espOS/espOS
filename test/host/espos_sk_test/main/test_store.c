@@ -8,6 +8,7 @@
 #include "unity.h"
 #include "esp_partition.h"
 #include "esp_private/partition_linux.h"
+#include "nvs.h"
 #include "nvs_flash.h"
 #include "espos_sk_priv.h"
 
@@ -77,6 +78,21 @@ TEST_CASE("store: token and pending request round-trip; empties erase", "[sk_sto
     TEST_ASSERT_EQUAL_STRING("", back.token);
     TEST_ASSERT_EQUAL_STRING("", back.token_host);
     TEST_ASSERT_EQUAL_STRING("/signalk/v1/requests/abc", back.pending_href);
+    /* a token rewritten by firmware that predates the address (rollback)
+     * does not inherit the old token's address */
+    strcpy(st.token, "tok.for.A");
+    strcpy(st.token_host, "10.0.0.10");
+    st.token_port = 80;
+    TEST_ESP_OK(espos_sk_store_save(&st));
+    nvs_handle_t h;
+    TEST_ESP_OK(nvs_open_from_partition("nvs", "skstate", NVS_READWRITE, &h));
+    TEST_ESP_OK(nvs_set_str(h, "token", "tok.for.B"));
+    TEST_ESP_OK(nvs_commit(h));
+    nvs_close(h);
+    TEST_ESP_OK(espos_sk_store_load(&back, id));
+    TEST_ASSERT_EQUAL_STRING("tok.for.B", back.token);
+    TEST_ASSERT_EQUAL_STRING("", back.token_host);
+    TEST_ASSERT_EQUAL(0, back.token_port);
     /* a token at the maximum length fits */
     memset(st.token, 'x', ESPOS_SK_TOKEN_MAX - 1);
     st.token[ESPOS_SK_TOKEN_MAX - 1] = '\0';

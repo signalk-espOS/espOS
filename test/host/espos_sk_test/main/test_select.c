@@ -66,6 +66,20 @@ TEST_CASE("select: by self -- only without an address or once it has moved; curr
     TEST_ASSERT_EQUAL_STRING(TWIN_SELF, ab[espos_sk_find_anchored(ab, 3, &a, "", 0, true)].self);
 }
 
+TEST_CASE("select: an address handed to another server is not the anchor", "[sk_select]")
+{
+    espos_sk_tok_store_t st = { .token = "tok.en", .token_self = TWIN_SELF, .token_host = "192.168.0.10", .token_port = 80 };
+    espos_sk_anchor_t a;
+    espos_sk_store_anchor(&st, &a);
+    espos_sk_discovered_t l[2] = { disc("192.168.0.10", 80, "urn:mrn:imo:mmsi:999999999"), disc("192.168.0.20", 80, TWIN_SELF) };
+    TEST_ASSERT_FALSE(espos_sk_is_anchor(&l[0], &a));
+    TEST_ASSERT_EQUAL(-1, espos_sk_find_anchored(l, 2, &a, "", 0, false));
+    TEST_ASSERT_EQUAL(1, espos_sk_find_anchored(l, 2, &a, "", 0, true));
+    /* an entry that advertised no self is not a contradiction */
+    espos_sk_discovered_t noself = disc("192.168.0.10", 80, "");
+    TEST_ASSERT_TRUE(espos_sk_is_anchor(&noself, &a));
+}
+
 TEST_CASE("select: nothing stored anchors nothing", "[sk_select]")
 {
     espos_sk_tok_store_t st = { 0 };

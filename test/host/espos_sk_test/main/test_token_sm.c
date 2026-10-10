@@ -395,7 +395,7 @@ TEST_CASE("server that changed address keeps its token (keyed by self)", "[sk_to
     TEST_ASSERT_EQUAL(0, F.requests);
 }
 
-TEST_CASE("a working token follows its server's address; an old token learns it", "[sk_tok]")
+TEST_CASE("an old token learns its address on verify; a recorded one is not re-homed", "[sk_tok]")
 {
     /* stored before the address was recorded */
     espos_sk_tok_store_t st = { .token = "tok.en.3", .token_self = "urn:mrn:signalk:uuid:aaaa" };
@@ -405,12 +405,13 @@ TEST_CASE("a working token follows its server's address; an old token learns it"
     verify_result(200, "urn:mrn:signalk:uuid:aaaa");
     TEST_ASSERT_EQUAL_STRING("10.0.0.10", F.saved.token_host);
     TEST_ASSERT_EQUAL(80, F.saved.token_port);
-    /* DHCP moved it: the verify at the new address re-homes the token */
-    espos_sk_server_t moved = SRV_A;
-    strcpy(moved.host, "10.0.0.99");
-    espos_sk_tok_event(&SM, ESPOS_SK_EV_SERVER, &moved);
+    /* a 200 elsewhere (a same-self twin with security off answers 200 to
+     * anything) does not move the anchor */
+    espos_sk_server_t twin = SRV_A;
+    strcpy(twin.host, "10.0.0.99");
+    espos_sk_tok_event(&SM, ESPOS_SK_EV_SERVER, &twin);
     verify_result(200, "urn:mrn:signalk:uuid:aaaa");
-    TEST_ASSERT_EQUAL_STRING("10.0.0.99", F.saved.token_host);
+    TEST_ASSERT_EQUAL_STRING("10.0.0.10", F.saved.token_host);
     /* a dropped token forgets the address with it */
     tick(60000);
     verify_result(401, NULL);

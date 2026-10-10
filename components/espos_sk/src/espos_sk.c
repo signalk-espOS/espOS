@@ -101,11 +101,11 @@ static struct {
     char client_id[40];
     espos_sk_discovered_t servers[ESPOS_SK_MAX_SERVERS];
     uint32_t avoid_until_ms[ESPOS_SK_MAX_SERVERS]; /* unreachable discovered servers are skipped for a while */
-    /* Since when the anchored address (anchor_self_fallback) has been absent
-     * from discovery; 0 = it is present. */
-    char anchor_missing_host[ESPOS_SK_HOST_MAX];
-    uint16_t anchor_missing_port;
-    uint32_t anchor_missing_ms;
+    /* Discovery rounds, among those anyone answered, in which the anchored
+     * address (anchor_self_fallback) was not heard; keyed by that address. */
+    char anchor_unheard_host[ESPOS_SK_HOST_MAX];
+    uint16_t anchor_unheard_port;
+    uint32_t anchor_unheard_rounds;
     size_t server_count;
     uint32_t last_discovery_ms;
     bool net_was_up;
@@ -396,51 +396,65 @@ static bool resolve_scheme(espos_sk_server_t *srv, int advertised)
 #endif
 }
 
-/* How long a discovered entry outlives its last mDNS answer -- and so how long
- * an anchored address may be silent before a server with the same self URN is
- * taken to be that server at a new address rather than a twin (sk_select.c).
- * Any shorter, and one lossy round, or the first round after boot, would hand
- * the pairing to the twin. */
+/* How long a discovered entry outlives its last mDNS answer. */
 static uint32_t carry_window_ms(void)
 {
     return 2 * s.discover_interval_ms + 5000;
 }
 
-/* Track whether this round's mDNS answers include the anchored address. Only
- * fresh answers count: a carried-over entry is exactly what a silent server
- * leaves behind, and letting it reset the clock would add a whole carry window
- * to the wait. Lock held; run_discovery() only. */
-static void anchor_note_answers(const espos_sk_anchor_t *a, const espos_sk_discovered_t *found, size_t n, uint32_t t)
+/* A server with the anchor's self URN but another address is a twin
+ * (sk_select.c) until the anchored address has gone unheard for this many
+ * answered rounds; after that it is taken to be our server at a new address.
+ * Two, so that neither one lossy round nor the first round after boot hands
+ * the pairing over. */
+#define ANCHOR_UNHEARD_ROUNDS 2
+
+static bool is_anchor_key(const espos_sk_anchor_t *a)
 {
-    if (!a->host[0]) {
-        s.anchor_missing_ms = 0;
+    return strcmp(s.anchor_unheard_host, a->host) == 0 && s.anchor_unheard_port == a->port;
+}
+
+/* Count this round against the anchored address if it was not among the
+ * answers. A round nobody answered (the network is down or coming back) says
+ * nothing either way and leaves the count alone: counting it would let an
+ * outage hand the pairing to whichever twin answers first afterwards, and
+ * resetting on it would let a flaky link postpone a real move for ever. Lock
+ * held; run_discovery() only. */
+static void anchor_note_answers(const espos_sk_anchor_t *a, const espos_sk_discovered_t *found, size_t n)
+{
+    if (!a->host[0] || n == 0) {
         return;
     }
+    if (!is_anchor_key(a)) {
+        snprintf(s.anchor_unheard_host, sizeof(s.anchor_unheard_host), "%s", a->host);
+        s.anchor_unheard_port = a->port;
+        s.anchor_unheard_rounds = 0;
+    }
     for (size_t k = 0; k < n; k++) {
-        if (espos_sk_same_addr(&found[k], a->host, a->port)) {
-            s.anchor_missing_ms = 0;
+        if (espos_sk_is_anchor(&found[k], a)) {
+            s.anchor_unheard_rounds = 0;
             return;
         }
     }
-    if (!s.anchor_missing_ms || strcmp(s.anchor_missing_host, a->host) != 0 || s.anchor_missing_port != a->port) {
-        snprintf(s.anchor_missing_host, sizeof(s.anchor_missing_host), "%s", a->host);
-        s.anchor_missing_port = a->port;
-        s.anchor_missing_ms = t ? t : 1;
-    }
+    s.anchor_unheard_rounds++;
 }
 
 /* May the anchor fall back to its self URN? Yes when it has no address (older
- * firmware stored none), or when discovery has not heard that address for a
- * whole carry window. Lock held. */
-static bool anchor_self_fallback(const espos_sk_anchor_t *a, uint32_t t)
+ * firmware stored none), or when that address has aged out of the list and
+ * gone unheard for ANCHOR_UNHEARD_ROUNDS answered rounds. While it is still in
+ * the list (carried over a lossy round) it is matched by address anyway. Lock
+ * held. */
+static bool anchor_self_fallback(const espos_sk_anchor_t *a)
 {
     if (!a->host[0]) {
         return true;
     }
-    if (!s.anchor_missing_ms || strcmp(s.anchor_missing_host, a->host) != 0 || s.anchor_missing_port != a->port) {
-        return false;
+    for (size_t i = 0; i < s.server_count; i++) {
+        if (espos_sk_is_anchor(&s.servers[i], a)) {
+            return false;
+        }
     }
-    return (int32_t)(t - s.anchor_missing_ms) >= (int32_t)carry_window_ms();
+    return is_anchor_key(a) && s.anchor_unheard_rounds >= ANCHOR_UNHEARD_ROUNDS;
 }
 
 /* Pick the server per config: manual host wins; else the discovered server
@@ -480,7 +494,7 @@ static void select_server(void)
         uint16_t cur_port = s.have_server ? s.server.port : 0;
         espos_sk_anchor_t anchor;
         espos_sk_store_anchor(&s.sm.store, &anchor);
-        bool fallback = anchor_self_fallback(&anchor, t);
+        bool fallback = anchor_self_fallback(&anchor);
         if (s.cfg_self[0]) {
             /* The configured self, at the address our token is for when it
              * is that server's -- the same twin problem as below. */
@@ -489,7 +503,7 @@ static void select_server(void)
                 anchor.port = 0;
             }
             anchor.self = s.cfg_self;
-            idx = espos_sk_find_anchored(s.servers, s.server_count, &anchor, cur_host, cur_port, true);
+            idx = espos_sk_find_anchored(s.servers, s.server_count, &anchor, cur_host, cur_port, fallback);
         } else {
             /* Sticky and deterministic: (1) the server our token / pending
              * request belongs to, by address and then by self URN
@@ -610,9 +624,9 @@ static void run_discovery(void)
      * address match and the device would never follow it. */
     espos_sk_anchor_t anchor;
     espos_sk_store_anchor(&s.sm.store, &anchor);
-    anchor_note_answers(&anchor, found, n, t);
+    anchor_note_answers(&anchor, found, n);
     int keep = espos_sk_find_anchored(s.servers, s.server_count, &anchor, s.have_server ? s.server.host : "",
-                                      s.have_server ? s.server.port : 0, anchor_self_fallback(&anchor, t));
+                                      s.have_server ? s.server.port : 0, anchor_self_fallback(&anchor));
     bool keep_reserved = false;
     char keep_host[ESPOS_SK_HOST_MAX] = "";
     uint16_t keep_port = 0;

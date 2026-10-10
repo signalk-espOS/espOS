@@ -242,12 +242,6 @@ static void evaluate(espos_sk_tok_sm_t *sm)
              * and comes back as EV_UNAUTHORIZED, so nothing is lost but a
              * handshake. */
             if (srv->tls) {
-                /* No verify to learn the address from, so a token stored
-                 * before it was recorded takes the one it is being used at;
-                 * the upgrade rejects it just as plainly if that is wrong. */
-                if (!sm->store.token_host[0] && set_token_addr(sm, srv->host, srv->port)) {
-                    save(sm);
-                }
                 sm->st.state = ESPOS_SK_TOK_APPROVED;
                 if (!sm->st.approved_since_ms) {
                     sm->st.approved_since_ms = now(sm);
@@ -624,10 +618,13 @@ void espos_sk_tok_event(espos_sk_tok_sm_t *sm, espos_sk_tok_event_t ev, const vo
                 notify(sm);
                 return;
             }
-            /* The token works here, so here is where it belongs from now on:
-             * a token stored before the address was recorded learns it, and
-             * one whose server moved (DHCP) follows it. */
-            bool changed = set_token_addr(sm, sm->st.server.host, sm->st.server.port);
+            /* A token stored before the address was recorded learns it here.
+             * One that has an address keeps it: a 200 is not proof this is
+             * the issuing server -- a same-self twin with security off
+             * answers 200 to anything -- and re-homing on it would anchor the
+             * device to the twin for good. A server that moved is found by
+             * self once its old address has gone quiet (espos_sk.c). */
+            bool changed = !sm->store.token_host[0] && set_token_addr(sm, sm->st.server.host, sm->st.server.port);
             if (r->self[0]) {
                 changed |= strcmp(sm->store.token_self, r->self) != 0;
                 snprintf(sm->store.token_self, sizeof(sm->store.token_self), "%s", r->self);

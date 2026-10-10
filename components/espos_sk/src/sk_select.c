@@ -62,11 +62,20 @@ bool espos_sk_disc_before(const espos_sk_discovered_t *a, const espos_sk_discove
     return a->port < b->port;
 }
 
+bool espos_sk_is_anchor(const espos_sk_discovered_t *d, const espos_sk_anchor_t *anchor)
+{
+    /* The address, but only while it still answers with our server's self:
+     * DHCP can hand the address to a different server, and the one we want
+     * is then elsewhere under its self URN. */
+    bool self_ok = !anchor->self || !anchor->self[0] || !d->self[0] || strcmp(d->self, anchor->self) == 0;
+    return self_ok && espos_sk_same_addr(d, anchor->host, anchor->port);
+}
+
 int espos_sk_find_anchored(const espos_sk_discovered_t *list, size_t n, const espos_sk_anchor_t *anchor,
                            const char *cur_host, uint16_t cur_port, bool self_fallback)
 {
     for (size_t i = 0; i < n; i++) {
-        if (espos_sk_same_addr(&list[i], anchor->host, anchor->port)) {
+        if (espos_sk_is_anchor(&list[i], anchor)) {
             return (int)i;
         }
     }
