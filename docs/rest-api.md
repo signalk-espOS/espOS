@@ -881,7 +881,7 @@ JSON content type required; `202 {"status": …}`. `POST /ota` with
 build (`404 not_found` if none). `409 busy` while a check or install is
 running; `409 coprocessor_busy` for an install or rollback while a radio
 co-processor update runs (`/system/coprocessor/update`), so a client that
-adopts a running install on `busy` does not wait on one that is not there;
+adopts a running install on `busy` can tell that no install is coming;
 `400 validation` for a non-http(s) URL. Progress and the outcome
 arrive via `GET /ota/status` and the `ota` SSE event.
 
