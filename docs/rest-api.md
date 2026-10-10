@@ -365,8 +365,9 @@ With no `url` the image comes from the URL this firmware was built with. Either
 way the device accepts only the image whose SHA-256 it was built with
 (`coproc_image.h`), checked before the first byte is written to the
 co-processor; any other file ends in `failed`. Redirects are followed; the
-server must send a `Content-Length`. 409 `busy` while a co-processor or a
-firmware update runs (each ends in a restart), and 409 `unconfirmed` while
+server must send a `Content-Length`. 409 `busy` while a co-processor update
+already runs, 409 `ota_busy` while a firmware update runs (each ends in a
+restart), and 409 `unconfirmed` while
 the running firmware is still pending verification after an OTA: the restart
 that applies the co-processor image would roll it back.
 
@@ -878,8 +879,10 @@ first check / when auto-check is off.
 JSON content type required; `202 {"status": …}`. `POST /ota` with
 `{"url": "http(s)://…"}` installs that image, with `{}` the *available*
 build (`404 not_found` if none). `409 busy` while a check or install is
-running, and for an install or rollback while a radio co-processor update runs
-(`/system/coprocessor/update`); `400 validation` for a non-http(s) URL. Progress and the outcome
+running; `409 coprocessor_busy` for an install or rollback while a radio
+co-processor update runs (`/system/coprocessor/update`), so a client that
+adopts a running install on `busy` does not wait on one that is not there;
+`400 validation` for a non-http(s) URL. Progress and the outcome
 arrive via `GET /ota/status` and the `ota` SSE event.
 
 ## BLE gateway

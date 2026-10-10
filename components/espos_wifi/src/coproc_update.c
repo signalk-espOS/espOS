@@ -38,6 +38,7 @@
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include <string.h>
 #include <strings.h>
 
@@ -139,12 +140,16 @@ static void set_state(cp_state_t state, size_t done, size_t total)
     portEXIT_CRITICAL(&s_mux);
 }
 
-/* fmt takes one %s. Formatted outside the lock: snprintf is not a call to
- * make with interrupts off. */
-static void fail(const char *fmt, const char *detail)
+/* Formatted outside the lock: snprintf is not a call to make with interrupts
+ * off. */
+static void fail(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+static void fail(const char *fmt, ...)
 {
     char msg[ERROR_MAX];
-    snprintf(msg, sizeof(msg), fmt, detail);
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(msg, sizeof(msg), fmt, ap);
+    va_end(ap);
     portENTER_CRITICAL(&s_mux);
     s_status.state = CP_FAILED;
     memcpy(s_status.error, msg, sizeof(msg));
@@ -396,22 +401,27 @@ static esp_err_t start(const char *url)
     if (host_image_pending()) {
         return ESP_ERR_INVALID_VERSION;
     }
-    /* Its restart at the end would cut a host update short, and the two
-     * together hold two images in PSRAM. */
-    if (espos_ota_busy && espos_ota_busy()) {
-        return ESP_ERR_NOT_FINISHED;
-    }
     portENTER_CRITICAL(&s_mux);
     bool running = s_running;
-    if (!running) {
-        s_running = true;
-        memset(&s_status, 0, sizeof(s_status));
-        s_status.state = CP_DOWNLOADING;
-    }
+    s_running = true;
     portEXIT_CRITICAL(&s_mux);
     if (running) {
         return ESP_ERR_INVALID_STATE;
     }
+    /* Its restart at the end would cut a host update short, and the two
+     * together hold two images in PSRAM. Checked after claiming s_running,
+     * as espos_ota claims its state before checking ours, so two requests
+     * racing each other cannot both miss. */
+    if (espos_ota_busy && espos_ota_busy()) {
+        portENTER_CRITICAL(&s_mux);
+        s_running = false;
+        portEXIT_CRITICAL(&s_mux);
+        return ESP_ERR_NOT_FINISHED;
+    }
+    portENTER_CRITICAL(&s_mux);
+    memset(&s_status, 0, sizeof(s_status));
+    s_status.state = CP_DOWNLOADING;
+    portEXIT_CRITICAL(&s_mux);
     snprintf(s_url, sizeof(s_url), "%s", from);
     /* TLS plus esp_http_client want more than the default; the image itself
      * is in PSRAM, not on this stack. */
@@ -499,7 +509,7 @@ static esp_err_t update_post(httpd_req_t *req)
     case ESP_ERR_INVALID_STATE:
         return espos_httpd_send_error(req, "409 Conflict", "busy", "a co-processor update is already running");
     case ESP_ERR_NOT_FINISHED:
-        return espos_httpd_send_error(req, "409 Conflict", "busy", "a firmware update is running; retry after it");
+        return espos_httpd_send_error(req, "409 Conflict", "ota_busy", "a firmware update is running; retry after it");
     case ESP_ERR_INVALID_VERSION:
         return espos_httpd_send_error(req, "409 Conflict", "unconfirmed",
                                       "the running firmware is not confirmed yet; confirm it or wait, then retry");

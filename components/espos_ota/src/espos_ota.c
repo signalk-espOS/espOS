@@ -325,12 +325,15 @@ static void do_install(const char *url)
     s.received = 0;
     s.total = 0;
     unlock();
+    /* Claimed before the check: espos_wifi claims its update before checking
+     * espos_ota_busy(), so two racing starts cannot both miss each other.
+     * Checked here too because auto_install queues straight onto the task,
+     * past send_cmd(). */
+    set_state(ESPOS_OTA_DOWNLOADING, NULL);
     if (coproc_busy()) {
-        /* auto_install queues straight onto the task, past send_cmd(). */
         set_state(ESPOS_OTA_FAILED, "a radio co-processor update is running");
         return;
     }
-    set_state(ESPOS_OTA_DOWNLOADING, NULL);
     char err_text[96] = "";
     espos_ota_quiesce_hook();
     esp_err_t err = espos_ota_port_install(url, insecure, info.project, progress_cb, NULL, err_text, sizeof(err_text));
@@ -442,6 +445,10 @@ static void ota_task(void *arg)
                 publish();
                 break;
             case CMD_ROLLBACK:
+                if (coproc_busy()) {
+                    set_state(ESPOS_OTA_FAILED, "a radio co-processor update is running");
+                    break;
+                }
                 ESP_LOGW(TAG, "rollback requested");
                 set_state(ESPOS_OTA_FAILED, "rollback requested");
                 espos_ota_port_mark_invalid_and_reboot();
@@ -534,7 +541,7 @@ static esp_err_t send_cmd(int cmd, const char *url)
         return ESP_ERR_INVALID_STATE;
     }
     if ((cmd == CMD_INSTALL_URL || cmd == CMD_INSTALL_AVAIL || cmd == CMD_ROLLBACK) && coproc_busy()) {
-        return ESP_ERR_INVALID_STATE;
+        return ESP_ERR_NOT_FINISHED;
     }
     lock();
     bool busy = s.state == ESPOS_OTA_CHECKING || s.state == ESPOS_OTA_DOWNLOADING || s.state == ESPOS_OTA_VERIFYING || s.state == ESPOS_OTA_READY;

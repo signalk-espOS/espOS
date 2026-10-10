@@ -49,7 +49,10 @@ jobs:
       version: ${{ steps.pin.outputs.version }}
       name: ${{ steps.pin.outputs.name }}
     steps:
+      # The build fetches components from the registry; no token for them.
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: read the pins
         id: pin
         run: |
@@ -149,12 +152,21 @@ jobs:
           git add "$file"
           git commit -q -m "chore: publish co-processor image $version"
           # Runs on main are not serialised (see concurrency above), so another
-          # one may have published a different file first: names are unique,
-          # so rebase onto it and try again.
+          # one may have published first: the same file (then done) or a
+          # different one (names are unique, so rebase onto it and retry).
           for attempt in 1 2 3 4 5; do
             git push -q origin HEAD:coprocessor-assets && { echo "published $file"; exit 0; }
             sleep $((attempt * 5))
-            git fetch -q origin coprocessor-assets && git rebase -q FETCH_HEAD
+            git fetch -q origin coprocessor-assets || continue
+            if git cat-file -e "FETCH_HEAD:$file" 2>/dev/null; then
+              if git show "FETCH_HEAD:$file" | cmp -s - "out/$(basename "$file")"; then
+                echo "$file was published by another run."
+                exit 0
+              fi
+              echo "::error::$file is published with different bytes, which its name (version and hash) should make impossible"
+              exit 1
+            fi
+            git rebase -q FETCH_HEAD || { git rebase --abort; continue; }
           done
           echo "::error::could not push $file to coprocessor-assets"
           exit 1

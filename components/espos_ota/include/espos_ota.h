@@ -44,7 +44,9 @@ const char *espos_ota_state_name(espos_ota_state_t s);
 
 /** Fetch the manifest now (async; result in status / SSE "ota"). */
 esp_err_t espos_ota_check_now(void);
-/** Install from an explicit URL (async). ESP_ERR_INVALID_STATE while busy. */
+/** Install from an explicit URL (async). ESP_ERR_INVALID_STATE while busy,
+ * ESP_ERR_NOT_FINISHED while a radio co-processor update runs (also for
+ * espos_ota_install_available() and espos_ota_rollback()). */
 esp_err_t espos_ota_install_url(const char *url);
 /** Install the build found by the last check. ESP_ERR_NOT_FOUND if none. */
 esp_err_t espos_ota_install_available(void);
