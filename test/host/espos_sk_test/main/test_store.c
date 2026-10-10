@@ -49,6 +49,8 @@ TEST_CASE("store: token and pending request round-trip; empties erase", "[sk_sto
     char id[40];
     strcpy(st.token, "eyJhbGciOiJIUzI1NiJ9.some.token");
     strcpy(st.token_self, "urn:mrn:signalk:uuid:aaaa");
+    strcpy(st.token_host, "10.0.0.10");
+    st.token_port = 80;
     strcpy(st.pending_href, "/signalk/v1/requests/abc");
     strcpy(st.pending_host, "10.0.0.10");
     strcpy(st.pending_self, "urn:mrn:signalk:uuid:aaaa");
@@ -59,6 +61,8 @@ TEST_CASE("store: token and pending request round-trip; empties erase", "[sk_sto
     TEST_ESP_OK(espos_sk_store_load(&back, id));
     TEST_ASSERT_EQUAL_STRING(st.token, back.token);
     TEST_ASSERT_EQUAL_STRING(st.token_self, back.token_self);
+    TEST_ASSERT_EQUAL_STRING(st.token_host, back.token_host);
+    TEST_ASSERT_EQUAL(80, back.token_port);
     TEST_ASSERT_EQUAL_STRING(st.pending_href, back.pending_href);
     TEST_ASSERT_EQUAL_STRING(st.pending_host, back.pending_host);
     TEST_ASSERT_EQUAL_STRING(st.pending_self, back.pending_self);
@@ -66,9 +70,12 @@ TEST_CASE("store: token and pending request round-trip; empties erase", "[sk_sto
     /* clearing the token erases the keys, pending untouched */
     st.token[0] = '\0';
     st.token_self[0] = '\0';
+    st.token_host[0] = '\0';
+    st.token_port = 0;
     TEST_ESP_OK(espos_sk_store_save(&st));
     TEST_ESP_OK(espos_sk_store_load(&back, id));
     TEST_ASSERT_EQUAL_STRING("", back.token);
+    TEST_ASSERT_EQUAL_STRING("", back.token_host);
     TEST_ASSERT_EQUAL_STRING("/signalk/v1/requests/abc", back.pending_href);
     /* a token at the maximum length fits */
     memset(st.token, 'x', ESPOS_SK_TOKEN_MAX - 1);

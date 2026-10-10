@@ -173,6 +173,8 @@ TEST_CASE("happy path: request → pending → approved → verifying → approv
     TEST_ASSERT_EQUAL_STRING("tok.en.1", F.last_verify_token);
     TEST_ASSERT_EQUAL_STRING("tok.en.1", F.saved.token);
     TEST_ASSERT_EQUAL_STRING("urn:mrn:signalk:uuid:aaaa", F.saved.token_self);
+    TEST_ASSERT_EQUAL_STRING("10.0.0.10", F.saved.token_host);                     /* and where */
+    TEST_ASSERT_EQUAL(80, F.saved.token_port);
     TEST_ASSERT_EQUAL_STRING("", F.saved.pending_href);                            /* cleared */
     verify_result(200, "urn:mrn:signalk:uuid:aaaa");
     TEST_ASSERT_EQUAL(ESPOS_SK_TOK_APPROVED, ST()->state);
@@ -391,6 +393,32 @@ TEST_CASE("server that changed address keeps its token (keyed by self)", "[sk_to
     espos_sk_tok_event(&SM, ESPOS_SK_EV_SERVER, &moved);
     TEST_ASSERT_EQUAL(1, F.verifies);
     TEST_ASSERT_EQUAL(0, F.requests);
+}
+
+TEST_CASE("a working token follows its server's address; an old token learns it", "[sk_tok]")
+{
+    /* stored before the address was recorded */
+    espos_sk_tok_store_t st = { .token = "tok.en.3", .token_self = "urn:mrn:signalk:uuid:aaaa" };
+    reset(&st);
+    espos_sk_tok_event(&SM, ESPOS_SK_EV_START, NULL);
+    espos_sk_tok_event(&SM, ESPOS_SK_EV_SERVER, &SRV_A);
+    verify_result(200, "urn:mrn:signalk:uuid:aaaa");
+    TEST_ASSERT_EQUAL_STRING("10.0.0.10", F.saved.token_host);
+    TEST_ASSERT_EQUAL(80, F.saved.token_port);
+    /* DHCP moved it: the verify at the new address re-homes the token */
+    espos_sk_server_t moved = SRV_A;
+    strcpy(moved.host, "10.0.0.99");
+    espos_sk_tok_event(&SM, ESPOS_SK_EV_SERVER, &moved);
+    verify_result(200, "urn:mrn:signalk:uuid:aaaa");
+    TEST_ASSERT_EQUAL_STRING("10.0.0.99", F.saved.token_host);
+    /* a dropped token forgets the address with it */
+    tick(60000);
+    verify_result(401, NULL);
+    tick(5000);
+    verify_result(401, NULL);
+    TEST_ASSERT_EQUAL_STRING("", F.saved.token);
+    TEST_ASSERT_EQUAL_STRING("", F.saved.token_host);
+    TEST_ASSERT_EQUAL(0, F.saved.token_port);
 }
 
 TEST_CASE("manual server without self: token verified, self learned and stored", "[sk_tok]")
