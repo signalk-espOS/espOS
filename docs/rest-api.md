@@ -358,7 +358,7 @@ over the existing link and restarts the device to apply it
 
 ```json
 {}                                                           → 202 {"status":"updating"}
-{"url": "http://signalk.local:3000/fw/espos-coprocessor-esp32c6-3.0.9-58ce9ea32836.bin"}
+{"url": "http://signalk.local:3000/fw/espos-coprocessor-esp32c6-3.0.9-7b8ad5b057d0.bin"}
 ```
 
 With no `url` the image comes from the URL this firmware was built with. Either
@@ -374,7 +374,7 @@ The GET is the progress and the image on offer:
 
 ```json
 {"state": "writing", "done": 524288, "total": 1427568,
- "image": {"version": "3.0.9", "sha256": "58ce9ea3…", "url": "https://…"}}
+ "image": {"version": "3.0.9", "sha256": "7b8ad5b0…", "url": "https://…"}}
 ```
 
 `state` is `idle`, `downloading`, `verifying`, `writing`, `restarting` or
