@@ -202,15 +202,20 @@ restarts the P4 when it sees the co-processor come back, so both chips start
 together on the new pair. The heartbeat watchdog is held for the transfer:
 `begin()` erases a 1.75 MB slot before it answers, which is not the wedge it
 exists for. The update is refused while the P4's own firmware is still pending
-verification, because that restart would roll it back. A client such as the Signal K manager can offer it
+verification, because that restart would roll it back, and while a P4 firmware
+update runs (and the other way round), because each ends in a restart. The
+download parks the same real-time work an OTA download does
+(`espos_ota_quiesce_hook()`). A client such as the Signal K manager can offer it
 whenever `coprocessor.stale` is set.
 
 Why it is safe to offer to someone who cannot reach the C6 with a cable:
 
 - **One image only.** The C6 image carries no signature the P4 can check, so
   the trust is in the P4 firmware, which is signed: it accepts exactly the image
-  whose SHA-256 is `CONFIG_ESPOS_WIFI_COPROC_FW_SHA256`, from whatever URL it
-  was fetched. A mirror serving the wrong file fails the hash, not the radio.
+  whose SHA-256 is `ESPOS_COPROC_FW_SHA256` in
+  `components/espos_wifi/src/coproc_image.h`, from whatever URL it was fetched.
+  A source header rather than Kconfig, because an existing `sdkconfig` keeps an
+  old Kconfig default and would go on offering the previous image. A mirror serving the wrong file fails the hash, not the radio.
 - **Checked before written.** The whole image (about 1.4 MB) is hashed in PSRAM
   before the first byte goes over SDIO. A co-processor older than esp_hosted
   2.6 switches its boot slot at `end()` with no separate `activate()`, so
@@ -218,9 +223,19 @@ Why it is safe to offer to someone who cannot reach the C6 with a cable:
 - **Two slots.** The C6 writes into its inactive app slot. An interrupted
   transfer, a refused image or a power cut leaves the running image in place,
   and the next attempt erases the slot again.
-- **Confirmed on boot.** An update does not replace the C6's bootloader. If the
-  one it shipped with has app rollback on, an unconfirmed image would be rolled
-  back at the next reset, so the image confirms itself once esp_hosted is up.
+- **Confirmed once a host talks to it.** An update does not replace the C6's
+  bootloader. If the one it shipped with has app rollback on, an unconfirmed
+  image is rolled back at the next reset, so the image confirms itself when a
+  host has negotiated with it over the transport (esp_hosted's
+  `EH_CP_EVT_PRIVATE_RPC_READY`). One that boots but never reaches the P4 stays
+  unconfirmed, and the P4's next reset takes the C6 back to the image that
+  worked. Without rollback in that bootloader there is no such net.
+
+Rolling the P4 back after updating the C6 is the one way to lose the radio
+this way: the 3.x image speaks only to an esp_hosted 3.x host, and the P4's
+other OTA slot may still hold an older firmware with a 2.x host (espOS before
+0.14.0). Update the P4 forward, not back, once its C6 runs 3.x; the cable route
+below is the way out if it happens.
 
 The image is `tools/coprocessor`: `esp_hosted`'s Wi-Fi + BLE co-existence
 co-processor (BLE as HCI over SDIO, which is what the [BLE gateway](ble.md)
@@ -229,12 +244,15 @@ rebuilds it on every change, fails if the result differs from the pinned hash,
 and on `main` publishes it to the `coprocessor-assets` branch under a name
 carrying its version and the first 12 hex digits of its hash, so a published
 file is never replaced. Any change to the image's bytes (an IDF bump, an
-sdkconfig change) is a new hash and a new file name in
-`CONFIG_ESPOS_WIFI_COPROC_FW_SHA256` and `CONFIG_ESPOS_WIFI_COPROC_FW_URL`; the
-workflow's error says what to set. Bumping `esp_hosted` also moves four
-versions the workflow checks agree: `components/espos_wifi/idf_component.yml`,
+sdkconfig change) is a new hash and a new file name in `ESPOS_COPROC_FW_SHA256`
+and `ESPOS_COPROC_FW_URL`; the workflow's error says what to set. Take the hash
+from the workflow, not from a local build: a different toolchain image or
+component checkout can shift the bytes, and the workflow's build is the one
+that gets published. Bumping `esp_hosted` also moves four versions the workflow
+checks agree: `components/espos_wifi/idf_component.yml`,
 `tools/coprocessor/main/idf_component.yml`, `PROJECT_VER` in
-`tools/coprocessor/CMakeLists.txt` and `CONFIG_ESPOS_WIFI_COPROC_FW_VERSION`.
+`tools/coprocessor/CMakeLists.txt` and the version in `coproc_image.h`, which
+the build also checks against the host's esp_hosted.
 
 Two things a bench has to show before this is offered widely, because no C6
 has yet been updated this way here: that a stock Waveshare C6 (esp_hosted

@@ -12,34 +12,4 @@ menu "espOS WiFi"
             espos_net with the seam: CONFIG_ESPOS_NET_MDNS and
             CONFIG_ESPOS_NET_MDNS_MAX_SERVICES under "espOS network".
 
-    config ESPOS_WIFI_COPROC_FW_VERSION
-        string "Co-processor firmware version offered for update"
-        default "3.0.9"
-        help
-            The esp_hosted version of the co-processor image that
-            POST /api/v1/system/coprocessor/update installs. Matches the
-            esp_hosted pin in idf_component.yml; tools/coprocessor builds it.
-            Only used on boards whose radio is a separate chip.
-
-    config ESPOS_WIFI_COPROC_FW_SHA256
-        string "SHA-256 of the one co-processor image accepted"
-        default "2eb7634e3321b946a05e07b5608df31ce495152239fad13efda23338044be866"
-        help
-            The co-processor image carries no signature this device can
-            check, so this pin is what makes it trusted: this firmware is
-            signed, and it accepts exactly the image with this hash, from
-            whichever URL it was fetched. The coprocessor workflow rebuilds
-            the image reproducibly and fails when its hash differs from this.
-
-    config ESPOS_WIFI_COPROC_FW_URL
-        string "Where to fetch the co-processor image by default"
-        default "https://raw.githubusercontent.com/signalk-espOS/espOS/coprocessor-assets/esp32c6/3.0.9/espos-coprocessor-esp32c6-3.0.9-2eb7634e3321.bin"
-        help
-            Used when the update request names no URL. A client such as the
-            Signal K manager may pass its own mirror instead; the hash above
-            decides either way. The file name carries the first 12 hex digits
-            of that hash, so a rebuild with different bytes (a new IDF, a
-            changed sdkconfig) is published beside the old image rather than
-            over it.
-
 endmenu

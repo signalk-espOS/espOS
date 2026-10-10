@@ -358,23 +358,23 @@ over the existing link and restarts the device to apply it
 
 ```json
 {}                                                           → 202 {"status":"updating"}
-{"url": "http://signalk.local:3000/fw/espos-coprocessor-esp32c6-3.0.9-2eb7634e3321.bin"}
+{"url": "http://signalk.local:3000/fw/espos-coprocessor-esp32c6-3.0.9-58ce9ea32836.bin"}
 ```
 
-With no `url` the image comes from `CONFIG_ESPOS_WIFI_COPROC_FW_URL`. Either
-way the device accepts only the image whose SHA-256 is
-`CONFIG_ESPOS_WIFI_COPROC_FW_SHA256`, checked before the first byte is written
-to the co-processor; any other file ends in `failed`. Redirects are followed;
-the server must send a `Content-Length`. 409 `busy` while an update runs, and
-409 `unconfirmed` while the running firmware is still pending verification
-after an OTA: the restart that applies the co-processor image would roll it
-back.
+With no `url` the image comes from the URL this firmware was built with. Either
+way the device accepts only the image whose SHA-256 it was built with
+(`coproc_image.h`), checked before the first byte is written to the
+co-processor; any other file ends in `failed`. Redirects are followed; the
+server must send a `Content-Length`. 409 `busy` while a co-processor or a
+firmware update runs (each ends in a restart), and 409 `unconfirmed` while
+the running firmware is still pending verification after an OTA: the restart
+that applies the co-processor image would roll it back.
 
 The GET is the progress and the image on offer:
 
 ```json
 {"state": "writing", "done": 524288, "total": 1427568,
- "image": {"version": "3.0.9", "sha256": "2eb7634e…", "url": "https://…"}}
+ "image": {"version": "3.0.9", "sha256": "58ce9ea3…", "url": "https://…"}}
 ```
 
 `state` is `idle`, `downloading`, `verifying`, `writing`, `restarting` or
@@ -878,7 +878,8 @@ first check / when auto-check is off.
 JSON content type required; `202 {"status": …}`. `POST /ota` with
 `{"url": "http(s)://…"}` installs that image, with `{}` the *available*
 build (`404 not_found` if none). `409 busy` while a check or install is
-running; `400 validation` for a non-http(s) URL. Progress and the outcome
+running, and for an install or rollback while a radio co-processor update runs
+(`/system/coprocessor/update`); `400 validation` for a non-http(s) URL. Progress and the outcome
 arrive via `GET /ota/status` and the `ota` SSE event.
 
 ## BLE gateway

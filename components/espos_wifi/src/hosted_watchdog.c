@@ -99,8 +99,8 @@ static esp_timer_handle_t s_timer;
 static uint32_t s_last_beat;
 static bool s_seen_beat;
 /* Set by a co-processor update (coproc_update.c) for as long as it keeps the
- * link busy. Written there and read on the event loop; a stale read costs one
- * re-arm or one missed re-arm, both corrected by the next beat or release. */
+ * link busy. Written on that task and read on the event loop, on either core:
+ * see arm_timer() for the race between the two. */
 static volatile bool s_held;
 
 static void arm_timer(void)
@@ -112,6 +112,13 @@ static void arm_timer(void)
         esp_timer_restart(s_timer, TIMEOUT_US);
     } else {
         esp_timer_start_once(s_timer, TIMEOUT_US);
+    }
+    /* A hold taken between the check above and the arm stopped a timer this
+     * then started again, and later beats return early without touching it,
+     * so it would fire mid-update. Checked again after arming; the hold sets
+     * the flag before it stops the timer, so one side always sees the other. */
+    if (s_held) {
+        esp_timer_stop(s_timer);
     }
 }
 

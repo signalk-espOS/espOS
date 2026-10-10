@@ -304,6 +304,17 @@ static void do_check(void)
     }
 }
 
+/* espos_wifi is optional here (and requires nothing from us), so a weak
+ * reference: NULL when it is not linked. */
+extern bool espos_wifi_coproc_busy(void) __attribute__((weak));
+
+/* A radio co-processor update ends in a restart, which would cut an install
+ * short or land a rollback mid-flash. */
+static bool coproc_busy(void)
+{
+    return espos_wifi_coproc_busy && espos_wifi_coproc_busy();
+}
+
 static void do_install(const char *url)
 {
     bool insecure;
@@ -314,6 +325,11 @@ static void do_install(const char *url)
     s.received = 0;
     s.total = 0;
     unlock();
+    if (coproc_busy()) {
+        /* auto_install queues straight onto the task, past send_cmd(). */
+        set_state(ESPOS_OTA_FAILED, "a radio co-processor update is running");
+        return;
+    }
     set_state(ESPOS_OTA_DOWNLOADING, NULL);
     char err_text[96] = "";
     espos_ota_quiesce_hook();
@@ -515,6 +531,9 @@ void espos_ota_stop(void)
 static esp_err_t send_cmd(int cmd, const char *url)
 {
     if (!s.q) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if ((cmd == CMD_INSTALL_URL || cmd == CMD_INSTALL_AVAIL || cmd == CMD_ROLLBACK) && coproc_busy()) {
         return ESP_ERR_INVALID_STATE;
     }
     lock();
