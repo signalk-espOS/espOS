@@ -22,8 +22,7 @@ static espos_sk_discovered_t disc(const char *host, uint16_t port, const char *s
 
 TEST_CASE("select: the anchor's address wins over a twin with the same self, in either order", "[sk_select]")
 {
-    espos_sk_tok_store_t st = { .pending_href = "/signalk/v1/requests/abc", .pending_host = "192.168.0.10",
-                                .pending_port = 80, .pending_self = TWIN_SELF };
+    espos_sk_tok_store_t st = { .pending_href = "/signalk/v1/requests/abc", .pending_host = "192.168.0.10", .pending_port = 80, .pending_self = TWIN_SELF };
     espos_sk_anchor_t a;
     espos_sk_store_anchor(&st, &a);
     espos_sk_discovered_t ab[2] = { disc("192.168.0.10", 80, TWIN_SELF), disc("192.168.0.122", 80, TWIN_SELF) };
