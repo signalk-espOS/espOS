@@ -386,7 +386,10 @@ The GET is the progress and the image on offer:
 `hardware.coprocessor.version` in `GET /system/info` to decide whether to offer
 the update. `restarting` is the last state a client sees: the co-processor
 restarts itself into the new image and the device follows it, so the next
-answer comes from a fresh boot.
+answer comes from a fresh boot. A co-processor that takes the image but will
+not activate it reads `failed` instead and the device still restarts, since
+it cannot tell whether the co-processor switched anyway;
+`hardware.coprocessor.version` after the restart says which image runs.
 
 ### `POST /system/reboot` — M1 · protected
 

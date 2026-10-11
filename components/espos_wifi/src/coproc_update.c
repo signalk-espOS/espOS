@@ -364,14 +364,18 @@ static void update_task(void *arg)
             /* After a good end() a co-processor that predates activate() but
              * did not say so has already switched and is restarting; one that
              * has not keeps booting its old image. Either way the restart
-             * below is the right next step, and "restarting" stays true. */
-            ESP_LOGW(TAG, "activate failed (%s); restarting to settle on whichever image the co-processor boots",
-                     esp_err_to_name(err));
+             * below is the right next step, but nothing says the image is in:
+             * the update reads failed, and the version after the restart
+             * tells which image runs. s_running stays set until then. */
+            fail("the co-processor did not activate the image: %s", esp_err_to_name(err));
+            ESP_LOGW(TAG, "restarting to settle on whichever image the co-processor boots");
         }
     }
     quiesce(false);
-    ESP_LOGW(TAG, "co-processor firmware %s installed; both chips restart to apply it",
-             ESPOS_COPROC_FW_VERSION);
+    if (err == ESP_OK) {
+        ESP_LOGW(TAG, "co-processor firmware %s installed; both chips restart to apply it",
+                 ESPOS_COPROC_FW_VERSION);
+    }
     vTaskDelay(pdMS_TO_TICKS(RESTART_FALLBACK_MS));
     ESP_LOGW(TAG, "the co-processor did not restart on its own; restarting");
     esp_restart();
