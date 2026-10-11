@@ -216,7 +216,8 @@ Why it is safe to offer to someone who cannot reach the C6 with a cable:
   whose SHA-256 is `ESPOS_COPROC_FW_SHA256` in
   `components/espos_wifi/src/coproc_image.h`, from whatever URL it was fetched.
   A source header rather than Kconfig, because an existing `sdkconfig` keeps an
-  old Kconfig default and would go on offering the previous image. A mirror serving the wrong file fails the hash, not the radio.
+  old Kconfig default and would go on offering the previous image. A mirror
+  serving the wrong file fails the hash, not the radio.
 - **Checked before written.** The whole image (about 1.4 MB) is hashed in PSRAM
   before the first byte goes over SDIO. A co-processor older than esp_hosted
   2.6 switches its boot slot at `end()` with no separate `activate()`, so

@@ -369,7 +369,10 @@ server must send a `Content-Length`. 409 `busy` while a co-processor update
 already runs, 409 `ota_busy` while a firmware update, check or rollback is in
 progress (an update or rollback ends in a restart too), and 409 `unconfirmed`
 while the running firmware is still pending verification after an OTA: the
-restart that applies the co-processor image would roll it back.
+restart that applies the co-processor image would roll it back. 400
+`validation` for a body that is not a JSON object, or a `url` that is not a
+string, not http(s), longer than 255 characters, or https on a build without a
+certificate bundle.
 
 The GET is the progress and the image on offer:
 
