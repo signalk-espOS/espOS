@@ -844,8 +844,8 @@ and, if the stream is down, into the offline ring (see `ws` in
 "message"}` or `null`.
 
 SSE events: `sk` (the status document, on connect and on change),
-`sk_servers` (the servers document after each discovery pass), `sk_ws`
-(the `ws` object on every stream state change), `sk_tls` (the `/sk/tls`
+`sk_servers` (the servers document after each discovery pass and whenever
+the server in use changes), `sk_ws` (the `ws` object on every stream state change), `sk_tls` (the `/sk/tls`
 document when the pinned certificate changes).
 
 ## OTA — M6
