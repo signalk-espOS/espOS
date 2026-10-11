@@ -691,7 +691,7 @@ cookie by itself, a script sends the Bearer header. Events:
 | `config`    | `{"ns": "...", "key": "..."}`         | a key's effective value changed        |
 
 | `sk`        | the `/sk/status` document            | on connect and every token/server change |
-| `sk_servers`| the `/sk/servers` document           | on connect and after each discovery pass |
+| `sk_servers`| the `/sk/servers` document           | on connect, after each discovery pass and after an `sk` config change |
 | `sk_ws`     | the `ws` object of `/sk/status`      | stream connect/disconnect, error, drops |
 | `sk_tls`    | the `/sk/tls` document               | on connect and whenever the pinned certificate changes |
 | `logs`      | `{"next": <seq>}`                     | at most every 500 ms when new log lines arrived; fetch `/logs?after=` |
@@ -762,6 +762,10 @@ delivered; `put` (M7): requests in flight, answered OK, failed/timed out.
 `scheme` is `https` for a server that advertised itself as
 `_signalk-https._tcp` rather than `_signalk-http._tcp`, which is how
 signalk-server says its `ssl` setting is on.
+
+`selected` marks the server in use, by address. With a manual host the list
+keeps the last discovery's entries (it is refreshed by `POST /sk/discover`,
+not periodically); only `discovery = false` empties it.
 
 ### `GET /sk/tls` — S1 · protected
 

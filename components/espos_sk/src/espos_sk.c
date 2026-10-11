@@ -595,6 +595,19 @@ static void select_server(void)
     }
 }
 
+/* The server list as the web UI shows it. Published after select_server(),
+ * whose choice its "selected" flags report: published before, they showed
+ * the previous server, and a pick in the list looked as if it had not
+ * taken. */
+static void publish_servers(void)
+{
+    char *json = NULL;
+    if (espos_sk_servers_json(&json) == ESP_OK) {
+        espos_httpd_sse_publish("sk_servers", json);
+        free(json);
+    }
+}
+
 static void run_discovery(void)
 {
     /* heap, not stack: two arrays of ~2 KiB each */
@@ -699,12 +712,8 @@ static void run_discovery(void)
     free(found);
     free(merged);
     ESP_LOGI(TAG, "discovery: %u server(s)", (unsigned)m);
-    char *json = NULL;
-    if (espos_sk_servers_json(&json) == ESP_OK) {
-        espos_httpd_sse_publish("sk_servers", json);
-        free(json);
-    }
     select_server();
+    publish_servers(); /* after the election, so "selected" is this round's */
 }
 
 /* ------------------------------------------------------------ task */
@@ -714,12 +723,16 @@ static void handle_cmd(const cmd_t *c)
     switch (c->type) {
     case CMD_CONFIG:
         load_cfg();
-        if (!discovery_wanted()) {
+        /* Only switching discovery off empties the list. A manual host keeps
+         * it: the entries say which of them is the pinned one, and an empty
+         * list after picking a row read as if the pick had been lost. */
+        if (!s.discovery_enabled) {
             lock();
             s.server_count = 0; /* discovered entries are no longer valid choices */
             unlock();
         }
         select_server();
+        publish_servers();
         /* Browse now whenever discovery has just become wanted again —
          * discovery switched on, or a manual host cleared. Testing only
          * `discover_due_ms == 0` was not enough: setting a manual host
