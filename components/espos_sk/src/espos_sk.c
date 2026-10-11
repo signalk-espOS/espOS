@@ -408,7 +408,7 @@ static uint32_t carry_window_ms(void)
  * longer refreshed, so its entries can be days old. Call under lock(). */
 static bool entry_fresh(const espos_sk_discovered_t *d, uint32_t t)
 {
-    return (int32_t)(t - d->seen_ms) < (int32_t)carry_window_ms();
+    return (uint32_t)(t - d->seen_ms) < carry_window_ms();
 }
 
 /* Drop what entry_fresh() no longer believes, as a discovery round would. */
