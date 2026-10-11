@@ -30,8 +30,8 @@ void app_main(void)
      * for a host to negotiate first would roll back every update: the first
      * boot after one is the C6 restarting itself, the P4 then loses the link
      * and restarts, and the P4 resets this chip at every start, so the first
-     * boot a host talks to is the second. Confirming here means only that the
-     * image boots and opens NVS; a no-op when rollback is off. */
+     * boot a host talks to is the second. Confirming means only that the image
+     * boots and opens NVS; without rollback it just marks its slot valid. */
     esp_ota_mark_app_valid_cancel_rollback();
     ESP_LOGI(TAG, "espOS co-processor (esp_hosted Wi-Fi + BLE) running");
     for (;;) {
