@@ -510,7 +510,7 @@ static esp_err_t update_post(httpd_req_t *req)
         return espos_httpd_send_error(req, "409 Conflict", "busy", "a co-processor update is already running");
     case ESP_ERR_NOT_FINISHED:
         return espos_httpd_send_error(req, "409 Conflict", "ota_busy",
-                                      "a firmware update or check is in progress; retry after it");
+                                      "a firmware update, check or rollback is in progress; retry after it");
     case ESP_ERR_INVALID_VERSION:
         return espos_httpd_send_error(req, "409 Conflict", "unconfirmed",
                                       "the running firmware is not confirmed yet; confirm it or wait, then retry");

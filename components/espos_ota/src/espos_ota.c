@@ -67,6 +67,7 @@ static struct {
     uint32_t next_check_at;
     bool ever_connected;
     bool confirmed_this_boot;
+    bool rolling_back;      /* from the rollback's check until its reboot */
     char key_fp[17];        /* "" until known, or when the image has no signature block */
     bool key_fp_done;       /* OTA task only */
     /* config snapshot */
@@ -445,13 +446,28 @@ static void ota_task(void *arg)
                 publish();
                 break;
             case CMD_ROLLBACK:
+                /* Claimed before the check, as do_install claims its state.
+                 * The state a rollback reports is FAILED, which
+                 * espos_ota_busy() does not count, so the claim is its own
+                 * flag, held until the reboot. */
+                lock();
+                s.rolling_back = true;
+                unlock();
                 if (coproc_busy()) {
+                    lock();
+                    s.rolling_back = false;
+                    unlock();
                     set_state(ESPOS_OTA_FAILED, "a radio co-processor update is running");
                     break;
                 }
                 ESP_LOGW(TAG, "rollback requested");
                 set_state(ESPOS_OTA_FAILED, "rollback requested");
                 espos_ota_port_mark_invalid_and_reboot();
+                /* Back here only without an image to roll back to, or on the
+                 * host simulator. */
+                lock();
+                s.rolling_back = false;
+                unlock();
                 break;
             case CMD_STOP:
                 s.task = NULL;
@@ -597,7 +613,7 @@ bool espos_ota_busy(void)
     }
     lock();
     bool busy = s.state == ESPOS_OTA_CHECKING || s.state == ESPOS_OTA_DOWNLOADING || s.state == ESPOS_OTA_VERIFYING ||
-                s.state == ESPOS_OTA_READY;
+                s.state == ESPOS_OTA_READY || s.rolling_back;
     unlock();
     /* The task polls its queue once a second, and POST /ota has answered 202
      * by then: a request still waiting in the queue is an update too. */
