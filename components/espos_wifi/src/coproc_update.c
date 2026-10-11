@@ -166,6 +166,10 @@ static uint8_t *download(const char *url, size_t *len)
         .url = url,
         .timeout_ms = 15000,
         .buffer_size = 2048,
+        /* Holds the request line, and a redirect target can be long: a GitHub
+         * release download lands on a signed URL of about 1 KB, which the
+         * default 512 bytes refuses. */
+        .buffer_size_tx = 2048,
 #if CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
         .crt_bundle_attach = esp_crt_bundle_attach,
 #endif
