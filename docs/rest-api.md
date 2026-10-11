@@ -691,7 +691,7 @@ cookie by itself, a script sends the Bearer header. Events:
 | `config`    | `{"ns": "...", "key": "..."}`         | a key's effective value changed        |
 
 | `sk`        | the `/sk/status` document            | on connect and every token/server change |
-| `sk_servers`| the `/sk/servers` document           | on connect, after each discovery pass and after an `sk` config change |
+| `sk_servers`| the `/sk/servers` document           | on connect, after each discovery pass and whenever the server in use changes |
 | `sk_ws`     | the `ws` object of `/sk/status`      | stream connect/disconnect, error, drops |
 | `sk_tls`    | the `/sk/tls` document               | on connect and whenever the pinned certificate changes |
 | `logs`      | `{"next": <seq>}`                     | at most every 500 ms when new log lines arrived; fetch `/logs?after=` |
