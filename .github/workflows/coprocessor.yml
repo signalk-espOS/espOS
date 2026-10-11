@@ -61,11 +61,17 @@ jobs:
           pin() { sed -n "s/^#define $1 *\"\(.*\)\"\$/\1/p" "$pins"; }
           version=$(pin ESPOS_COPROC_FW_VERSION)
           sha=$(pin ESPOS_COPROC_FW_SHA256)
-          [ -n "$version" ] && [ -n "$sha" ] || { echo "::error::could not read the pins from $pins"; exit 1; }
+          # Checked by shape too: both go into later steps' scripts verbatim.
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$sha" =~ ^[0-9a-f]{64}$ ]] || {
+            echo "::error::could not read the pins from $pins (version '$version', sha256 '$sha')"
+            exit 1
+          }
           # The image, the host's esp_hosted and the version the P4 offers are
           # one pair; a bump that misses one of the three is caught here.
-          host=$(grep -A1 'espressif/esp_hosted:' components/espos_wifi/idf_component.yml | sed -n 's/.*version: "==\(.*\)".*/\1/p')
-          image=$(grep -A1 'espressif/esp_hosted:' tools/coprocessor/main/idf_component.yml | sed -n 's/.*version: "==\(.*\)".*/\1/p')
+          # "|| true": a pin these cannot find is reported by the comparison
+          # below, not by pipefail ending the step without a word.
+          host=$(grep -A1 'espressif/esp_hosted:' components/espos_wifi/idf_component.yml | sed -n 's/.*version: "==\(.*\)".*/\1/p' || true)
+          image=$(grep -A1 'espressif/esp_hosted:' tools/coprocessor/main/idf_component.yml | sed -n 's/.*version: "==\(.*\)".*/\1/p' || true)
           project=$(sed -n 's/^set(PROJECT_VER "\(.*\)")/\1/p' tools/coprocessor/CMakeLists.txt)
           echo "coproc_image.h $version, host esp_hosted $host, image esp_hosted $image, PROJECT_VER $project"
           for v in "$host" "$image" "$project"; do
