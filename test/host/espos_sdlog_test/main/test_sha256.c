@@ -49,3 +49,10 @@ TEST_CASE("sha256 is the same fed in pieces as in one go", "[sha256]")
     espos_sdlog_sha256_hex(&c, parts);
     TEST_ASSERT_EQUAL_STRING(whole, parts);
 }
+
+TEST_CASE("crc32 matches zlib's check value, in one go or in pieces", "[crc32]")
+{
+    TEST_ASSERT_EQUAL_HEX32(0xcbf43926u, espos_sdlog_crc32(0, "123456789", 9));
+    TEST_ASSERT_EQUAL_HEX32(0xcbf43926u, espos_sdlog_crc32(espos_sdlog_crc32(0, "1234", 4), "56789", 5));
+    TEST_ASSERT_EQUAL_HEX32(0, espos_sdlog_crc32(0, "", 0));
+}

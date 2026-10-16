@@ -1,5 +1,6 @@
 /* SPDX-FileCopyrightText: 2026 Dirk Wahrheit */
 /* SPDX-License-Identifier: Apache-2.0 */
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -373,4 +374,29 @@ TEST_CASE("a pruned session's number is never handed out again", "[prune]")
     write_raw(t, "7\n");
     TEST_ASSERT_EQUAL_UINT32(8, one_session("{}", NULL, 0, NULL));
     TEST_ASSERT_EQUAL_STRING("8\n", slurp(p, NULL));
+}
+
+TEST_CASE("row_crc ends every row with the CRC-32 of what comes before it", "[session]")
+{
+    fresh_root();
+    const espos_sdlog_open_cfg_t cfg = { .row_crc = true };
+    espos_sdlog_session_t s;
+    TEST_ASSERT_EQUAL(ESP_OK, espos_sdlog_open(root, "{}", &cfg, &s));
+    TEST_ASSERT_EQUAL(ESP_OK, espos_sdlog_append(s, "123456789"));
+    TEST_ASSERT_EQUAL(ESP_OK, espos_sdlog_append(s, "t,depth"));
+    uint32_t seq = espos_sdlog_seq(s);
+    TEST_ASSERT_EQUAL(ESP_OK, espos_sdlog_close(s, NULL));
+
+    char expect[64];
+    snprintf(expect, sizeof(expect), "123456789,cbf43926\nt,depth,%08" PRIx32 "\n",
+             espos_sdlog_crc32(0, "t,depth", 7));
+    size_t len;
+    TEST_ASSERT_EQUAL_STRING(expect, slurp(file_of(seq, ESPOS_SDLOG_FILE_ROWS), &len));
+
+    espos_sdlog_info_t info;
+    TEST_ASSERT_EQUAL(ESP_OK, espos_sdlog_info(root, seq, &info));
+    TEST_ASSERT_EQUAL_UINT64(len, info.bytes);
+    char hex[ESPOS_SDLOG_SHA256_HEX_MAX];
+    sha_of(expect, hex);
+    TEST_ASSERT_EQUAL_STRING(hex, info.sha256);
 }

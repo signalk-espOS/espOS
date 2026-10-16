@@ -2,8 +2,8 @@
  * SPDX-FileCopyrightText: 2026 Dirk Wahrheit
  * SPDX-License-Identifier: Apache-2.0
  *
- * SHA-256 (FIPS 180-4) in plain C, so the session code stays host-testable
- * without mbedTLS. A row file hashes at card speed either way; the hardware
+ * SHA-256 (FIPS 180-4) and CRC-32 in plain C, so the session code stays
+ * host-testable without mbedTLS. A row file hashes at card speed either way; the hardware
  * accelerator would buy nothing a logger notices.
  */
 #include <string.h>
@@ -111,4 +111,18 @@ void espos_sdlog_sha256_hex(espos_sdlog_sha256_t *c, char hex[ESPOS_SDLOG_SHA256
         }
     }
     hex[64] = '\0';
+}
+
+uint32_t espos_sdlog_crc32(uint32_t crc, const void *data, size_t n)
+{
+    /* Bitwise rather than a 1 KB table: a row a second is a few dozen bytes. */
+    const uint8_t *p = data;
+    crc = ~crc;
+    while (n--) {
+        crc ^= *p++;
+        for (int i = 0; i < 8; i++) {
+            crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
+        }
+    }
+    return ~crc;
 }

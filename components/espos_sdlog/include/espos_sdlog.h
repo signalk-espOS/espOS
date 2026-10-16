@@ -51,6 +51,11 @@ typedef struct {
      * ESPOS_SDLOG_SYNC_EVERY_DEFAULT. A sync costs a card write cycle, so 1
      * on a row a second wears a card faster than it needs to. */
     uint32_t sync_every;
+    /** End every row with ",xxxxxxxx": the CRC-32 of the row before that
+     * comma, as espos_sdlog_crc32() computes it, in lower-case hex. A reader
+     * then keeps each row that ends in a newline and passes its check, and a
+     * row a power cut or a bad sector garbled is dropped alone. */
+    bool row_crc;
 } espos_sdlog_open_cfg_t;
 
 /**
@@ -160,6 +165,11 @@ esp_err_t espos_sdlog_remove(const char *root, uint32_t seq);
 esp_err_t espos_sdlog_prune(const char *root, uint64_t keep_bytes, uint32_t *removed);
 
 /* sha256, exposed for an uploader that hashes what it sends. */
+/** CRC-32 as zlib, Ethernet and PNG compute it (reflected 0x04C11DB7,
+ * initial and final XOR 0xFFFFFFFF). Pass 0 to start and the previous result
+ * to continue: crc32("123456789") is 0xcbf43926. */
+uint32_t espos_sdlog_crc32(uint32_t crc, const void *data, size_t n);
+
 typedef struct {
     uint32_t h[8];
     uint64_t len;

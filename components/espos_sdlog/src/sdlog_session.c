@@ -43,6 +43,7 @@ struct espos_sdlog_session {
     uint64_t bytes;
     uint32_t sync_every;
     uint32_t unsynced;
+    bool row_crc;
     bool failed;
     char root[PATH_MAX_LEN];
 };
@@ -317,6 +318,7 @@ esp_err_t espos_sdlog_open(const char *root, const char *header, const espos_sdl
     strcpy(s->root, root);
     s->seq = seq;
     s->sync_every = (cfg && cfg->sync_every) ? cfg->sync_every : ESPOS_SDLOG_SYNC_EVERY_DEFAULT;
+    s->row_crc = cfg && cfg->row_crc;
     espos_sdlog_sha256_init(&s->sha);
     *out = s;
     return ESP_OK;
@@ -362,14 +364,19 @@ esp_err_t espos_sdlog_append(espos_sdlog_session_t s, const char *row)
         return ESP_FAIL;
     }
     size_t n = strlen(row);
-    if (fwrite(row, 1, n, s->rows_f) != n || fputc('\n', s->rows_f) == EOF) {
+    char tail[16] = "\n";
+    if (s->row_crc) {
+        snprintf(tail, sizeof(tail), ",%08" PRIx32 "\n", espos_sdlog_crc32(0, row, n));
+    }
+    size_t t = strlen(tail);
+    if (fwrite(row, 1, n, s->rows_f) != n || fwrite(tail, 1, t, s->rows_f) != t) {
         s->failed = true;
         return ESP_FAIL;
     }
     espos_sdlog_sha256_update(&s->sha, row, n);
-    espos_sdlog_sha256_update(&s->sha, "\n", 1);
+    espos_sdlog_sha256_update(&s->sha, tail, t);
     s->rows++;
-    s->bytes += n + 1;
+    s->bytes += n + t;
     if (++s->unsynced >= s->sync_every) {
         return espos_sdlog_sync(s);
     }

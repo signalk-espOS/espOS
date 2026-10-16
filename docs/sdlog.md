@@ -96,10 +96,27 @@ two sector writes wide, once per session.
 Call `espos_sdlog_recover()` once after mounting and before opening a
 session: a session open at the time looks cut short too.
 
+### Rows that stand alone
+
+A power cut costs the half row after the last newline, which recovery cuts.
+A card that was pulled, or a sector that went bad, can garble a row in the
+middle too. With `.row_crc = true` in the open configuration every row ends
+in `,xxxxxxxx`, the CRC-32 (`espos_sdlog_crc32()`, the zlib one) of the row
+before that comma in lower-case hex. A reader keeps each row that ends in a
+newline and passes its check, and drops the rest one by one, so nothing on
+the card needs the close record to be read.
+
+For a logger that has no stop signal (a dinghy whose power is cut without
+warning), set `sync_every` to the number of rows in a few seconds: that is
+then all a cut loses, since FatFs writes the file's size and cluster chain
+only on a sync.
+
 ## Delivering sessions
 
-Only a closed session is complete, and its close record carries what a server
-needs to check the upload: the row count and the sha256 of `ROWS.TXT`. The
+Every session but the open one is complete: one the power cut off is closed
+by `espos_sdlog_recover()` at the next boot. Its close record is the device's
+own bookkeeping and carries what an upload needs to send along: the row count
+and the sha256 of `ROWS.TXT`. A server never needs `CLOSE.JSN` itself. The
 delivery itself is the firmware's (it knows the server and its API); the
 component gives it the pieces:
 
