@@ -93,8 +93,15 @@ reboot, so make the receiving end idempotent on `(path, offset)`.
 
 | Board | Card | USB to the host |
 |---|---|---|
-| Waveshare ESP32-P4 PoE-ETH | TF slot, slot 0: CLK 43, CMD 44, D0–D3 39–42, LDO channel 4 | USB 2.0 OTG high-speed, a 4-pin header |
+| Waveshare ESP32-P4 PoE-ETH | TF slot, slot 0: CLK 43, CMD 44, D0–D3 39–42, LDO channel 4 | USB 2.0 OTG high-speed, the 4-pin header J3 |
 | Waveshare ESP32-P4 Touch-LCD 7B | the same pins | USB 2.0 OTG high-speed, Type-A (needs an A-to-A cable) |
+
+The PoE-ETH's USB-C port goes only to its CH343 serial bridge, so a host
+plugged in there sees a serial port and no card. The host connects to J3
+instead, with a plain USB-A lead: pin 1 5 V, 2 D−, 3 D+, 4 GND. Pin 1 feeds
+the board's 5 V rail ahead of the regulator, and a diode keeps it from the
+USB-C port; with a PC on the USB-C for the console at the same time, leave
+J3's 5 V wire unconnected.
 
 On the P4 the SDMMC controller's slot 1 is the SDIO link to the C6 radio.
 espOS brings that up first, and `start()` accepts the controller already
@@ -114,8 +121,10 @@ and USB power at the same time.
 The app needs these in its `sdkconfig.defaults`:
 
 ```
-CONFIG_TINYUSB_MSC_ENABLED=y   # esp_tinyusb compiles no MSC class otherwise
-CONFIG_FATFS_LFN_HEAP=y        # realbathy/ is longer than 8.3; the build fails without long names
+# esp_tinyusb compiles no MSC class otherwise
+CONFIG_TINYUSB_MSC_ENABLED=y
+# realbathy/ is longer than 8.3; the build fails without long names
+CONFIG_FATFS_LFN_HEAP=y
 ```
 
 The host shows esp_tinyusb's SCSI inquiry strings. The USB product string is
@@ -124,12 +133,10 @@ The host shows esp_tinyusb's SCSI inquiry strings. The USB product string is
 With the espOS prologue, name the component, since it is optional:
 `espos_project_prologue(NAME ... COMPONENTS espos_usb_storage)`.
 
-## Not yet
+## Limits
 
-* No upload sink ships with espOS. Where RealBathy data goes (the crowd-depth
-  plugin's trip upload) is decided on the server side first.
-* Files that are rewritten in place rather than appended (RealBathy's `.trk`
-  tiles) are not followed.
-* Not yet tried against a real Axiom. The open questions are whether LightHouse
-  offers the USB card as RealBathy's save location, and how long it holds
-  writes before flushing them.
+* espOS ships no upload sink: the app passes one to `follow()` and decides
+  where the chunks go.
+* Only files that grow by appending are followed. A file rewritten in place
+  (RealBathy's `.trk` tiles) is re-read only when its first 32 bytes change
+  or it shrinks; other rewrites go unnoticed.

@@ -50,6 +50,15 @@ esp_err_t card_init(const SdConfig& sd, sdmmc_card_t** out) {
 #endif
   }
 
+  /* Every failure below releases the LDO channel, or a start() retried after
+   * the card is inserted would find it still taken. */
+  auto release_ldo = [&host]() {
+#if SOC_GP_LDO_SUPPORTED
+    if (host.pwr_ctrl_handle) sd_pwr_ctrl_del_on_chip_ldo(host.pwr_ctrl_handle);
+    host.pwr_ctrl_handle = nullptr;
+#endif
+  };
+
   sdmmc_slot_config_t slot = SDMMC_SLOT_CONFIG_DEFAULT();
   const bool four_bit = sd.d1 >= 0 && sd.d2 >= 0 && sd.d3 >= 0;
   slot.width = four_bit ? 4 : 1;
@@ -73,16 +82,21 @@ esp_err_t card_init(const SdConfig& sd, sdmmc_card_t** out) {
   const esp_err_t host_err = host.init();
   if (host_err != ESP_OK && host_err != ESP_ERR_INVALID_STATE) {
     ESP_LOGE(TAG, "SDMMC host: %s", esp_err_to_name(host_err));
+    release_ldo();
     return host_err;
   }
-  ESP_RETURN_ON_ERROR(sdmmc_host_init_slot(host.slot, &slot), TAG,
-                      "SDMMC slot");
+  const esp_err_t slot_err = sdmmc_host_init_slot(host.slot, &slot);
+  if (slot_err != ESP_OK) {
+    ESP_LOGE(TAG, "SDMMC slot: %s", esp_err_to_name(slot_err));
+    release_ldo();
+    return slot_err;
+  }
 
   auto* card = static_cast<sdmmc_card_t*>(calloc(1, sizeof(sdmmc_card_t)));
-  if (!card) return ESP_ERR_NO_MEM;
-  const esp_err_t err = sdmmc_card_init(&host, card);
+  const esp_err_t err = card ? sdmmc_card_init(&host, card) : ESP_ERR_NO_MEM;
   if (err != ESP_OK) {
     free(card);
+    release_ldo();
     ESP_LOGE(TAG, "no card, or it does not answer: %s", esp_err_to_name(err));
     return err;
   }
