@@ -173,7 +173,7 @@ void espos_nmea0183_uart_close(espos_nmea0183_uart_t h)
     free(h);
 }
 
-int espos_nmea0183_uart_add_listener(espos_nmea0183_uart_t h, espos_nmea0183_sentence_fn fn, void *arg)
+int32_t espos_nmea0183_uart_add_listener(espos_nmea0183_uart_t h, espos_nmea0183_sentence_fn fn, void *arg)
 {
     if (!h || !fn) {
         return 0;
@@ -191,7 +191,7 @@ int espos_nmea0183_uart_add_listener(espos_nmea0183_uart_t h, espos_nmea0183_sen
     return id;
 }
 
-void espos_nmea0183_uart_remove_listener(espos_nmea0183_uart_t h, int id)
+void espos_nmea0183_uart_remove_listener(espos_nmea0183_uart_t h, int32_t id)
 {
     if (!h || id <= 0) {
         return;

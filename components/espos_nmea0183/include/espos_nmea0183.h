@@ -120,21 +120,21 @@ void espos_nmea0183_reader_feed(espos_nmea0183_reader_t *r, const uint8_t *data,
 /* ------------------------------------------------------------------------ */
 
 /** Field `i` as a number. False when it is missing, empty or not a number. */
-bool espos_nmea0183_field_double(const espos_nmea0183_sentence_t *s, int i, double *out);
+bool espos_nmea0183_field_double(const espos_nmea0183_sentence_t *s, int32_t i, double *out);
 
 /** Field `i` as its first character; '\0' when missing or empty. */
-char espos_nmea0183_field_char(const espos_nmea0183_sentence_t *s, int i);
+char espos_nmea0183_field_char(const espos_nmea0183_sentence_t *s, int32_t i);
 
 /** Fields `i` ("ddmm.mmmm" or "dddmm.mmmm") and `i + 1` (N/S or E/W) as signed
  * decimal degrees. False when either is empty or out of range. */
-bool espos_nmea0183_field_latlon(const espos_nmea0183_sentence_t *s, int i, double *out_deg);
+bool espos_nmea0183_field_latlon(const espos_nmea0183_sentence_t *s, int32_t i, double *out_deg);
 
 /** Field `i` ("hhmmss" or "hhmmss.sss") as milliseconds since midnight UTC. */
-bool espos_nmea0183_field_time(const espos_nmea0183_sentence_t *s, int i, int64_t *out_ms);
+bool espos_nmea0183_field_time(const espos_nmea0183_sentence_t *s, int32_t i, int64_t *out_ms);
 
 /** Unix milliseconds of a UTC civil date (full year) plus milliseconds since
  * midnight; -1 for an impossible date. */
-int64_t espos_nmea0183_unix_ms(int year, int month, int day, int64_t ms_of_day);
+int64_t espos_nmea0183_unix_ms(int32_t year, int32_t month, int32_t day, int64_t ms_of_day);
 
 /* ------------------------------------------------------------------------ */
 /* Decoded sentences, in Signal K units                                     */

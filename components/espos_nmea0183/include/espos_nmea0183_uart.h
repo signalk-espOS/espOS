@@ -71,11 +71,11 @@ esp_err_t espos_nmea0183_uart_open(const espos_nmea0183_uart_cfg_t *cfg, espos_n
 void espos_nmea0183_uart_close(espos_nmea0183_uart_t h);
 
 /** Add a listener; returns its id (> 0), or 0 when all slots are taken. */
-int espos_nmea0183_uart_add_listener(espos_nmea0183_uart_t h, espos_nmea0183_sentence_fn fn, void *arg);
+int32_t espos_nmea0183_uart_add_listener(espos_nmea0183_uart_t h, espos_nmea0183_sentence_fn fn, void *arg);
 
 /** Remove a listener. When it returns, the listener is not running and will
  * not run again, so `arg` may be freed. */
-void espos_nmea0183_uart_remove_listener(espos_nmea0183_uart_t h, int id);
+void espos_nmea0183_uart_remove_listener(espos_nmea0183_uart_t h, int32_t id);
 
 /**
  * Send one sentence (needs a tx_gpio). `line` is "$IIXDR,..." with or without

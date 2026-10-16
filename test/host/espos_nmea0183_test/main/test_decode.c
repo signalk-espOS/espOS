@@ -244,3 +244,22 @@ TEST_CASE("GST: the receiver's error estimate, and no accuracy from empty fields
     s = sentence("$GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,*47");
     TEST_ASSERT_FALSE(espos_nmea0183_decode_gst(&s, &g));
 }
+
+TEST_CASE("absurd numbers that pass the checksum are refused, not looped on", "[fields]")
+{
+    /* A deviation and variation of 1e300 degrees: no heading, and above all
+     * no endless loop stepping it back into a turn. */
+    espos_nmea0183_sentence_t s = sentence("$HCHDG,98.3,1e300,E,1e300,W*62");
+    espos_nmea0183_heading_t h;
+    TEST_ASSERT_TRUE(espos_nmea0183_decode_heading(&s, &h));
+    TEST_ASSERT_TRUE(h.has_magnetic); /* the sensor alone, deviation left out */
+    TEST_ASSERT_DOUBLE_WITHIN(1e-9, DEG(98.3), h.heading_magnetic);
+    TEST_ASSERT_FALSE(h.has_variation);
+
+    double v;
+    s = sentence("$GPGGA,123519,1e300,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,*3E");
+    TEST_ASSERT_FALSE(espos_nmea0183_field_latlon(&s, 1, &v));
+    int64_t ms;
+    s = sentence("$GPGGA,123519.5e300,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,*0A");
+    TEST_ASSERT_FALSE(espos_nmea0183_field_time(&s, 0, &ms));
+}

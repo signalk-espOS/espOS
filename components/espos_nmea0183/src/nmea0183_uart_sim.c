@@ -21,7 +21,7 @@ void espos_nmea0183_uart_close(espos_nmea0183_uart_t h)
     (void)h;
 }
 
-int espos_nmea0183_uart_add_listener(espos_nmea0183_uart_t h, espos_nmea0183_sentence_fn fn, void *arg)
+int32_t espos_nmea0183_uart_add_listener(espos_nmea0183_uart_t h, espos_nmea0183_sentence_fn fn, void *arg)
 {
     (void)h;
     (void)fn;
@@ -29,7 +29,7 @@ int espos_nmea0183_uart_add_listener(espos_nmea0183_uart_t h, espos_nmea0183_sen
     return 0;
 }
 
-void espos_nmea0183_uart_remove_listener(espos_nmea0183_uart_t h, int id)
+void espos_nmea0183_uart_remove_listener(espos_nmea0183_uart_t h, int32_t id)
 {
     (void)h;
     (void)id;

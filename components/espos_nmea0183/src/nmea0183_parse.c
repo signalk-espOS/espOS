@@ -250,7 +250,7 @@ static const char *field(const espos_nmea0183_sentence_t *s, int i)
     return s->field[i];
 }
 
-bool espos_nmea0183_field_double(const espos_nmea0183_sentence_t *s, int i, double *out)
+bool espos_nmea0183_field_double(const espos_nmea0183_sentence_t *s, int32_t i, double *out)
 {
     const char *f = field(s, i);
     if (!f) {
@@ -265,7 +265,7 @@ bool espos_nmea0183_field_double(const espos_nmea0183_sentence_t *s, int i, doub
     return true;
 }
 
-char espos_nmea0183_field_char(const espos_nmea0183_sentence_t *s, int i)
+char espos_nmea0183_field_char(const espos_nmea0183_sentence_t *s, int32_t i)
 {
     const char *f = field(s, i);
     return f ? f[0] : '\0';
@@ -286,11 +286,13 @@ static bool field_int(const espos_nmea0183_sentence_t *s, int i, int32_t *out)
     return true;
 }
 
-bool espos_nmea0183_field_latlon(const espos_nmea0183_sentence_t *s, int i, double *out_deg)
+bool espos_nmea0183_field_latlon(const espos_nmea0183_sentence_t *s, int32_t i, double *out_deg)
 {
     double v;
     char hemi = espos_nmea0183_field_char(s, i + 1);
-    if (!espos_nmea0183_field_double(s, i, &v) || v < 0) {
+    /* 18000 is 180°00': anything bigger is no place, and must not reach the
+     * integer conversion below. */
+    if (!espos_nmea0183_field_double(s, i, &v) || v < 0 || v >= 18100.0) {
         return false;
     }
     double deg = (double)(long)(v / 100.0); /* v >= 0: truncation is floor */
@@ -331,7 +333,7 @@ static int digits(const char *p, int n)
     return v;
 }
 
-bool espos_nmea0183_field_time(const espos_nmea0183_sentence_t *s, int i, int64_t *out_ms)
+bool espos_nmea0183_field_time(const espos_nmea0183_sentence_t *s, int32_t i, int64_t *out_ms)
 {
     const char *f = field(s, i);
     if (!f || strlen(f) < 6) {
@@ -343,7 +345,9 @@ bool espos_nmea0183_field_time(const espos_nmea0183_sentence_t *s, int i, int64_
     }
     double frac = 0;
     if (f[6] != '\0') {
-        if (f[6] != '.') {
+        /* Digits only: strtod would take an exponent, and "05.5e300" must
+         * not reach the integer conversion. */
+        if (f[6] != '.' || f[7] == '\0' || strspn(f + 7, "0123456789") != strlen(f + 7)) {
             return false;
         }
         char *end = NULL;
@@ -356,7 +360,7 @@ bool espos_nmea0183_field_time(const espos_nmea0183_sentence_t *s, int i, int64_
     return true;
 }
 
-int64_t espos_nmea0183_unix_ms(int year, int month, int day, int64_t ms_of_day)
+int64_t espos_nmea0183_unix_ms(int32_t year, int32_t month, int32_t day, int64_t ms_of_day)
 {
     static const int mdays[] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
     if (year < 1970 || month < 1 || month > 12 || day < 1 || ms_of_day < 0 || ms_of_day >= 86401000) {
@@ -394,7 +398,9 @@ static bool signed_angle(const espos_nmea0183_sentence_t *s, int i, double *out)
 {
     double v;
     char ew = espos_nmea0183_field_char(s, i + 1);
-    if (!espos_nmea0183_field_double(s, i, &v) || (ew != 'E' && ew != 'W')) {
+    /* Bounded, because rad_of() steps a heading plus this deviation back
+     * into a turn: 1e300 would never step back. */
+    if (!espos_nmea0183_field_double(s, i, &v) || v < 0 || v > 180.0 || (ew != 'E' && ew != 'W')) {
         return false;
     }
     *out = (ew == 'W' ? -v : v) * DEG_RAD;
