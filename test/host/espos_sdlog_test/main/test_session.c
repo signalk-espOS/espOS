@@ -344,7 +344,7 @@ TEST_CASE("a close record this did not write is reported, not trusted", "[list]"
 TEST_CASE("a pruned session's number is never handed out again", "[prune]")
 {
     fresh_root();
-    const char *rows[] = {"x"};
+    const char *rows[] = { "x" };
     TEST_ASSERT_EQUAL_UINT32(1, one_session("{}", rows, 1, NULL));
     TEST_ASSERT_EQUAL_UINT32(2, one_session("{}", rows, 1, NULL));
     TEST_ASSERT_EQUAL(ESP_OK, espos_sdlog_mark_synced(root, 1, NULL));
