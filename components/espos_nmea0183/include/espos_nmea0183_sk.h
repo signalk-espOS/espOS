@@ -31,6 +31,7 @@ typedef enum {
     ESPOS_NMEA0183_SK_NUMBER = 0,
     ESPOS_NMEA0183_SK_JSON = 1,   /* an object: navigation.position */
     ESPOS_NMEA0183_SK_STRING = 2, /* navigation.datetime, methodQuality */
+    ESPOS_NMEA0183_SK_KIND_MAX = 3,
 } espos_nmea0183_sk_kind_t;
 
 typedef struct {

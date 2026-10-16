@@ -32,14 +32,15 @@ extern "C" {
 
 typedef enum {
     ESPOS_NMEA0183_OK = 0,
-    ESPOS_NMEA0183_ERR_EMPTY,           /* nothing but whitespace */
-    ESPOS_NMEA0183_ERR_NO_START,        /* does not begin with '$' or '!' */
-    ESPOS_NMEA0183_ERR_TOO_LONG,        /* over ESPOS_NMEA0183_LINE_MAX */
-    ESPOS_NMEA0183_ERR_BAD_CHAR,        /* a byte outside printable ASCII */
-    ESPOS_NMEA0183_ERR_NO_CHECKSUM,     /* none, and the caller requires one */
-    ESPOS_NMEA0183_ERR_BAD_CHECKSUM,    /* present and wrong, or malformed */
-    ESPOS_NMEA0183_ERR_BAD_ADDRESS,     /* the address field is not TTSSS or Pxxx */
-    ESPOS_NMEA0183_ERR_TOO_MANY_FIELDS, /* more than ESPOS_NMEA0183_MAX_FIELDS */
+    ESPOS_NMEA0183_ERR_EMPTY = 1,           /* nothing but whitespace */
+    ESPOS_NMEA0183_ERR_NO_START = 2,        /* does not begin with '$' or '!' */
+    ESPOS_NMEA0183_ERR_TOO_LONG = 3,        /* over ESPOS_NMEA0183_LINE_MAX */
+    ESPOS_NMEA0183_ERR_BAD_CHAR = 4,        /* a byte outside printable ASCII */
+    ESPOS_NMEA0183_ERR_NO_CHECKSUM = 5,     /* none, and the caller requires one */
+    ESPOS_NMEA0183_ERR_BAD_CHECKSUM = 6,    /* present and wrong, or malformed */
+    ESPOS_NMEA0183_ERR_BAD_ADDRESS = 7,     /* the address field is not TTSSS or Pxxx */
+    ESPOS_NMEA0183_ERR_TOO_MANY_FIELDS = 8, /* more than ESPOS_NMEA0183_MAX_FIELDS */
+    ESPOS_NMEA0183_ERR_MAX = 9,
 } espos_nmea0183_err_t;
 
 /** A sentence split into its fields. The pointers point into the line the
@@ -146,8 +147,8 @@ typedef struct {
     bool has_time, has_position, has_satellites, has_hdop, has_altitude, has_geoid;
     int64_t time_ms;         /* since midnight UTC */
     double lat, lon;         /* decimal degrees, + north / east */
-    int quality;             /* 0 none, 1 GNSS, 2 DGNSS, 3 PPS, 4 RTK fixed, 5 RTK float, 6 dead reckoning, 7 manual, 8 simulator */
-    int satellites;
+    int32_t quality;             /* 0 none, 1 GNSS, 2 DGNSS, 3 PPS, 4 RTK fixed, 5 RTK float, 6 dead reckoning, 7 manual, 8 simulator */
+    int32_t satellites;
     double hdop;
     double altitude;         /* m above mean sea level */
     double geoid_separation; /* m */
@@ -191,6 +192,7 @@ typedef enum {
     ESPOS_NMEA0183_DEPTH_TRANSDUCER = 0,
     ESPOS_NMEA0183_DEPTH_SURFACE = 1,
     ESPOS_NMEA0183_DEPTH_KEEL = 2,
+    ESPOS_NMEA0183_DEPTH_REF_MAX = 3,
 } espos_nmea0183_depth_ref_t;
 
 typedef struct {

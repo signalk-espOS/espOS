@@ -34,14 +34,14 @@ extern "C" {
 typedef struct espos_nmea0183_uart *espos_nmea0183_uart_t;
 
 typedef struct {
-    int uart_num;          /* 1 or 2; UART0 is usually the console */
-    int rx_gpio;
-    int tx_gpio;           /* -1: listen only, the common case */
+    int32_t uart_num;          /* 1 or 2; UART0 is usually the console */
+    int32_t rx_gpio;
+    int32_t tx_gpio;           /* -1: listen only, the common case */
     uint32_t baud;         /* 0 = 4800, the standard rate; GPS modules: 9600; AIS and "high speed": 38400 */
     bool invert_rx;        /* a single-ended talker wired without a receiver chip */
     bool require_checksum; /* refuse sentences without "*hh" (most talkers send one) */
     uint32_t task_stack;   /* 0 = 6144 bytes, enough for espos_nmea0183_sk_publish(); listeners run on this stack */
-    int task_prio;         /* 0 = 5 */
+    int32_t task_prio;         /* 0 = 5 */
 } espos_nmea0183_uart_cfg_t;
 
 /**

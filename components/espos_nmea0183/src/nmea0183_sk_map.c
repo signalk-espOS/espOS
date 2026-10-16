@@ -177,6 +177,8 @@ size_t espos_nmea0183_sk_map(const espos_nmea0183_sentence_t *s, espos_nmea0183_
         case ESPOS_NMEA0183_DEPTH_KEEL:
             number(&k, "environment.depth.belowKeel", dpt.depth);
             break;
+        case ESPOS_NMEA0183_DEPTH_REF_MAX:
+            break;
         }
     } else if (espos_nmea0183_decode_mtw(s, &mtw)) {
         number(&k, "environment.water.temperature", mtw.temperature);

@@ -45,6 +45,8 @@ esp_err_t espos_nmea0183_sk_publish(const espos_nmea0183_sentence_t *s, bool set
         case ESPOS_NMEA0183_SK_STRING:
             err = espos_sk_publish_string(up[i].path, up[i].text);
             break;
+        case ESPOS_NMEA0183_SK_KIND_MAX:
+            break;
         }
         if (first == ESP_OK) {
             first = err;

@@ -138,11 +138,11 @@ esp_err_t espos_nmea0183_uart_open(const espos_nmea0183_uart_cfg_t *cfg, espos_n
         goto fail;
     }
     if (xTaskCreate(reader_task, "nmea0183", h->cfg.task_stack ? h->cfg.task_stack : 6144, h,
-                    h->cfg.task_prio ? h->cfg.task_prio : 5, &h->task) != pdPASS) {
+                    h->cfg.task_prio ? (UBaseType_t)h->cfg.task_prio : 5, &h->task) != pdPASS) {
         uart_driver_delete(h->cfg.uart_num);
         goto fail_mem;
     }
-    ESP_LOGI(TAG, "UART%d rx %d tx %d at %lu baud%s", h->cfg.uart_num, h->cfg.rx_gpio, h->cfg.tx_gpio,
+    ESP_LOGI(TAG, "UART%d rx %d tx %d at %lu baud%s", (int)h->cfg.uart_num, (int)h->cfg.rx_gpio, (int)h->cfg.tx_gpio,
              (unsigned long)h->cfg.baud, h->cfg.invert_rx ? ", inverted" : "");
     *out = h;
     return ESP_OK;

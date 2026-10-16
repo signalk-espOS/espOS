@@ -42,6 +42,8 @@ const char *espos_nmea0183_err_str(espos_nmea0183_err_t err)
         return "bad address";
     case ESPOS_NMEA0183_ERR_TOO_MANY_FIELDS:
         return "too many fields";
+    case ESPOS_NMEA0183_ERR_MAX:
+        break;
     }
     return "unknown";
 }
@@ -269,7 +271,7 @@ char espos_nmea0183_field_char(const espos_nmea0183_sentence_t *s, int i)
     return f ? f[0] : '\0';
 }
 
-static bool field_int(const espos_nmea0183_sentence_t *s, int i, int *out)
+static bool field_int(const espos_nmea0183_sentence_t *s, int i, int32_t *out)
 {
     const char *f = field(s, i);
     if (!f) {
@@ -277,10 +279,10 @@ static bool field_int(const espos_nmea0183_sentence_t *s, int i, int *out)
     }
     char *end = NULL;
     long v = strtol(f, &end, 10);
-    if (end == f || *end != '\0') {
+    if (end == f || *end != '\0' || v < INT32_MIN || v > INT32_MAX) {
         return false;
     }
-    *out = (int)v;
+    *out = (int32_t)v;
     return true;
 }
 
@@ -621,7 +623,7 @@ bool espos_nmea0183_decode_zda(const espos_nmea0183_sentence_t *s, espos_nmea018
     }
     memset(out, 0, sizeof(*out));
     int64_t ms;
-    int d, m, y;
+    int32_t d, m, y;
     const char *fy = field(s, 3);
     if (espos_nmea0183_field_time(s, 0, &ms) && field_int(s, 1, &d) && field_int(s, 2, &m) && fy &&
         strlen(fy) == 4 && field_int(s, 3, &y)) {
