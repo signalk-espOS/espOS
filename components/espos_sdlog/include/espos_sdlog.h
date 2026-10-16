@@ -164,12 +164,12 @@ esp_err_t espos_sdlog_remove(const char *root, uint32_t seq);
  */
 esp_err_t espos_sdlog_prune(const char *root, uint64_t keep_bytes, uint32_t *removed);
 
-/* sha256, exposed for an uploader that hashes what it sends. */
 /** CRC-32 as zlib, Ethernet and PNG compute it (reflected 0x04C11DB7,
  * initial and final XOR 0xFFFFFFFF). Pass 0 to start and the previous result
  * to continue: crc32("123456789") is 0xcbf43926. */
 uint32_t espos_sdlog_crc32(uint32_t crc, const void *data, size_t n);
 
+/* sha256, exposed for an uploader that hashes what it sends. */
 typedef struct {
     uint32_t h[8];
     uint64_t len;

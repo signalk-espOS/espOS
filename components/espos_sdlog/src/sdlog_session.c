@@ -525,6 +525,18 @@ static esp_err_t recover_one(const char *root, uint32_t seq)
             size += n;
         }
         fclose(f);
+    } else {
+        /* The power went between the header and the rows file: the session
+         * is empty, and an uploader opening ROWS.TXT must find it. */
+        f = fopen(p, "wb");
+        if (!f) {
+            return ESP_FAIL;
+        }
+        bool ok = sync_file(f) == ESP_OK;
+        ok = (fclose(f) == 0) && ok;
+        if (!ok) {
+            return ESP_FAIL;
+        }
     }
     if (size > keep && truncate(p, (off_t)keep) != 0) {
         return ESP_FAIL;

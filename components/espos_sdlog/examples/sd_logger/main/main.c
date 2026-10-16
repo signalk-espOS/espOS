@@ -28,6 +28,7 @@ static const char *TAG = "sd_logger";
 /* A session an hour: a file small enough to upload over a weak link, and a
  * power cut costs at most the rows since the last sync of one of them. */
 #define ROWS_PER_SESSION 3600
+#define RETRY_MS         10000
 
 static espos_sdlog_card_cfg_t card_cfg(void)
 {
@@ -82,8 +83,14 @@ void app_main(void)
     }
     espos_sdlog_list(ROOT, print_session, NULL);
 
-    espos_sdlog_session_t s = start_session();
-    while (s) {
+    /* A card that refuses one write may take the next: a logger out of
+     * reach for a week keeps trying rather than stopping for good. */
+    espos_sdlog_session_t s = NULL;
+    for (;;) {
+        if (!s && !(s = start_session())) {
+            vTaskDelay(pdMS_TO_TICKS(RETRY_MS));
+            continue;
+        }
         char row[48];
         /* 0 until the clock is set (SNTP, the server, a GPS): an honest gap
          * rather than a time that looks right and is not. */
@@ -91,11 +98,10 @@ void app_main(void)
         if (espos_sdlog_append(s, row) != ESP_OK) {
             ESP_LOGE(TAG, "the card refused a row; closing the session");
             espos_sdlog_close(s, NULL);
-            break;
-        }
-        if (espos_sdlog_rows(s) >= ROWS_PER_SESSION) {
+            s = NULL;
+        } else if (espos_sdlog_rows(s) >= ROWS_PER_SESSION) {
             espos_sdlog_close(s, NULL);
-            s = start_session();
+            s = NULL;
         }
         vTaskDelay(pdMS_TO_TICKS(1000));
     }

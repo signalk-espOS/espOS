@@ -181,7 +181,9 @@ TEST_CASE("recover cuts the half row a power cut left and closes the session unc
     TEST_ASSERT_EQUAL(ESP_OK, espos_sdlog_sync(s));
     /* The power goes mid-row: what the card holds is the rows and a stub. */
     write_raw(file_of(1, ESPOS_SDLOG_FILE_ROWS), "one\ntwo\nthr");
-    free(s); /* the handle dies with the power; nothing closes it */
+    /* The handle dies with the power; nothing closes it. Its FILE leaks on
+     * purpose, and holds nothing unwritten: the rows were synced above. */
+    free(s);
 
     uint32_t recovered, removed;
     TEST_ASSERT_EQUAL(ESP_OK, espos_sdlog_recover(root, &recovered, &removed));
@@ -399,4 +401,26 @@ TEST_CASE("row_crc ends every row with the CRC-32 of what comes before it", "[se
     char hex[ESPOS_SDLOG_SHA256_HEX_MAX];
     sha_of(expect, hex);
     TEST_ASSERT_EQUAL_STRING(hex, info.sha256);
+}
+
+TEST_CASE("recover gives a session cut off before its rows file an empty one", "[recover]")
+{
+    fresh_root();
+    TEST_ASSERT_EQUAL(0, mkdir(root, 0775));
+    char p[200];
+    snprintf(p, sizeof(p), "%s/00000001", root);
+    TEST_ASSERT_EQUAL(0, mkdir(p, 0775));
+    snprintf(p, sizeof(p), "%s/00000001/HEAD.JSN", root);
+    write_raw(p, "{}");
+
+    uint32_t recovered, removed;
+    TEST_ASSERT_EQUAL(ESP_OK, espos_sdlog_recover(root, &recovered, &removed));
+    TEST_ASSERT_EQUAL_UINT32(1, recovered);
+    size_t len = 99;
+    TEST_ASSERT_EQUAL_STRING("", slurp(file_of(1, ESPOS_SDLOG_FILE_ROWS), &len));
+    TEST_ASSERT_EQUAL(0, len);
+    espos_sdlog_info_t info;
+    TEST_ASSERT_EQUAL(ESP_OK, espos_sdlog_info(root, 1, &info));
+    TEST_ASSERT_TRUE(info.closed);
+    TEST_ASSERT_EQUAL_UINT64(0, info.rows);
 }
