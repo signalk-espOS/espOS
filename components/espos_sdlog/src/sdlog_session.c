@@ -26,6 +26,7 @@
 #define SEQ_DIGITS    8
 #define MAX_SEQ       99999999u
 #define LAST_SEQ_FILE "LASTSEQ.TXT"
+#define LAST_SEQ_TMP  "LASTSEQ.TMP"
 
 static const char *const FILE_NAMES[] = {
     [ESPOS_SDLOG_FILE_HEADER] = "HEAD.JSN",
@@ -189,7 +190,7 @@ static esp_err_t write_file_atomic(const char *tmp, const char *dst, const char 
     /* FatFs refuses to rename onto an existing name. Only SYNCED and the
      * root's LASTSEQ.TXT are ever rewritten: losing SYNCED to a power cut
      * here costs a duplicate upload, which the server answers as one, and
-     * losing LASTSEQ.TXT falls back to the highest session on the card. */
+     * LASTSEQ.TXT is read back from LASTSEQ.TMP. */
     unlink(dst);
     if (rename(tmp, dst) != 0) {
         unlink(tmp);
@@ -208,13 +209,10 @@ static esp_err_t write_atomic(const char *root, uint32_t seq, const char *tmp_na
     return write_file_atomic(tmp, dst, a, b, c);
 }
 
-/* The highest number ever handed out under root. Sessions are pruned once
- * delivered, the newest included, so the directories alone would hand a
- * number out twice. */
-static uint32_t read_last_seq(const char *root)
+static uint32_t read_seq_file(const char *root, const char *name)
 {
     char p[PATH_MAX_LEN];
-    snprintf(p, sizeof(p), "%s/" LAST_SEQ_FILE, root);
+    snprintf(p, sizeof(p), "%s/%s", root, name);
     FILE *f = fopen(p, "rb");
     if (!f) {
         return 0;
@@ -227,10 +225,21 @@ static uint32_t read_last_seq(const char *root)
     return (uint32_t)v;
 }
 
+/* The highest number ever handed out under root. Sessions are pruned once
+ * delivered, the newest included, so the directories alone would hand a
+ * number out twice. A power cut between removing LASTSEQ.TXT and renaming
+ * the synced LASTSEQ.TMP onto it leaves only the temporary file, so both
+ * count. */
+static uint32_t read_last_seq(const char *root)
+{
+    uint32_t a = read_seq_file(root, LAST_SEQ_FILE), b = read_seq_file(root, LAST_SEQ_TMP);
+    return a > b ? a : b;
+}
+
 static esp_err_t write_last_seq(const char *root, uint32_t seq)
 {
     char tmp[PATH_MAX_LEN], dst[PATH_MAX_LEN], text[16];
-    snprintf(tmp, sizeof(tmp), "%s/LASTSEQ.TMP", root);
+    snprintf(tmp, sizeof(tmp), "%s/" LAST_SEQ_TMP, root);
     snprintf(dst, sizeof(dst), "%s/" LAST_SEQ_FILE, root);
     snprintf(text, sizeof(text), "%" PRIu32 "\n", seq);
     return write_file_atomic(tmp, dst, text, NULL, NULL);

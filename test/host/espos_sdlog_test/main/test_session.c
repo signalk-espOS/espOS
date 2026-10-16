@@ -361,4 +361,16 @@ TEST_CASE("a pruned session's number is never handed out again", "[prune]")
     TEST_ASSERT_EQUAL(0, unlink(p));
     TEST_ASSERT_EQUAL_UINT32(4, one_session("{}", NULL, 0, NULL));
     TEST_ASSERT_EQUAL_STRING("4\n", slurp(p, NULL));
+
+    /* A power cut between removing LASTSEQ.TXT and renaming the synced
+     * LASTSEQ.TMP onto it leaves only the temporary file, which still counts. */
+    TEST_ASSERT_EQUAL(ESP_OK, espos_sdlog_mark_synced(root, 3, NULL));
+    TEST_ASSERT_EQUAL(ESP_OK, espos_sdlog_mark_synced(root, 4, NULL));
+    TEST_ASSERT_EQUAL(ESP_OK, espos_sdlog_prune(root, 0, &removed));
+    TEST_ASSERT_EQUAL(0, unlink(p));
+    char t[200];
+    snprintf(t, sizeof(t), "%s/LASTSEQ.TMP", root);
+    write_raw(t, "7\n");
+    TEST_ASSERT_EQUAL_UINT32(8, one_session("{}", NULL, 0, NULL));
+    TEST_ASSERT_EQUAL_STRING("8\n", slurp(p, NULL));
 }

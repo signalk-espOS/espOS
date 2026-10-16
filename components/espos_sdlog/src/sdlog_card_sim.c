@@ -8,6 +8,43 @@
 
 #include "espos_sdlog_card.h"
 
+esp_err_t espos_sdlog_card_init(const espos_sdlog_card_cfg_t *cfg)
+{
+    (void)cfg;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+esp_err_t espos_sdlog_card_deinit(void)
+{
+    return ESP_ERR_INVALID_STATE;
+}
+
+esp_err_t espos_sdlog_card_mount_fat(void)
+{
+    return ESP_ERR_INVALID_STATE;
+}
+
+esp_err_t espos_sdlog_card_unmount_fat(void)
+{
+    return ESP_ERR_INVALID_STATE;
+}
+
+esp_err_t espos_sdlog_card_claim(void **card)
+{
+    (void)card;
+    return ESP_ERR_INVALID_STATE;
+}
+
+esp_err_t espos_sdlog_card_release(void)
+{
+    return ESP_ERR_INVALID_STATE;
+}
+
+espos_sdlog_card_state_t espos_sdlog_card_state(void)
+{
+    return ESPOS_SDLOG_CARD_OFF;
+}
+
 esp_err_t espos_sdlog_card_mount(const espos_sdlog_card_cfg_t *cfg)
 {
     (void)cfg;
