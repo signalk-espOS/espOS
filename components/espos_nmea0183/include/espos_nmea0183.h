@@ -222,6 +222,21 @@ typedef struct {
     int64_t unix_ms;
 } espos_nmea0183_zda_t;
 
+/** GST — the receiver's own estimate of its position error, in metres, one
+ * standard deviation. `h_accuracy` combines the latitude and longitude
+ * errors (the root of the sum of their squares), the horizontal accuracy a
+ * logger weights a sounding by. Signal K has no path for it, so it is decoded
+ * but not published. */
+typedef struct {
+    bool has_time, has_rms, has_lat_lon, has_altitude;
+    int64_t time_ms;     /* since midnight UTC */
+    double rms;          /* RMS of the pseudorange residuals, m */
+    double lat_sd;       /* m */
+    double lon_sd;       /* m */
+    double h_accuracy;   /* m: sqrt(lat_sd² + lon_sd²) */
+    double altitude_sd;  /* m */
+} espos_nmea0183_gst_t;
+
 /* Each returns false when `s` is not that sentence or carries nothing usable;
  * the has_ flags say which values it did carry. */
 bool espos_nmea0183_decode_gga(const espos_nmea0183_sentence_t *s, espos_nmea0183_gga_t *out);
@@ -232,6 +247,7 @@ bool espos_nmea0183_decode_depth(const espos_nmea0183_sentence_t *s, espos_nmea0
 bool espos_nmea0183_decode_mtw(const espos_nmea0183_sentence_t *s, espos_nmea0183_mtw_t *out);
 bool espos_nmea0183_decode_vhw(const espos_nmea0183_sentence_t *s, espos_nmea0183_vhw_t *out);
 bool espos_nmea0183_decode_zda(const espos_nmea0183_sentence_t *s, espos_nmea0183_zda_t *out);
+bool espos_nmea0183_decode_gst(const espos_nmea0183_sentence_t *s, espos_nmea0183_gst_t *out);
 
 #ifdef __cplusplus
 }

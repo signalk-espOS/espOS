@@ -221,3 +221,26 @@ TEST_CASE("an RMC with only a variation still reports it", "[rmc]")
     TEST_ASSERT_FALSE(r.valid);
     TEST_ASSERT_TRUE(r.has_variation);
 }
+
+TEST_CASE("GST: the receiver's error estimate, and no accuracy from empty fields", "[gst]")
+{
+    espos_nmea0183_sentence_t s = sentence("$GPGST,172814.0,0.006,0.023,0.020,273.6,0.023,0.020,0.031*6A");
+    espos_nmea0183_gst_t g;
+    TEST_ASSERT_TRUE(espos_nmea0183_decode_gst(&s, &g));
+    TEST_ASSERT_TRUE(g.has_time);
+    TEST_ASSERT_EQUAL_INT64((17 * 3600 + 28 * 60 + 14) * 1000LL, g.time_ms);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-9, 0.006, g.rms);
+    TEST_ASSERT_TRUE(g.has_lat_lon);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-9, 0.023, g.lat_sd);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-9, 0.020, g.lon_sd);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-9, 0.030479501308256, g.h_accuracy); /* sqrt(0.023² + 0.020²) */
+    TEST_ASSERT_DOUBLE_WITHIN(1e-9, 0.031, g.altitude_sd);
+
+    /* A receiver without a fix sends the sentence with nothing in it. */
+    s = sentence("$GNGST,172814.0,,,,,,,*5E");
+    TEST_ASSERT_FALSE(espos_nmea0183_decode_gst(&s, &g));
+    TEST_ASSERT_FALSE(g.has_lat_lon);
+
+    s = sentence("$GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,*47");
+    TEST_ASSERT_FALSE(espos_nmea0183_decode_gst(&s, &g));
+}

@@ -632,3 +632,45 @@ bool espos_nmea0183_decode_zda(const espos_nmea0183_sentence_t *s, espos_nmea018
     }
     return out->has_datetime;
 }
+
+/* Newton's square root: the host tests link no libm, and a few iterations
+ * from a halving start are exact to a double for a receiver's error. */
+static double root(double x)
+{
+    if (x <= 0) {
+        return 0;
+    }
+    double r = x > 1 ? x / 2 : 1;
+    for (int i = 0; i < 60; i++) {
+        double next = (r + x / r) / 2;
+        if (next == r) {
+            break;
+        }
+        r = next;
+    }
+    return r;
+}
+
+/* A deviation is a size: a negative one is a talker bug, not a value. */
+static bool deviation(const espos_nmea0183_sentence_t *s, int i, double *out)
+{
+    return espos_nmea0183_field_double(s, i, out) && *out >= 0;
+}
+
+bool espos_nmea0183_decode_gst(const espos_nmea0183_sentence_t *s, espos_nmea0183_gst_t *out)
+{
+    if (!espos_nmea0183_is(s, "GST") || !out) {
+        return false;
+    }
+    memset(out, 0, sizeof(*out));
+    out->has_time = espos_nmea0183_field_time(s, 0, &out->time_ms);
+    out->has_rms = deviation(s, 1, &out->rms);
+    out->has_lat_lon = deviation(s, 5, &out->lat_sd) && deviation(s, 6, &out->lon_sd);
+    if (out->has_lat_lon) {
+        out->h_accuracy = root(out->lat_sd * out->lat_sd + out->lon_sd * out->lon_sd);
+    } else {
+        out->lat_sd = out->lon_sd = 0;
+    }
+    out->has_altitude = deviation(s, 7, &out->altitude_sd);
+    return out->has_rms || out->has_lat_lon || out->has_altitude;
+}
