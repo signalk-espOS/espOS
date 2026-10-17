@@ -1,6 +1,6 @@
 # Examples
 
-Eleven complete ESP-IDF projects, one per thing a device built on espOS
+Complete ESP-IDF projects, one per thing a device built on espOS
 does. Each lives under the component it shows off, builds on its own for
 every supported target, and replaces a SensESP example — the table says
 which, so a reader coming from SensESP knows where to look.
