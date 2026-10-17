@@ -524,7 +524,14 @@ static esp_err_t recover_one(const char *root, uint32_t seq)
             }
             size += n;
         }
+        bool read_ok = !ferror(f);
         fclose(f);
+        if (!read_ok) {
+            return ESP_FAIL;
+        }
+    } else if (errno != ENOENT) {
+        /* Rows that are there but unreadable stay for a later recovery. */
+        return ESP_FAIL;
     } else {
         /* The power went between the header and the rows file: the session
          * is empty, and an uploader opening ROWS.TXT must find it. */
@@ -545,12 +552,17 @@ static esp_err_t recover_one(const char *root, uint32_t seq)
     espos_sdlog_sha256_t sha;
     espos_sdlog_sha256_init(&sha);
     f = fopen(p, "rb");
-    if (f) {
-        size_t n;
-        while ((n = fread(buf, 1, sizeof(buf), f)) > 0) {
-            espos_sdlog_sha256_update(&sha, buf, n);
-        }
-        fclose(f);
+    if (!f) {
+        return ESP_FAIL;
+    }
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), f)) > 0) {
+        espos_sdlog_sha256_update(&sha, buf, n);
+    }
+    bool read_ok = !ferror(f);
+    fclose(f);
+    if (!read_ok) {
+        return ESP_FAIL;
     }
     char hex[ESPOS_SDLOG_SHA256_HEX_MAX];
     espos_sdlog_sha256_hex(&sha, hex);
