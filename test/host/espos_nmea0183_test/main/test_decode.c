@@ -263,3 +263,33 @@ TEST_CASE("absurd numbers that pass the checksum are refused, not looped on", "[
     s = sentence("$GPGGA,123519.5e300,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,*0A");
     TEST_ASSERT_FALSE(espos_nmea0183_field_time(&s, 0, &ms));
 }
+
+TEST_CASE("only plain decimals are numbers, and only sane ones are values", "[fields][gga][gst]")
+{
+    /* strtod would read 0x10 as 16 and hand GST a made-up accuracy. */
+    espos_nmea0183_sentence_t s = sentence("$GPGST,172814.0,0x10,0.023,0.020,273.6,0x10,0x10,0.031*08");
+    espos_nmea0183_gst_t t;
+    TEST_ASSERT_TRUE(espos_nmea0183_decode_gst(&s, &t));
+    TEST_ASSERT_FALSE(t.has_rms);
+    TEST_ASSERT_FALSE(t.has_lat_lon);
+    TEST_ASSERT_TRUE(t.has_altitude);
+
+    /* 1000 km and more is a talker bug, and its square would not stay finite. */
+    s = sentence("$GPGST,172814.0,0.006,0.023,0.020,273.6,1000000000,1000000000,0.031*69");
+    TEST_ASSERT_TRUE(espos_nmea0183_decode_gst(&s, &t));
+    TEST_ASSERT_FALSE(t.has_lat_lon);
+    TEST_ASSERT_EQUAL_DOUBLE(0, t.h_accuracy);
+
+    espos_nmea0183_gga_t g;
+    s = sentence("$GPGGA,123519,4807.038,N,01131.000,E,1,08,-0.5,545.4,M,46.9,M,,*66");
+    TEST_ASSERT_TRUE(espos_nmea0183_decode_gga(&s, &g));
+    TEST_ASSERT_TRUE(g.has_position);
+    TEST_ASSERT_FALSE(g.has_hdop);
+
+    /* Without a fix the height is as stale as the position. */
+    s = sentence("$GPGGA,123519,4807.038,N,01131.000,E,0,08,-1.0,545.4,M,46.9,M,,*63");
+    TEST_ASSERT_TRUE(espos_nmea0183_decode_gga(&s, &g));
+    TEST_ASSERT_FALSE(g.has_position);
+    TEST_ASSERT_FALSE(g.has_altitude);
+    TEST_ASSERT_FALSE(g.has_geoid);
+}

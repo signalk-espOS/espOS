@@ -256,6 +256,13 @@ bool espos_nmea0183_field_double(const espos_nmea0183_sentence_t *s, int32_t i, 
     if (!f) {
         return false;
     }
+    /* NMEA numbers are plain decimals; strtod would also take hex, exponents
+     * and leading blanks, so "0x10" would read as 16. */
+    for (const char *c = f; *c; c++) {
+        if (!(isdigit((unsigned char)*c) || *c == '.' || *c == '-' || *c == '+')) {
+            return false;
+        }
+    }
     char *end = NULL;
     double v = strtod(f, &end);
     if (end == f || *end != '\0' || !isfinite(v)) {
@@ -436,11 +443,14 @@ bool espos_nmea0183_decode_gga(const espos_nmea0183_sentence_t *s, espos_nmea018
     }
     /* Without a fix a receiver repeats its last position: not a place. Dead
      * reckoning, manual input and a simulator (6 to 8) are not fixes either. */
-    out->has_position = out->quality >= 1 && out->quality <= 5 && position(s, 1, &out->lat, &out->lon);
+    bool fix = out->quality >= 1 && out->quality <= 5;
+    out->has_position = fix && position(s, 1, &out->lat, &out->lon);
     out->has_satellites = field_int(s, 6, &out->satellites) && out->satellites >= 0;
-    out->has_hdop = espos_nmea0183_field_double(s, 7, &out->hdop);
-    out->has_altitude = espos_nmea0183_field_double(s, 8, &out->altitude);
-    out->has_geoid = espos_nmea0183_field_double(s, 10, &out->geoid_separation);
+    out->has_hdop = espos_nmea0183_field_double(s, 7, &out->hdop) && out->hdop >= 0;
+    /* The height belongs to the fix: without one it is as stale as the
+     * repeated position. */
+    out->has_altitude = fix && espos_nmea0183_field_double(s, 8, &out->altitude);
+    out->has_geoid = fix && espos_nmea0183_field_double(s, 10, &out->geoid_separation);
     return out->has_time || out->has_position || out->has_satellites;
 }
 
@@ -657,10 +667,11 @@ static double root(double x)
     return r;
 }
 
-/* A deviation is a size: a negative one is a talker bug, not a value. */
+/* A deviation is a size: a negative one is a talker bug, not a value, and so
+ * is one past 1000 km, which would also overflow h_accuracy's square. */
 static bool deviation(const espos_nmea0183_sentence_t *s, int i, double *out)
 {
-    return espos_nmea0183_field_double(s, i, out) && *out >= 0;
+    return espos_nmea0183_field_double(s, i, out) && *out >= 0 && *out < 1e6;
 }
 
 bool espos_nmea0183_decode_gst(const espos_nmea0183_sentence_t *s, espos_nmea0183_gst_t *out)

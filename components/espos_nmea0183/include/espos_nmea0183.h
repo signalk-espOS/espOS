@@ -119,7 +119,8 @@ void espos_nmea0183_reader_feed(espos_nmea0183_reader_t *r, const uint8_t *data,
 /* Fields                                                                   */
 /* ------------------------------------------------------------------------ */
 
-/** Field `i` as a number. False when it is missing, empty or not a number. */
+/** Field `i` as a number. False when it is missing, empty or not a plain
+ * decimal (no hex, exponent or blanks). */
 bool espos_nmea0183_field_double(const espos_nmea0183_sentence_t *s, int32_t i, double *out);
 
 /** Field `i` as its first character; '\0' when missing or empty. */
@@ -140,9 +141,10 @@ int64_t espos_nmea0183_unix_ms(int32_t year, int32_t month, int32_t day, int64_t
 /* Decoded sentences, in Signal K units                                     */
 /* ------------------------------------------------------------------------ */
 
-/** GGA — fix data. Position is reported only when the fix quality says the
- * receiver has one (1 to 5); a receiver without a fix repeats its last
- * position, and dead reckoning, manual input and a simulator are not fixes. */
+/** GGA — fix data. Position, altitude and geoid separation are reported only
+ * when the fix quality says the receiver has one (1 to 5); a receiver without
+ * a fix repeats its last position, and dead reckoning, manual input and a
+ * simulator are not fixes. */
 typedef struct {
     bool has_time, has_position, has_satellites, has_hdop, has_altitude, has_geoid;
     int64_t time_ms;         /* since midnight UTC */
