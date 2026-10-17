@@ -18,8 +18,9 @@ if(target STREQUAL "esp32p4" OR target STREQUAL "esp32s3")
         PRIV_REQUIRES espressif__esp_tinyusb esp_driver_sdmmc sdmmc fatfs
                       nvs_flash esp_timer)
     # The host's writes reach the card through esp_tinyusb's own call to
-    # sdmmc_write_sectors(), deferred to its task; wrapping that call is the one place every write can be seen and kept
-    # apart from espOS's reads (src/card_lock.h). The -u pulls card_lock.cpp
+    # sdmmc_write_sectors(), deferred to its task. Wrapping that call is the
+    # one place every write can be seen and kept apart from espOS's reads
+    # (src/card_lock.h). The -u pulls card_lock.cpp
     # in even when nothing calls into it, because once the wrap is on, every
     # sdmmc_write_sectors() in the firmware needs __wrap_ to exist.
     target_link_libraries(${COMPONENT_LIB} INTERFACE

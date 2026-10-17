@@ -31,6 +31,10 @@ a small or shared machine use the locked wrapper instead of a bare build:
 *development* signing key with a warning; that is expected
 ([OTA → Signing key](ota.md#signing-key)).
 
+`usb_storage_follow` builds only for `esp32p4` and `esp32s3`, the targets with
+the USB OTG port mass storage needs, and its `main.cpp` is C++ because the
+follower API is.
+
 `from_registry` is the exception, deliberately: it has no prologue, so nothing
 generates a key for it and the build stops until you run
 `espsecure generate-signing-key --version 2 --scheme rsa3072 secure_boot_signing_key.pem`
