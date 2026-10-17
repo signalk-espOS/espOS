@@ -28,7 +28,7 @@ extern "C" {
 #define ESPOS_SK_VALUE_MAX   256
 #define ESPOS_SK_PENDING_MAX 32
 /* "vessels.urn:mrn:signalk:uuid:" plus a 36-character UUID is 65. */
-#define ESPOS_SK_CONTEXT_MAX  80
+#define ESPOS_SK_CONTEXT_MAX 80
 /* Distinct contexts one batch window holds before it closes early. */
 #define ESPOS_SK_CONTEXTS_MAX 4
 
