@@ -150,8 +150,10 @@ Pipeline (`sk_delta.c`, pure C, unit-tested; `sk_ws.c` = the transport
 task):
 
 1. **Batching window** (`sk.batch_ms`, default 100 ms): everything
-   published inside one window becomes one delta message with one update;
-   a path published twice in a window keeps the last value. Numbers use
+   published inside one window becomes one delta message with one update
+   per context (one message for a device that publishes only for
+   `vessels.self`); a path published twice in a window for the same
+   context keeps the last value. Numbers use
    the shortest round-trip representation.
 2. **Ring buffer** while the stream is down (`sk.buffer_msgs` /
    `sk.buffer_kb`, default 128 messages / 32 KiB): oldest messages are

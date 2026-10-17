@@ -124,8 +124,17 @@ esp_err_t espos_sk_store_vessel_uuid(char uuid[40])
         ESP_LOGE(TAG, "cannot open state namespace: %s; no vessel UUID", esp_err_to_name(err));
         return err;
     }
-    get_str(h, "vessel_id", uuid, 40);
-    if (uuid[0] == '\0') {
+    size_t len = 40;
+    err = nvs_get_str(h, "vessel_id", uuid, &len);
+    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
+        /* A vessel that exists but cannot be read now must not be replaced:
+         * a new UUID written over it would split the boat's data for good. */
+        ESP_LOGE(TAG, "cannot read the vessel UUID: %s", esp_err_to_name(err));
+        uuid[0] = '\0';
+        nvs_close(h);
+        return err;
+    }
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
         make_uuid(uuid);
         err = nvs_set_str(h, "vessel_id", uuid);
         if (err == ESP_OK) {
