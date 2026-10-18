@@ -63,6 +63,16 @@ esp_err_t espos_sk_delta_publish(espos_sk_delta_t *d, const char *path, const ch
  * backslash or control character. */
 esp_err_t espos_sk_delta_publish_ctx(espos_sk_delta_t *d, const char *context, const char *path,
                                      const char *value_json, uint32_t now_ms);
+/** The same, dated `at_ms` (unix ms) rather than when its batch closes; 0 is
+ * the plain call. A context's values go out in one message with an update per
+ * timestamp, in the order each timestamp was first published, and a dated
+ * update is sent whatever the clock set with espos_sk_delta_set_clock().
+ * Within a window a path keeps its last value per timestamp; publishing it
+ * again after a later update of its context closes the window instead, so
+ * the order values reach the server is the order they were published.
+ * ESP_ERR_INVALID_ARG for at_ms below 0 or past the year 9999. */
+esp_err_t espos_sk_delta_publish_at(espos_sk_delta_t *d, const char *context, const char *path,
+                                    const char *value_json, int64_t at_ms, uint32_t now_ms);
 
 /** Sender side. Returns a malloc'ed message to transmit now, or NULL.
  * connected=false only batches into the ring. */
