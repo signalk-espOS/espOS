@@ -153,9 +153,10 @@ short dropout, or a reading the sensor timestamped itself. `at_ms` 0 is the
 plain `_ctx` call. The update carries that timestamp whether or not
 `sk.timestamps` is on or the device knows the time. A context's values in a
 window go out as one delta with an update per timestamp, in the order each
-was first published, and publishing a path again after a later update of
-the same context closes the window rather than move the newer value in
-front of it, so values reach the server in the order they were published.
+was first published. A value that would join an update sent ahead of an
+older value of its path closes the window instead, so each path's values
+reach the server in the order they were published; values of different
+paths may be reordered.
 The caveats above still hold. History stores may not use the timestamp
 either: signalk-questdb stamps rows with the time they arrive, on purpose,
 and signalk-to-influxdb2 does too by default (`useSKTimestamp`), and skips

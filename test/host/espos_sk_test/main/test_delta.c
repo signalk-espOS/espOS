@@ -492,3 +492,48 @@ TEST_CASE("dated values: the timestamp must be one ISO 8601 can write", "[delta]
     free(m);
     espos_sk_delta_destroy(d);
 }
+
+TEST_CASE("dated values: a new path in an earlier update cannot overtake its older value", "[delta]")
+{
+    espos_sk_delta_t *d = mk(8, 0, 20);
+    TEST_ESP_OK(espos_sk_delta_publish_at(d, DINGHY, "x.y", "1", T1, 1000));
+    TEST_ESP_OK(espos_sk_delta_publish_ctx(d, DINGHY, "a.b", "\"old\"", 1001));
+    TEST_ESP_OK(espos_sk_delta_publish_at(d, DINGHY, "x.z", "2", T1, 1002)); /* other path: joins */
+    espos_sk_delta_stats_t st;
+    espos_sk_delta_stats(d, &st);
+    TEST_ASSERT_EQUAL(0, st.built);
+    /* Joining the T1 update would send "new" ahead of "old". */
+    TEST_ESP_OK(espos_sk_delta_publish_at(d, DINGHY, "a.b", "\"new\"", T1, 1003));
+    espos_sk_delta_stats(d, &st);
+    TEST_ASSERT_EQUAL(1, st.built);
+    TEST_ASSERT_EQUAL(1, st.pending);
+    char *m = espos_sk_delta_take(d, 1050, true);
+    TEST_ASSERT_NOT_NULL(m);
+    TEST_ASSERT_NOT_NULL(strstr(m, "\"value\":\"old\""));
+    TEST_ASSERT_NULL(strstr(m, "\"value\":\"new\""));
+    free(m);
+    m = espos_sk_delta_take(d, 1200, true);
+    TEST_ASSERT_NOT_NULL(m);
+    TEST_ASSERT_NOT_NULL(strstr(m, "\"value\":\"new\""));
+    free(m);
+    espos_sk_delta_destroy(d);
+}
+
+TEST_CASE("dated values: an entry of an earlier update does not close the window", "[delta]")
+{
+    espos_sk_delta_t *d = mk(8, 0, 20);
+    TEST_ESP_OK(espos_sk_delta_publish_ctx(d, DINGHY, "a.b", "1", 1000));
+    TEST_ESP_OK(espos_sk_delta_publish_at(d, DINGHY, "x.y", "2", T1, 1001));
+    TEST_ESP_OK(espos_sk_delta_publish_ctx(d, DINGHY, "a.b", "3", 1002)); /* its update is sent first: replaces */
+    TEST_ESP_OK(espos_sk_delta_publish_at(d, DINGHY, "a.b", "4", T1, 1003)); /* after the undated one: joins */
+    espos_sk_delta_stats_t st;
+    espos_sk_delta_stats(d, &st);
+    TEST_ASSERT_EQUAL(0, st.built);
+    TEST_ASSERT_EQUAL(3, st.pending);
+    char *m = espos_sk_delta_take(d, 1100, true);
+    TEST_ASSERT_NOT_NULL(m);
+    TEST_ASSERT_NOT_NULL(strstr(m, "\"value\":3}]},{\"timestamp\""));
+    TEST_ASSERT_NOT_NULL(strstr(m, "\"value\":4}]}]}"));
+    free(m);
+    espos_sk_delta_destroy(d);
+}

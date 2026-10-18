@@ -69,7 +69,8 @@ esp_err_t espos_sk_delta_publish_ctx(espos_sk_delta_t *d, const char *context, c
  * update is sent whatever the clock set with espos_sk_delta_set_clock().
  * Within a window a path keeps its last value per timestamp; publishing it
  * again after a later update of its context closes the window instead, so
- * the order values reach the server is the order they were published.
+ * each path's values reach the server in the order they were published;
+ * values of different paths may be reordered.
  * ESP_ERR_INVALID_ARG for at_ms below 0 or past the year 9999. */
 esp_err_t espos_sk_delta_publish_at(espos_sk_delta_t *d, const char *context, const char *path,
                                     const char *value_json, int64_t at_ms, uint32_t now_ms);

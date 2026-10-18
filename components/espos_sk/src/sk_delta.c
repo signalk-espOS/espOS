@@ -226,18 +226,37 @@ esp_err_t espos_sk_delta_publish_ctx(espos_sk_delta_t *d, const char *context, c
     return espos_sk_delta_publish_at(d, context, path, value_json, 0, now_ms);
 }
 
-/* True when pending[i]'s value may be replaced in place: no update for its
- * context opened after its own. Replacing it otherwise would move the newer
- * value in front of an update published after it, and the server keeps
- * whichever value of a path it receives last. */
-static bool replaceable(const espos_sk_delta_t *d, size_t i)
+/* Index of the entry that opens pending[j]'s update: the first of its context
+ * with its at_ms. build_message() sends updates in this order. */
+static size_t update_head(const espos_sk_delta_t *d, size_t j)
 {
-    for (size_t j = i + 1; j < d->pending_n; j++) {
-        if (d->pending[j].ctx == d->pending[i].ctx && d->pending[j].at_ms != d->pending[i].at_ms) {
-            return false;
+    for (size_t i = 0; i < j; i++) {
+        if (d->pending[i].ctx == d->pending[j].ctx && d->pending[i].at_ms == d->pending[j].at_ms) {
+            return i;
         }
     }
-    return true;
+    return j;
+}
+
+/* True when a value for `path` dated `at_ms` would join an update that is sent
+ * ahead of one already holding `path` for the same context: the newer value
+ * would reach the server first, and the server keeps the last value of a path
+ * it receives. */
+static bool overtakes(const espos_sk_delta_t *d, int ctx, int64_t at_ms, const char *path)
+{
+    size_t h = d->pending_n;
+    for (size_t i = 0; i < d->pending_n && h == d->pending_n; i++) {
+        if (d->pending[i].ctx == ctx && d->pending[i].at_ms == at_ms) {
+            h = i;
+        }
+    }
+    for (size_t j = h + 1; j < d->pending_n; j++) {
+        if (d->pending[j].ctx == ctx && d->pending[j].at_ms != at_ms && strcmp(d->pending[j].path, path) == 0 &&
+            update_head(d, j) > h) {
+            return true;
+        }
+    }
+    return false;
 }
 
 esp_err_t espos_sk_delta_publish_at(espos_sk_delta_t *d, const char *context, const char *path, const char *value_json,
@@ -257,14 +276,10 @@ esp_err_t espos_sk_delta_publish_at(espos_sk_delta_t *d, const char *context, co
         return ESP_ERR_INVALID_SIZE;
     }
     int ctx = context_slot(d, context);
-    bool reorder = false;
-    if (ctx >= 0) {
+    bool reorder = ctx >= 0 && overtakes(d, ctx, at_ms, path);
+    if (ctx >= 0 && !reorder) {
         for (size_t i = 0; i < d->pending_n; i++) {
             if (d->pending[i].ctx == ctx && d->pending[i].at_ms == at_ms && strcmp(d->pending[i].path, path) == 0) {
-                if (!replaceable(d, i)) {
-                    reorder = true;
-                    break;
-                }
                 strcpy(d->pending[i].value, value_json); /* newest wins within the window */
                 return ESP_OK;
             }
@@ -288,21 +303,10 @@ esp_err_t espos_sk_delta_publish_at(espos_sk_delta_t *d, const char *context, co
 
 static size_t iso8601(int64_t unix_ms, char *buf, size_t size);
 
-/* Whether pending[i] opens an update: the first value of its context with its
- * at_ms. */
-static bool update_head(const espos_sk_delta_t *d, size_t i)
-{
-    for (size_t j = 0; j < i; j++) {
-        if (d->pending[j].ctx == d->pending[i].ctx && d->pending[j].at_ms == d->pending[i].at_ms) {
-            return false;
-        }
-    }
-    return true;
-}
-
 /* One message for context `ctx`, with an update per distinct at_ms in the
  * order each was first published: the server applies updates in array order,
- * so a caller's order is the order its values land in. The values with no
+ * and publish refuses to let a path's newer value join an update sent ahead of
+ * its older one, so each path's values land in the order they were published. The values with no
  * time of their own share the update the batch's timestamp is written into at
  * take(); *stamp_at is where it goes, 0 when every value brought its own. */
 static char *build_message(espos_sk_delta_t *d, uint8_t ctx, size_t *stamp_at)
@@ -312,7 +316,7 @@ static char *build_message(espos_sk_delta_t *d, uint8_t ctx, size_t *stamp_at)
     for (size_t i = 0; i < d->pending_n; i++) {
         if (d->pending[i].ctx == ctx) {
             need += 24 + strlen(d->pending[i].path) + strlen(d->pending[i].value);
-            if (update_head(d, i)) {
+            if (update_head(d, i) == i) {
                 need += 80 + strlen(d->label);
             }
         }
@@ -324,7 +328,7 @@ static char *build_message(espos_sk_delta_t *d, uint8_t ctx, size_t *stamp_at)
     int n = snprintf(m, need, "{\"context\":\"%s\",\"updates\":[", d->ctx[ctx]);
     bool first_update = true;
     for (size_t i = 0; i < d->pending_n; i++) {
-        if (d->pending[i].ctx != ctx || !update_head(d, i)) {
+        if (d->pending[i].ctx != ctx || update_head(d, i) != i) {
             continue;
         }
         int64_t at = d->pending[i].at_ms;
