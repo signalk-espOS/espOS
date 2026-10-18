@@ -156,7 +156,10 @@ window go out as one delta with an update per timestamp, in the order each
 was first published. A value that would join an update sent ahead of an
 older value of its path closes the window instead, so each path's values
 reach the server in the order they were published; values of different
-paths may be reordered.
+paths may be reordered. A path alternating between dated and current values
+therefore costs a message per change, which is one more reason to finish a
+replay before current values resume. A time before 2000 is refused
+(`ESP_ERR_INVALID_ARG`): it is uptime or unix seconds passed by mistake.
 The caveats above still hold. History stores may not use the timestamp
 either: signalk-questdb stamps rows with the time they arrive, on purpose,
 and signalk-to-influxdb2 does too by default (`useSKTimestamp`), and skips

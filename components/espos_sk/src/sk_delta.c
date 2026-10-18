@@ -12,10 +12,14 @@ typedef struct {
     char value[ESPOS_SK_VALUE_MAX];
     int64_t at_ms; /* unix ms the caller measured it at; 0 = dated when the batch closes */
     uint8_t ctx;   /* index into espos_sk_delta.ctx, in order of first publish */
+    uint8_t upd;   /* the update it goes out in; updates are numbered in order of first publish */
 } pending_t;
 
 #define SELF_CONTEXT "vessels.self"
 
+/* 2000-01-01T00:00:00.000Z. Anything earlier is uptime or unix seconds passed
+ * by mistake, which would otherwise be sent dated 1970. */
+#define AT_MS_MIN 946684800000LL
 /* 9999-12-31T23:59:59.999Z, the last instant iso8601() can write. */
 #define AT_MS_MAX 253402300799999LL
 
@@ -42,6 +46,7 @@ struct espos_sk_delta {
      * difference is 2.5 KB of RAM on a classic ESP32. */
     char ctx[ESPOS_SK_CONTEXTS_MAX][ESPOS_SK_CONTEXT_MAX];
     size_t ctx_n;
+    size_t upd_n; /* updates the open window holds, all contexts together */
     uint32_t pending_since_ms;
     queued_t *ring;           /* messages, oldest at head */
     size_t head, count;
@@ -50,6 +55,11 @@ struct espos_sk_delta {
     bool draining;            /* backlog existed when we started sending */
     int64_t (*wall_ms)(void *arg); /* wall clock; NULL or returning 0 = no timestamps */
     void *wall_arg;
+    /* The last message take() handed out with its undated update still
+     * undated (no clock yet), so a requeue keeps it stampable. */
+    const char *unstamped;
+    size_t unstamped_at;
+    uint32_t unstamped_batch_ms;
     espos_sk_delta_stats_t st;
 };
 
@@ -156,9 +166,10 @@ static char *ring_pop(espos_sk_delta_t *d, uint32_t *batch_ms, size_t *stamp_at)
     return m;
 }
 
-/* A requeued message has already had its timestamp written in, so it goes back
- * as it is: its batch_ms is irrelevant from here on, and re-stamping it on the
- * next take would only move the time of a measurement that did not move. */
+/* A requeued message that had its timestamp written in goes back as it is:
+ * re-stamping it on the next take would only move the time of a measurement
+ * that did not move. One taken before the clock was known goes back with its
+ * offset and batch time, so the next take can still date it. */
 void espos_sk_delta_requeue(espos_sk_delta_t *d, char *msg)
 {
     if (!msg) {
@@ -171,9 +182,11 @@ void espos_sk_delta_requeue(espos_sk_delta_t *d, char *msg)
         return;
     }
     d->head = (d->head + d->cfg.max_msgs - 1) % d->cfg.max_msgs;
+    bool undated = msg == d->unstamped;
     d->ring[d->head].msg = msg;
-    d->ring[d->head].batch_ms = 0;
-    d->ring[d->head].stamp_at = 0;
+    d->ring[d->head].batch_ms = undated ? d->unstamped_batch_ms : 0;
+    d->ring[d->head].stamp_at = undated ? d->unstamped_at : 0;
+    d->unstamped = NULL;
     d->count++;
     d->bytes += strlen(msg);
     d->st.taken--;
@@ -226,33 +239,28 @@ esp_err_t espos_sk_delta_publish_ctx(espos_sk_delta_t *d, const char *context, c
     return espos_sk_delta_publish_at(d, context, path, value_json, 0, now_ms);
 }
 
-/* Index of the entry that opens pending[j]'s update: the first of its context
- * with its at_ms. build_message() sends updates in this order. */
-static size_t update_head(const espos_sk_delta_t *d, size_t j)
+/* The update a value of context `ctx` dated `at_ms` joins, or -1 when it would
+ * open one. */
+static int update_of(const espos_sk_delta_t *d, int ctx, int64_t at_ms)
 {
-    for (size_t i = 0; i < j; i++) {
-        if (d->pending[i].ctx == d->pending[j].ctx && d->pending[i].at_ms == d->pending[j].at_ms) {
-            return i;
+    for (size_t i = 0; i < d->pending_n; i++) {
+        if (d->pending[i].ctx == ctx && d->pending[i].at_ms == at_ms) {
+            return d->pending[i].upd;
         }
     }
-    return j;
+    return -1;
 }
 
-/* True when a value for `path` dated `at_ms` would join an update that is sent
- * ahead of one already holding `path` for the same context: the newer value
- * would reach the server first, and the server keeps the last value of a path
- * it receives. */
-static bool overtakes(const espos_sk_delta_t *d, int ctx, int64_t at_ms, const char *path)
+/* True when a value for `path` would join update `upd` while a later update of
+ * the same context already holds `path`: the newer value would reach the
+ * server first, and the server keeps the last value of a path it receives. */
+static bool overtakes(const espos_sk_delta_t *d, int ctx, int upd, const char *path)
 {
-    size_t h = d->pending_n;
-    for (size_t i = 0; i < d->pending_n && h == d->pending_n; i++) {
-        if (d->pending[i].ctx == ctx && d->pending[i].at_ms == at_ms) {
-            h = i;
-        }
+    if (upd < 0) {
+        return false; /* a new update goes out last */
     }
-    for (size_t j = h + 1; j < d->pending_n; j++) {
-        if (d->pending[j].ctx == ctx && d->pending[j].at_ms != at_ms && strcmp(d->pending[j].path, path) == 0 &&
-            update_head(d, j) > h) {
+    for (size_t j = 0; j < d->pending_n; j++) {
+        if (d->pending[j].ctx == ctx && d->pending[j].upd > upd && strcmp(d->pending[j].path, path) == 0) {
             return true;
         }
     }
@@ -262,7 +270,7 @@ static bool overtakes(const espos_sk_delta_t *d, int ctx, int64_t at_ms, const c
 esp_err_t espos_sk_delta_publish_at(espos_sk_delta_t *d, const char *context, const char *path, const char *value_json,
                                     int64_t at_ms, uint32_t now_ms)
 {
-    if (!d || !path || !*path || !value_json || !*value_json || at_ms < 0 || at_ms > AT_MS_MAX) {
+    if (!d || !path || !*path || !value_json || !*value_json || (at_ms && (at_ms < AT_MS_MIN || at_ms > AT_MS_MAX))) {
         return ESP_ERR_INVALID_ARG;
     }
     if (!context) {
@@ -276,7 +284,7 @@ esp_err_t espos_sk_delta_publish_at(espos_sk_delta_t *d, const char *context, co
         return ESP_ERR_INVALID_SIZE;
     }
     int ctx = context_slot(d, context);
-    bool reorder = ctx >= 0 && overtakes(d, ctx, at_ms, path);
+    bool reorder = ctx >= 0 && overtakes(d, ctx, update_of(d, ctx, at_ms), path);
     if (ctx >= 0 && !reorder) {
         for (size_t i = 0; i < d->pending_n; i++) {
             if (d->pending[i].ctx == ctx && d->pending[i].at_ms == at_ms && strcmp(d->pending[i].path, path) == 0) {
@@ -294,8 +302,10 @@ esp_err_t espos_sk_delta_publish_at(espos_sk_delta_t *d, const char *context, co
     }
     strcpy(d->pending[d->pending_n].path, path);
     strcpy(d->pending[d->pending_n].value, value_json);
+    int upd = update_of(d, ctx, at_ms);
     d->pending[d->pending_n].at_ms = at_ms;
     d->pending[d->pending_n].ctx = (uint8_t)ctx;
+    d->pending[d->pending_n].upd = (uint8_t)(upd >= 0 ? upd : (int)d->upd_n++);
     d->pending_n++;
     d->st.pending = d->pending_n;
     return ESP_OK;
@@ -303,22 +313,38 @@ esp_err_t espos_sk_delta_publish_at(espos_sk_delta_t *d, const char *context, co
 
 static size_t iso8601(int64_t unix_ms, char *buf, size_t size);
 
+/* The first entry of update `upd`, or -1 when context `ctx` has none in it. */
+static int update_first(const espos_sk_delta_t *d, uint8_t ctx, size_t upd)
+{
+    for (size_t i = 0; i < d->pending_n; i++) {
+        if (d->pending[i].ctx == ctx && d->pending[i].upd == upd) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
 /* One message for context `ctx`, with an update per distinct at_ms in the
  * order each was first published: the server applies updates in array order,
- * and publish refuses to let a path's newer value join an update sent ahead of
- * its older one, so each path's values land in the order they were published. The values with no
- * time of their own share the update the batch's timestamp is written into at
- * take(); *stamp_at is where it goes, 0 when every value brought its own. */
+ * and publish keeps a path's newer value out of an update sent ahead of its
+ * older one, so each path's values land in the order they were published.
+ * The values with no time of their own share the update the batch's
+ * timestamp is written into at take(); *stamp_at is where it goes, 0 when
+ * every value brought its own. */
 static char *build_message(espos_sk_delta_t *d, uint8_t ctx, size_t *stamp_at)
 {
     *stamp_at = 0;
+    /* An update's frame with its timestamp is 77 bytes plus the label; the
+     * rest is slack, because an underestimate here is a heap overflow. */
     size_t need = 32 + strlen(d->ctx[ctx]);
     for (size_t i = 0; i < d->pending_n; i++) {
         if (d->pending[i].ctx == ctx) {
             need += 24 + strlen(d->pending[i].path) + strlen(d->pending[i].value);
-            if (update_head(d, i) == i) {
-                need += 80 + strlen(d->label);
-            }
+        }
+    }
+    for (size_t u = 0; u < d->upd_n; u++) {
+        if (update_first(d, ctx, u) >= 0) {
+            need += 128 + strlen(d->label);
         }
     }
     char *m = malloc(need);
@@ -327,11 +353,12 @@ static char *build_message(espos_sk_delta_t *d, uint8_t ctx, size_t *stamp_at)
     }
     int n = snprintf(m, need, "{\"context\":\"%s\",\"updates\":[", d->ctx[ctx]);
     bool first_update = true;
-    for (size_t i = 0; i < d->pending_n; i++) {
-        if (d->pending[i].ctx != ctx || update_head(d, i) != i) {
+    for (size_t u = 0; u < d->upd_n; u++) {
+        int f = update_first(d, ctx, u);
+        if (f < 0) {
             continue;
         }
-        int64_t at = d->pending[i].at_ms;
+        int64_t at = d->pending[f].at_ms;
         n += snprintf(m + n, need - n, "%s{", first_update ? "" : ",");
         first_update = false;
         char iso[25];
@@ -342,8 +369,8 @@ static char *build_message(espos_sk_delta_t *d, uint8_t ctx, size_t *stamp_at)
         }
         n += snprintf(m + n, need - n, "\"source\":{\"label\":\"%s\"},\"values\":[", d->label);
         bool first = true;
-        for (size_t j = i; j < d->pending_n; j++) {
-            if (d->pending[j].ctx != ctx || d->pending[j].at_ms != at) {
+        for (size_t j = (size_t)f; j < d->pending_n; j++) {
+            if (d->pending[j].ctx != ctx || d->pending[j].upd != u) {
                 continue;
             }
             n += snprintf(m + n, need - n, "%s{\"path\":\"%s\",\"value\":%s}", first ? "" : ",", d->pending[j].path,
@@ -385,6 +412,7 @@ void espos_sk_delta_flush(espos_sk_delta_t *d, uint32_t now_ms)
     }
     d->pending_n = 0;
     d->ctx_n = 0;
+    d->upd_n = 0;
     d->st.pending = 0;
 }
 
@@ -509,8 +537,15 @@ char *espos_sk_delta_take(espos_sk_delta_t *d, uint32_t now_ms, bool connected)
     d->st.taken++;
     d->st.buffered = d->count;
     d->st.buffered_bytes = d->bytes;
+    d->unstamped = NULL;
     if (m && stamp_at) {
-        m = stamp(d, m, now_ms, batch_ms, stamp_at);
+        char *out = stamp(d, m, now_ms, batch_ms, stamp_at);
+        if (out == m) {
+            d->unstamped = m;
+            d->unstamped_at = stamp_at;
+            d->unstamped_batch_ms = batch_ms;
+        }
+        m = out;
     }
     return m;
 }

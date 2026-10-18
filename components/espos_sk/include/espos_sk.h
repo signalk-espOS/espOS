@@ -102,8 +102,8 @@ esp_err_t espos_sk_publish_json_ctx(const char *context, const char *path, const
  * a value that waited on the device before it could be sent: a sample held
  * through a short dropout, a reading the sensor dated itself. 0 is the plain
  * _ctx call. The update carries this timestamp whatever `sk.timestamps` says
- * and whether or not the device knows the time; ESP_ERR_INVALID_ARG for a
- * negative one or one past the year 9999. Each path's values reach the server
+ * and whether or not the device knows the time; ESP_ERR_INVALID_ARG for one
+ * before 2000 (uptime or unix seconds by mistake) or past the year 9999. Each path's values reach the server
  * in the order they were published; values of different paths may be
  * reordered.
  *

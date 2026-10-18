@@ -537,3 +537,34 @@ TEST_CASE("dated values: an entry of an earlier update does not close the window
     free(m);
     espos_sk_delta_destroy(d);
 }
+
+TEST_CASE("dated values: uptime or unix seconds are refused, not sent as 1970", "[delta]")
+{
+    espos_sk_delta_t *d = mk(8, 0, 20);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, espos_sk_delta_publish_at(d, DINGHY, "a.b", "1", 3600000, 0));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, espos_sk_delta_publish_at(d, DINGHY, "a.b", "1", 1788775933LL, 0));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, espos_sk_delta_publish_at(d, DINGHY, "a.b", "1", 946684799999LL, 0));
+    TEST_ESP_OK(espos_sk_delta_publish_at(d, DINGHY, "a.b", "1", 946684800000LL, 0));
+    espos_sk_delta_destroy(d);
+}
+
+TEST_CASE("timestamps: a message requeued before the clock was set is dated on retry", "[delta]")
+{
+    espos_sk_delta_t *d = mk(8, 0, 20);
+    espos_sk_delta_set_clock(d, fake_wall, NULL);
+    s_wall_ms = 0;
+    TEST_ESP_OK(espos_sk_delta_publish_at(d, DINGHY, "a.b", "1", T1 - 60000, 1000));
+    TEST_ESP_OK(espos_sk_delta_publish_ctx(d, DINGHY, "a.b", "2", 1000));
+    char *m = espos_sk_delta_take(d, 1100, true);
+    TEST_ASSERT_NOT_NULL(m);
+    TEST_ASSERT_NULL(strstr(strstr(m, "timestamp") + 1, "timestamp")); /* only the dated update */
+    espos_sk_delta_requeue(d, m); /* the send failed */
+    /* The clock arrives one second later; the batch closed at mono 1000. */
+    s_wall_ms = T1 + 1100;
+    m = espos_sk_delta_take(d, 2100, true);
+    TEST_ASSERT_NOT_NULL(m);
+    TEST_ASSERT_NOT_NULL(strstr(m, "]},{\"timestamp\":\"2026-09-07T10:12:13.456Z\",\"source\":"));
+    TEST_ASSERT_NOT_NULL(strstr(m, "\"timestamp\":\"2026-09-07T10:11:13.456Z\""));
+    free(m);
+    espos_sk_delta_destroy(d);
+}
