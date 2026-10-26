@@ -44,6 +44,6 @@ dependencies:
   # a chartplotter and its recordings, and a minor arriving on its own would
   # change that with nobody looking.
   espressif/esp_tinyusb:
-    version: "==2.4.0"
+    version: "==3.0.0"
     rules:
       - if: "target in [esp32s3, esp32p4]"
