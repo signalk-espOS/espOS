@@ -125,7 +125,7 @@ dependencies:
       type: service
     version: 1.8.0
   espressif/mdns:
-    component_hash: b5b30022c46302eab89c1d2e3b6fb5918a627563a7462f0ee284b22b9a934967
+    component_hash: ef0766474b37459f6ad22461e453a8713e780e831a7c993b16919d817988dff6
     dependencies:
     - name: idf
       require: private
@@ -133,7 +133,7 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.14.0
+    version: 1.14.1
   espressif/tinyusb:
     component_hash: 16c8d774dab1f484d3e0c0f61105624d2424bbae864efd19818baf7b451b41e7
     dependencies:
@@ -272,7 +272,7 @@ dependencies:
     - name: espressif/mdns
       rules:
       - if: target != linux
-      version: ==1.14.0
+      version: ==1.14.1
     source:
       path: components/espos_net
       type: local
@@ -408,6 +408,6 @@ direct_dependencies:
 - signalk-espos/espos_sk_flow
 - signalk-espos/espos_time
 - signalk-espos/espos_wifi
-manifest_hash: 3fb9b0292eb49162fa2f57682727d16ab6d1b121e4a6a2a50bac62f0c2907eb1
+manifest_hash: 1b81681101119c1a3a6761aafa6b31a607e71e30e6c026c522b0f031c24212fb
 target: esp32s3
 version: 3.0.0
