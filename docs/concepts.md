@@ -53,17 +53,17 @@ void app_main(void) { ESP_ERROR_CHECK(espos_start(NULL)); /* your application */
 |---|---|---|
 | 1 | `espos_log_init()` | So the boot itself shows up in `/api/v1/logs`. |
 | 2 | `espos_config_init()` | Everything after this reads its settings. |
-| 3 | `espos_health_policy_start()` | The device watchdog, armed before anything can hang ([health](health.md)). `espos_core` also starts listening for `NETWORK_UP` and `NETWORK_DOWN` here, to raise and clear the `netDown` warning. Then `espos_init()` posts `CONFIG_READY`. |
+| 3 | `espos_health_policy_start()` | The device watchdog, armed before anything can hang ([health](health.md)), unless it is turned off (below) or fails to start. `espos_core` also starts listening for `NETWORK_UP` and `NETWORK_DOWN` here, to raise and clear the `netDown` warning. Then `espos_init()` posts `CONFIG_READY`. |
 | | your `before_network` hook | For anything that must exist before someone connects, such as a display that shows the setup network's name. |
 | 4 | `espos_httpd_start()` | The setup page has to be there as soon as there is a link or a setup network. Posts `HTTPD_STARTED`. |
 | 5 | `espos_net_start()` | Device id, hostname (`net.hostname`), `/net/status` and the mDNS responder (`<hostname>.local`, [net](net.md)). It comes before WiFi and Ethernet so the hostname is set on every interface. Posts `NETWORK_UP` and `NETWORK_DOWN`. |
 | 6 | `espos_time_start()` | The clock ([time](time.md)). It keeps a time carried through deep sleep and starts SNTP on the first `NETWORK_UP`. |
 | 7 | `espos_wifi_start()` | Station, setup network and `/wifi`, when WiFi is in the build and `CONFIG_ESPOS_WIFI` is on. Every chip with a radio or a radio co-processor has the component; the H-series chips don't. |
-| 8 | `espos_eth_start()` | Wired Ethernet, when the component is in, the chip has its own EMAC and `CONFIG_ESPOS_ETH` is on. It runs beside WiFi, and `espos_net` prefers the cable. |
+| 8 | `espos_eth_start()` | Wired Ethernet, when the component is in and both `CONFIG_ETH_USE_ESP32_EMAC` (the chip's own EMAC) and `CONFIG_ESPOS_ETH` are on. It runs beside WiFi, and `espos_net` prefers the cable. |
 | 9 | `espos_sk_start()` | Signal K, if built. It needs `espos_net` for discovery and the stream. Just before it, the application name is set, so the access request reads `<app> <hostname>`. It also sets the clock from `navigation.datetime` while the clock is unset. |
 | 10 | `espos_ota_start()` | Updates, if built. Its API sits on the web server and it watches `espos_net` to decide when to confirm a new image. |
 | 11 | `espos_ble_start()` | The Bluetooth gateway, if built. It signs in with the Signal K token. It only counts as built when both the component and `CONFIG_BT_BLUEDROID_ENABLED` are in. |
-| 12 | `espos_prov_start()` | Bluetooth WiFi setup ([provisioning](provisioning.md)), if built with `CONFIG_ESPOS_PROV`, and only while no WiFi network is configured. |
+| 12 | `espos_prov_start()` | Bluetooth WiFi setup ([provisioning](provisioning.md)), if built with both `CONFIG_ESPOS_PROV` and `CONFIG_BT_BLUEDROID_ENABLED`, and only while no WiFi network is configured. |
 | 13 | `espos_power_start()` | The deep-sleep duty cycle ([power](power.md)), if built. Last, because it waits for everything above. |
 
 The time, Ethernet, Bluetooth, provisioning and power steps don't stop the
@@ -73,8 +73,9 @@ restarts in a loop. A watchdog that fails to start doesn't stop it either.
 
 `espos_init()` runs steps 1 to 3 and `espos_start_network()` runs 4 to 13,
 for an application that wants to do its own work in between
-([`two_phase_boot`](examples.md)). Every start function can be called twice
-safely. To turn the watchdog off, clear
+([`two_phase_boot`](examples.md)). Calling a start function twice is harmless,
+except `espos_prov_start()`, which returns `ESP_ERR_INVALID_STATE` while it
+runs. To turn the watchdog off, clear
 `CONFIG_ESPOS_CORE_HEALTH_WATCHDOG`, or set
 `espos_start_opts_t.health_watchdog` to false. The option only works through
 `espos_start()`, so a two-phase boot uses the Kconfig switch.
@@ -91,7 +92,7 @@ with `ESP_ERR_INVALID_STATE` and logs what is missing, for example
 |---|---|
 | `espos_httpd_start()` | config |
 | `espos_net_start()` | config and the web server |
-| `espos_time_start()` | config and the web server |
+| `espos_time_start()` | config and the web server; call it after `espos_net_start()` or it can miss the first `NETWORK_UP` |
 | `espos_wifi_start()` | the web server and `espos_net` |
 | `espos_eth_start()` | `espos_net` |
 | `espos_sk_start()` | `espos_net` |
@@ -106,8 +107,8 @@ shows the lines.
 
 ## Which task calls you
 
-espOS calls your callbacks from its own tasks, never from yours. The rule is
-the same everywhere: copy what you need, return quickly, and don't wait for
+Most callbacks run on an espOS task, and some on whichever task did the
+thing they report, which can be yours. The rule is the same everywhere: copy what you need, return quickly, and don't wait for
 anything that might be waiting for the task you are on. Which task it is
 matters when you take a lock:
 
@@ -116,9 +117,9 @@ matters when you take a lock:
 | `espos_config_subscribe` | the task that changed the setting, usually a web request | You may read and write config from it. |
 | `espos_sk_subscribe` | the Signal K stream task | Strings are only valid during the call. Don't call anything that waits on the stream. |
 | `espos_sk_put` result | the Signal K stream task | Same as above. |
-| `espos_health_add_sink` | the task that raised the condition | You may raise conditions of your own. |
+| `espos_health_add_sink` | the task that raised the condition; when you register, the conditions so far are replayed on your task | You may raise conditions of your own. |
 | `espos_net_subscribe` | the task of the link that changed; for WiFi, the default event loop | The status is only valid during the call. |
-| `espos_time_subscribe` | whatever set the clock: SNTP's task, the Signal K stream task, or a web request | Don't block. |
+| `espos_time_subscribe` | whatever called `espos_time_set()`: SNTP's task, the Signal K stream task, a web request, or your own code | Don't block. |
 | `espos_httpd_register` handlers | the web server task | One task serves every request, so a slow handler stalls the web page. |
 | `espos_httpd_sse_on_connect` | the web server task | Send the new client its first update and return. |
 | `espos_log_set_notify` | a timer task | At most every 500 ms. You may log from it. |
@@ -176,10 +177,10 @@ them.
 
 | Event | When | Data |
 |---|---|---|
-| `CONFIG_READY` | `espos_init()` has loaded the settings and armed the watchdog | |
+| `CONFIG_READY` | `espos_init()` has loaded the settings and tried to arm the watchdog, if it is on | |
 | `HTTPD_STARTED` | the web server runs | |
-| `NETWORK_UP` | the device has an address on some link | `{ip, hostname}` |
-| `NETWORK_DOWN` | it lost it. One per `NETWORK_UP`; moving to another link is a DOWN then an UP | |
+| `NETWORK_UP` | the device has a default route, or it moved to another link | `{ip, hostname}` |
+| `NETWORK_DOWN` | the default route is gone. One per `NETWORK_UP`; moving to another link is a DOWN then an UP | |
 | `MDNS_READY` | after every `NETWORK_UP` once mDNS runs, and once from `espos_mdns_start()` if the network is already up | |
 | `SK_SERVER_SELECTED` | a Signal K server was picked or changed | `{host, port}` |
 | `SK_TOKEN_APPROVED` | the server approved the device | |
