@@ -39,21 +39,30 @@ walks through it.
 
 ## If you write firmware
 
-You need ESP-IDF 6.0 (the exact release is in [`.idf-version`](.idf-version))
+You need ESP-IDF 6.0, the release named in [`.idf-version`](.idf-version),
 and a board with an ESP32, ESP32-S3, ESP32-C3, ESP32-C5, ESP32-C6 or
 ESP32-P4.
 
 ```sh
+. $IDF_PATH/export.sh
 git clone https://github.com/signalk-espOS/espOS.git
 cd espOS/components/espos_core/examples/minimal
 idf.py set-target esp32c6
 idf.py build flash monitor
 ```
 
+On a small or shared machine, build with espOS's `scripts/build.sh build`
+instead of `idf.py build`. It caps the job count so the machine stays usable.
+
 The serial monitor tells you what to do next: join the `espOS-xxxx` WiFi
 network, pick your boat's network at <http://192.168.4.1>, then approve the
 device in Signal K under **Security → Access Requests**.
 [Getting started](docs/getting-started.md) goes through it step by step.
+
+The examples sign their images with a development key made on the first
+build. That is fine on the bench. Before a device goes on a boat, read
+[OTA and signing](docs/ota.md): a device only takes updates signed with the
+key it was flashed with.
 
 Your application starts espOS with one call and then does its own work:
 
@@ -116,7 +125,9 @@ firmware that knows the board.
 
 espOS is before 1.0, so a minor release can still change the API. The core is
 in daily use on ESP32-P4 panels with signalk-server 2.31. CI runs the host
-tests and builds for every supported chip on each change. What comes next is in the [roadmap](docs/roadmap.md).
+tests and builds for every supported chip on each change. What comes next is
+in the [roadmap](docs/roadmap.md), and the decisions so far are in
+[decisions](docs/decisions.md).
 
 ## How the project works
 

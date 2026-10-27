@@ -25,11 +25,11 @@ under the Apache-2.0 license.
 
 ## Try it
 
-You need ESP-IDF 6.0 (the exact release is in `.idf-version`), a board with
-an ESP32, -S3, -C3, -C5, -C6 or -P4, and a Signal K server on the same
-network.
+You need ESP-IDF 6.0, the release named in `.idf-version`, a board with an
+ESP32, -S3, -C3, -C5, -C6 or -P4, and a Signal K server on the same network.
 
 ```sh
+. $IDF_PATH/export.sh
 git clone https://github.com/signalk-espOS/espOS.git
 cd espOS/components/espos_core/examples/minimal
 idf.py set-target esp32c6            # or your chip

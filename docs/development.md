@@ -149,51 +149,40 @@ add.
 ## Using the components from the registry
 
 The components are published on the ESP Component Registry under
-`signalk-espos`, so a firmware can use espOS without the submodule:
+`signalk-espos`, so a firmware can use espOS without the submodule. The
+quickest start is the example made for this:
 
 ```sh
-idf.py add-dependency "signalk-espos/espos_sk^0.24.0"   # x-release-please-version
+idf.py create-project-from-example "signalk-espos/espos_core:from_registry"
 ```
 
-`espos_sk` pulls in the rest of the core. Keep the `^`: before 1.0 a minor
-release can break the API, and the caret stops at the next minor. All
-components are released together, so use the same version for each.
+It gives you a project with everything the prologue would otherwise set up:
 
-Without the submodule there is no prologue, so the project needs three files
-of its own:
+* `main/idf_component.yml` naming `espos_core`, `espos_sk` and `espos_ota`.
+  `espos_ota` has to be listed on its own; without it the firmware can never
+  be updated over the air.
+* A partition table with two OTA slots and a `storage` partition for the web
+  UI.
+* `sdkconfig.defaults`, plus `sdkconfig.defaults.esp32` for the original
+  ESP32. `espos_core` checks these when CMake configures and names any line
+  that is missing.
 
-1. **A root `CMakeLists.txt`**, plain IDF plus the web UI partition:
+Keep the `^` in each version. Before 1.0 a minor release can break the API,
+and the caret stops at the next minor. All components are released together,
+so give each the same version.
 
-   ```cmake
-   cmake_minimum_required(VERSION 3.22)
-   include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-   project(my_firmware)
-   espos_project_ui_partition()
-   ```
-
-2. **A partition table** with two OTA slots and a `storage` partition. Copy
-   one of the bundled tables into the project, since `managed_components/` is
-   a build directory:
-
-   ```sh
-   cp managed_components/signalk-espos__espos_core/partitions/4mb.csv partitions.csv
-   ```
-
-3. **`sdkconfig.defaults`** with the task stacks, core dump, OTA rollback,
-   image signing, the partition table and the flash size. `espos_core`
-   checks these when CMake configures and prints each missing line with the
-   reason.
-
-Then make the signing key once and keep it safe. A device only accepts
-updates signed with the key it was flashed with ([OTA](ota.md)), which is why
-no build step makes one for you:
+Then make the signing key, once, before the first build:
 
 ```sh
 espsecure generate-signing-key --version 2 --scheme rsa3072 secure_boot_signing_key.pem
 ```
 
-[`components/espos_core/examples/from_registry`](https://github.com/signalk-espOS/espOS/tree/main/components/espos_core/examples/from_registry)
-is a complete project set up this way, and CI builds it on every change.
+Add `*.pem` to your `.gitignore`: a committed key lets anyone sign firmware
+your devices accept. A device only accepts updates signed with the key it was
+flashed with ([OTA](ota.md)). Lose the key and no device flashed with it can be updated
+over the air again, which is why no build step makes one for you. The
+[example's README](https://github.com/signalk-espOS/espOS/tree/main/components/espos_core/examples/from_registry)
+explains each file, and CI builds the example on every change.
 
 ## Multi-target
 

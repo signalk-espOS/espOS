@@ -134,8 +134,8 @@ the person with the hardware — say in the PR which board that was.
   Write the way you would explain it to someone at the dock:
     * Lead with what the reader does or gets, then the reason if they need
       it. Design reasoning goes in [docs/decisions.md](docs/decisions.md).
-    * Short sentences, one idea per paragraph. If a sentence needs a dash or
-      brackets to hold a second thought, make it two sentences.
+    * Short sentences, one idea per paragraph. If a sentence needs a dash to
+      hold a second thought, make it two sentences.
     * Concrete over clever: a number, a file name or an example rather than
       "robust", "seamless" or "deliberately".
     * Signal K with a space, espOS with a small e, signalk-espOS for the
