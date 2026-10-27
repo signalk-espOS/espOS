@@ -7,7 +7,8 @@ Three places answer most questions before you get here:
 
 * the **serial monitor** (`idf.py monitor`), where the device says what it
   is doing as it boots ([Getting started](getting-started.md#2-read-the-monitor)
-  shows the lines, [Concepts](concepts.md) the start order);
+  shows the lines, [Concepts](concepts.md#what-espos_start-does-in-order)
+  the start order);
 * the **device log** at `GET /api/v1/logs` or on the Logs page of the web
   UI, which keeps the boot log so you don't need a cable ([below](#logs));
 * `GET /api/v1/system/info`, where `reset_reason` and `last_reset` say why
