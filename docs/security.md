@@ -3,11 +3,12 @@
 This page says what protects an espOS device, what doesn't, and what
 travels over the network. In short:
 
-* Once you set an API key, the web page and the REST API need it.
+* Once you set an API key, the REST API needs it, and so does everything the
+  web page does beyond showing its login.
 * The device only installs firmware with a valid signature, wherever the
   image came from.
-* Everything travels over plain http on the boat's network, so anyone who
-  can capture that traffic can read the key.
+* The device's own web server speaks plain http, so anyone who can capture
+  traffic on the boat's network can read the key.
 
 ## Who this keeps out
 
@@ -38,13 +39,13 @@ decides what protected means:
 | `httpd.api_key` | Effect |
 |---|---|
 | empty (the default) | The API is **open** to anyone on the network. A device from before authentication existed keeps working after an update, and first setup needs no key. |
-| set (8 to 64 characters) | Every protected request needs a credential, or it gets `401`. |
+| set (up to 64 characters; under 8 is accepted with a warning) | Every protected request needs a credential, or it gets `401`. |
 
 There are two kinds of credential, both checked in one place before any
 handler runs:
 
-* **`Authorization: Bearer <key>`**, for programs: the HMI designer, the
-  manager plugin, `curl`. The device keeps nothing for these.
+* **`Authorization: Bearer <key>`**, for programs: the HMI designer, a fleet
+  plugin such as the manager, `curl`. The device keeps nothing for these.
 * **A session cookie**, for browsers. `POST /api/v1/auth/login {"key": …}`
   answers with the cookie `espos_sid` (`HttpOnly; SameSite=Strict; Path=/`),
   valid for `httpd.session_ttl_s`, a day by default. `fetch()` and
@@ -54,8 +55,8 @@ handler runs:
   the session idle longest, a reboot forgets them all, and changing the key
   ends every session, so everyone logs in again with the new key.
 
-A browser sends the cookie with every request a page makes, including a
-hostile page. So a cookie-authenticated request that **changes something**
+The cookie is `SameSite=Strict`, so other sites' pages don't get it sent.
+As a second line of defence, a cookie-authenticated request that **changes something**
 (`PUT`, `POST`, `DELETE`) must also come from the device's own page: the
 host in `Origin` (or `Referer`) must equal `Host`, or the answer is
 `403 forbidden`. That comes on top of the older rule that such requests carry
@@ -68,7 +69,8 @@ every key check (login and Bearer, even with the right key) answers
 `429 too_many_attempts` with `Retry-After` for **30 s**. The counter is
 shared by all clients, because the device can't cheaply tell them apart.
 Sessions that are already logged in aren't key checks and keep working. Keys
-and session ids are compared in constant time.
+and session ids are compared in constant time over their maximum length, so
+not even the key's length leaks through timing.
 
 Applications get this for free. An endpoint registered with
 `espos_httpd_register()` is protected. One that must stay reachable
@@ -93,14 +95,19 @@ who is near the device. `wifi.portal_psk` is empty by default, so the setup
 network is open, and the device raises it unattended:
 `wifi.portal_after_s` after the WiFi link drops, or at once when no network
 is configured. (It doesn't come up while another link such as Ethernet
-carries the network, see [WiFi](wifi.md#portal-softap-provisioning), but
-that only shrinks the exposure.) Earlier releases trusted the setup network
+carries the network, see [WiFi](wifi.md#portal-softap-provisioning). That
+shrinks the exposure, but it is not a credential.) Earlier releases trusted the setup network
 always; [Decisions](decisions.md) records why that changed.
 
 **If you lose the key and have no cable**, switch the device **off and on
 three times**. Let it come up each time, and switch it off again within 20 s
-of each boot. After the third time the setup network needs no key for 10
-minutes: join `espOS-xxxx`, open the Config page and set a new key.
+of the first two boots. After the third power-on, leave it running: for 10
+minutes the setup network needs no key. Join `espOS-xxxx`, open the Config
+page and set a new key.
+The setup network has to be up for this. A device connected to your WiFi
+doesn't show one, so switch that access point off or take the device out of
+its range; the setup network then comes up after `wifi.portal_after_s`
+(90 s).
 `GET /api/v1/auth/status` shows the seconds left as `recovery_s`, and the
 log says:
 
@@ -202,7 +209,8 @@ marked `secret`. The API never returns them (they read back as
 For production builds, turn on flash encryption. ESP-IDF then sets
 `CONFIG_NVS_ENCRYPTION=y` and encrypts the `nvs` partition with keys from
 the `nvs_keys` partition, which every bundled table in
-`components/espos_core/partitions/` has, or with the HMAC peripheral on
+`components/espos_core/partitions/` has and marks `encrypted` (a table of
+your own needs that flag too), or with the HMAC peripheral on
 chips that have one. The release overlay `sdkconfig.d/release.defaults`
 does this; select it with `espos_project_prologue(... PROFILE release)` or
 `-DESPOS_PROFILE=release`:
@@ -219,8 +227,9 @@ on the linux target doesn't support encryption.
 
 ## Request handling
 
-* Authentication is checked before a handler runs, for every endpoint, so a
-  refused request never reaches the handler's parsing.
+* Authentication is checked before a handler runs, for every registered
+  endpoint that isn't public, so a refused request never reaches the
+  handler's parsing.
 * Request bodies are capped at `CONFIG_ESPOS_HTTPD_MAX_BODY` (16 KiB by
   default); anything larger gets `413`.
 * All JSON input is checked against the settings descriptor before anything
@@ -240,8 +249,9 @@ whoever holds `secure_boot_signing_key.pem`, whether the image came over
 (`POST /api/v1/ota` needs the key like everything else).
 
 This doesn't stop someone with the USB port, because there is no hardware
-Secure Boot and no flash encryption by default; both are options in the
-release overlay. Rollback is the bootloader's `APP_ROLLBACK_ENABLE` plus
+Secure Boot and no flash encryption by default. The release overlay turns on
+flash encryption; hardware Secure Boot is not in it and has to be configured
+separately. Rollback is the bootloader's `APP_ROLLBACK_ENABLE` plus
 `espos_ota`'s rule that a new image confirms itself once it reaches the
 network ([OTA](ota.md)). Keep the signing key out of the repository. It is
 git-ignored, and without one the build makes a development key and warns
