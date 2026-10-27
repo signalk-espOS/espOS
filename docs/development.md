@@ -146,6 +146,46 @@ PSRAM itself, the L2 cache line with the hosted mempool in PSRAM and the
 block-ack window with PSRAM — and fails the configure with the exact line to
 add.
 
+## Using the components from the registry
+
+The components are published on the ESP Component Registry under
+`signalk-espos`, so a firmware can use espOS without the submodule. The
+quickest start is the example made for this:
+
+```sh
+idf.py create-project-from-example "signalk-espos/espos_core:from_registry"
+```
+
+It gives you a project with everything the prologue would otherwise set up:
+
+* `main/idf_component.yml` naming `espos_core`, `espos_sk` and `espos_ota`.
+  `espos_ota` has to be listed on its own; without it the firmware can never
+  be updated over the air.
+* A partition table with two OTA slots and a `storage` partition for the web
+  UI.
+* `sdkconfig.defaults`, plus `sdkconfig.defaults.esp32` for the original
+  ESP32. `espos_core` checks these when CMake configures and names any line
+  that is missing.
+
+Keep the `^` in each version. Before 1.0 a minor release can break the API,
+and the caret stops at the next minor. All components are released together,
+so give each the same version.
+
+Then make the signing key, once, before any `idf.py` command in the project,
+`set-target` included. Each of them configures the project, and a key that
+appears after that is not picked up:
+
+```sh
+espsecure generate-signing-key --version 2 --scheme rsa3072 secure_boot_signing_key.pem
+```
+
+Add `*.pem` to your `.gitignore`: a committed key lets anyone sign firmware
+your devices accept. A device only accepts updates signed with the key it was
+flashed with ([OTA](ota.md)). Lose the key and no device flashed with it can be updated
+over the air again, which is why no build step makes one for you. The
+[example's README](https://github.com/signalk-espOS/espOS/tree/main/components/espos_core/examples/from_registry)
+explains each file, and CI builds the example on every change.
+
 ## Multi-target
 
 One build directory per target, each with its own `sdkconfig`:
