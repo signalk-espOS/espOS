@@ -181,26 +181,9 @@ Ids are part of the ABI and are only ever appended.
 
 ## From SensESP's model to espOS's
 
-SensESP is a graph: sensors, transforms and outputs are objects created in
-`setup()`, wired with `connect_to()`, and ticked by one event loop; a
-setting is an object's `config_path` plus a `ConfigItem()`. espOS is a
-runtime with a C API: the components above come up in one call, and the
-application is a task that reads, computes and calls `espos_sk_publish_*()`;
-a setting is one entry in a descriptor. Both reach the same wire — deltas to
-`vessels.self`, an access request, metadata for non-standard paths — and
-that is why a SensESP author is at home here after one afternoon. A typed
-C++ facade over this API is planned for a later tranche; until it exists the
-C shape below is the shape. The full mapping, symbol by symbol, and a worked
-port of SensESP's `analog_input.cpp` are in
-[migration-from-sensesp.md](migration-from-sensesp.md).
-
-| SensESP | espOS |
-|---|---|
-| `SensESPAppBuilder` … `get_app()` | `espos_start(NULL)` |
-| `event_loop()->onRepeat()` + `RepeatSensor` | a task with `vTaskDelay()`, or an `esp_timer` |
-| `connect_to()` chain of transforms | arithmetic in C between the read and the publish |
-| `SKOutputFloat`, `SKMetadata` | `espos_sk_publish_number()`, `espos_sk_declare_meta()` |
-| `SKValueListener` / `SKPutRequest` | `espos_sk_subscribe()` / `espos_sk_put()` |
-| `config_path` + `ConfigItem()` | a key in `config/<ns>.json`; `espos_config_get_*()`, `espos_config_subscribe()` |
-| `SystemStatusLed`, `enable_wifi_watchdog()` | `espos_health` sinks and its policy |
-| `enable_ota()` | `espos_ota`: signed, rolled back, manifest-driven |
+SensESP wires sensors, transforms and outputs into a graph. espOS offers the
+same with [`espos_flow`](flow.md), or plain C calls if you prefer: a task
+that reads, computes and calls `espos_sk_publish_*()`. Both send the same
+deltas, so a SensESP author should feel at home quickly.
+[Migrating from SensESP](migration-from-sensesp.md) maps each SensESP class
+to its espOS counterpart and ports the `analog_input` example both ways.

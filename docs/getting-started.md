@@ -96,7 +96,7 @@ I (17040) espos_sk: approved, streaming
 
 The device keeps the token across reboots and new firmware. A factory reset
 or `POST /api/v1/sk/forget` deletes it. If you denied it by mistake, use
-**Request again** on the device's Signal K page
+**Request access** on the device's Signal K page
 ([Troubleshooting](troubleshooting.md#signal-k)).
 
 ## 5. Find the value
@@ -116,8 +116,9 @@ reconnects ([Signal K](signalk.md#delta-stream-m4)).
 The web page and REST API are open at first, so setting up needs no
 password. Once the device works, set `httpd.api_key` on the **Config** page.
 **Generate** makes a 20-character key and shows it once. After that the page
-asks for it and scripts send `Authorization: Bearer <key>`. The setup network
-never asks, so you cannot lock yourself out ([Security](security.md)).
+asks for it and scripts send `Authorization: Bearer <key>`. If you lose the
+key, power-cycle the device three times: the setup network then lets you set
+a new one for ten minutes ([Security](security.md)).
 
 ## Next steps
 

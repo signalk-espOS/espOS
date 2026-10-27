@@ -76,7 +76,7 @@ namespaces appear by name.
 | `set_wifi_client(ssid, psk)` | never in code: the setup portal, or an NVS image ([WiFi](wifi.md)) | same |
 | `set_sk_server(host, port)` | `sk.server_host` and `sk.server_port`; left empty, the server is found over mDNS | same |
 | `SetupLogging()` | nothing: `espos_start()` sets up logging; change the level with `PUT /api/v1/logs/level` | same |
-| `onRepeat()` / `onDelay()` | `Ticker`, `Poll<T>` | `espos_flow_every()` / `espos_flow_after()`, or a FreeRTOS task |
+| `onRepeat()` / `onDelay()` | `Ticker`, `Poll<T>` | a FreeRTOS task with `vTaskDelay()`, or an `esp_timer` |
 | `RepeatSensor<T>` | `Poll<T>` | a loop: read, compute, `espos_sk_publish_*()` |
 | `AnalogInput` | `sensors::Analog` (volts, calibrated) | `esp_adc` oneshot ([example](https://github.com/signalk-espOS/espOS/tree/main/components/espos_sk/examples/analog_input)) |
 | `DigitalInputCounter` / `Change` / `State` | `PulseCounter` / `GpioChange` / `GpioState` | `esp_driver_pcnt` / a GPIO interrupt and a queue / `gpio_get_level()` |
@@ -145,119 +145,46 @@ extern "C" void app_main()
 {
     ESP_ERROR_CHECK(espos_start(nullptr));
 
-    auto& light = g.make<Analog>("light", 4, 500);      // GPIO 4, every 500 ms, in volts
+    // An ADC1 pin: GPIO 4 on an ESP32-C6, GPIO 20 on an ESP32-P4.
+    auto& light = g.make<Analog>("light", 4, 500);      // every 500 ms, in volts
     auto& cal   = g.make<Linear<float>>("cal", 1.7007f, -0.165f);
     auto& out   = g.make<espos::sk::Output<float>>("environment.inside.illuminance");
 
     cal.register_config("Input Calibration");           // ConfigItem(cal)
     light >> cal >> out;
 
-    light.start();
+    ESP_ERROR_CHECK(light.start());
     ESP_ERROR_CHECK(g.start());
 }
 ```
 
-The [`sensor_graph`](https://github.com/signalk-espOS/espOS/tree/main/components/espos_flow/examples/sensor_graph)
-example builds the same chain for every chip, with a stand-in reading instead
-of the ADC.
+`main/CMakeLists.txt` names the three components the graph uses:
+
+```cmake
+idf_component_register(SRCS main.cpp PRIV_REQUIRES espos_core espos_flow espos_sensors espos_sk_flow)
+```
+
+The calibration shows up on the **Config** page as **Input Calibration**.
+The [`smart_switch`](https://github.com/signalk-espOS/espOS/tree/main/components/espos_sk_flow/examples/smart_switch)
+example uses the same `Analog` and `sk::Output` nodes in a firmware CI builds.
 
 ### In plain C
 
-The plain C version is `components/espos_sk/examples/analog_input`, cut down
-here to the parts that match. The real example also handles the original
-ESP32's calibration scheme, averages 16 samples and logs. The `Linear`'s two
-numbers become settings in a descriptor, `main/config/app.json`. The example
-ships `1.0` and `0.0`; a port keeps SensESP's numbers:
-
-```json
-{"namespace": "app", "version": 1, "title": "Analog input",
- "keys": [
-  {"name": "multiplier", "type": "float", "default": 1.7007, "title": "Multiplier"},
-  {"name": "offset", "type": "float", "default": -0.165, "title": "Offset", "description": "Analog input value adjustment."},
-  {"name": "period_ms", "type": "int", "default": 500, "min": 100, "max": 60000, "unit": "ms", "title": "Sample period"}]}
-```
-
-It is registered in `main/CMakeLists.txt`, next to the ESP-IDF ADC driver:
-
-```cmake
-idf_component_register(SRCS main.c PRIV_REQUIRES espos_core espos_config espos_sk esp_adc)
-espos_config_add_descriptor(config/app.json)
-```
-
-`main/main.c` is the whole program. `RepeatSensor` becomes the loop, `Linear`
-one multiply-add and `SKOutputFloat` one publish call:
-
-```c
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "esp_adc/adc_oneshot.h"
-#include "esp_adc/adc_cali_scheme.h"
-#include "espos.h"
-#include "espos_cfg_keys.h"
-#include "espos_config.h"
-#include "espos_sk.h"
-
-#define ADC_GPIO 4 /* ADC1 on the ESP32-C6 DevKitC (GPIO 0..6); the example uses 20 on the ESP32-P4 */
-#define SK_PATH  "environment.inside.illuminance" /* a spec path: the server owns its meta */
-
-static adc_oneshot_unit_handle_t s_adc;
-static adc_cali_handle_t s_cali;
-static adc_channel_t s_chan;
-static float s_multiplier = 1.7007f, s_offset = -0.165f; /* word-sized: written on the HTTP task, read by the loop */
-static int32_t s_period_ms = 500;
-
-/* Initial load and the change callback (runs on the writer's task, usually an HTTP handler). */
-static void load_cfg(const char *ns, const char *key, void *arg)
-{
-    (void)ns; (void)key; (void)arg;
-    espos_config_get_float(ESPOS_CFG_NS_APP, ESPOS_CFG_APP_MULTIPLIER, &s_multiplier);
-    espos_config_get_float(ESPOS_CFG_NS_APP, ESPOS_CFG_APP_OFFSET, &s_offset);
-    espos_config_get_i32(ESPOS_CFG_NS_APP, ESPOS_CFG_APP_PERIOD_MS, &s_period_ms);
-}
-
-static void adc_init(void)
-{
-    adc_unit_t unit;
-    ESP_ERROR_CHECK(adc_oneshot_io_to_channel(ADC_GPIO, &unit, &s_chan));
-    adc_oneshot_unit_init_cfg_t ucfg = { .unit_id = unit };
-    ESP_ERROR_CHECK(adc_oneshot_new_unit(&ucfg, &s_adc));
-    adc_oneshot_chan_cfg_t ccfg = { .atten = ADC_ATTEN_DB_12, .bitwidth = ADC_BITWIDTH_DEFAULT };
-    ESP_ERROR_CHECK(adc_oneshot_config_channel(s_adc, s_chan, &ccfg));
-    adc_cali_curve_fitting_config_t cal = { .unit_id = unit, .chan = s_chan, .atten = ADC_ATTEN_DB_12, .bitwidth = ADC_BITWIDTH_DEFAULT };
-    ESP_ERROR_CHECK(adc_cali_create_scheme_curve_fitting(&cal, &s_cali)); /* eFuse data: what analogReadMilliVolts() used */
-}
-
-void app_main(void)
-{
-    ESP_ERROR_CHECK(espos_start(NULL));                 /* WiFi, portal, token, stream, UI, OTA */
-    load_cfg(NULL, NULL, NULL);
-    ESP_ERROR_CHECK(espos_config_subscribe(load_cfg, NULL));
-    adc_init();
-    for (;; vTaskDelay(pdMS_TO_TICKS(s_period_ms))) {   /* RepeatSensor<float>(500, …) */
-        int raw, mv;
-        ESP_ERROR_CHECK(adc_oneshot_read(s_adc, s_chan, &raw));
-        if (adc_cali_raw_to_voltage(s_cali, raw, &mv) == ESP_OK) {
-            espos_sk_publish_number(SK_PATH, mv / 1000.0f * s_multiplier + s_offset); /* Linear → SKOutputFloat */
-        }
-    }
-}
-```
+[`components/espos_sk/examples/analog_input`](https://github.com/signalk-espOS/espOS/tree/main/components/espos_sk/examples/analog_input)
+is the same device without the graph. The `Linear`'s two numbers become
+settings in a JSON descriptor, a loop reads the ADC, and one
+`espos_sk_publish_number()` call replaces `SKOutputFloat`. Read it next to
+the graph version to see what the nodes do for you.
 
 One change is on purpose. SensESP's `environment.indoor.illuminance` is
 not in the Signal K specification, which is why its example had to send
 `SKMetadata("ratio", …)`. The espOS versions publish the specification path
 `environment.inside.illuminance`, whose units the server already knows. To
-keep a path of your own, declare its metadata: `sk::Meta` in the graph, or
-one call before the loop in C:
-
-```c
-espos_sk_declare_meta(SK_PATH, "{\"units\":\"ratio\",\"displayName\":\"Indoor light\"}", s_period_ms);
-```
+keep a path of your own, declare its metadata: pass an `sk::Meta` to
+`sk::Output` in the graph, or call `espos_sk_declare_meta()` in C.
 
 WiFi, hostname and server are settings, entered once in the setup portal or
-the web page. The calibration is changed on the **Config** page, or with
-`PUT /api/v1/config {"app":{"multiplier":2}}`, and reaches the loop through
-`load_cfg`. None of this code deals with WebSockets, tokens or reconnects.
+the web page. None of this code deals with WebSockets, tokens or reconnects.
 
 ## What has no equivalent yet
 
