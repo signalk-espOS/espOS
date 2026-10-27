@@ -6,7 +6,8 @@ which page explains more.
 Three places answer most questions before you get here:
 
 * the **serial monitor** (`idf.py monitor`), where the device says what it
-  is doing as it boots ([Getting started](getting-started.md#2-read-the-monitor));
+  is doing as it boots ([Getting started](getting-started.md#2-read-the-monitor)
+  shows the lines, [Concepts](concepts.md) the start order);
 * the **device log** at `GET /api/v1/logs` or on the Logs page of the web
   UI, which keeps the boot log so you don't need a cable ([below](#logs));
 * `GET /api/v1/system/info`, where `reset_reason` and `last_reset` say why
@@ -40,7 +41,8 @@ Three places answer most questions before you get here:
     note go away. [Releasing](releasing.md#consumers).
 
 **`the espOS pin is at tag vX but its version.txt says Y`**
-:   This one is a real fault, and fetching won't fix it. The pinned commit has a
+:   This one is a real fault, and fetching won't fix it: a tag that the pinned
+    commit can reach is one the checkout already has. The pinned commit has a
     `version.txt` that was never bumped to match its tag, so a device would
     report one version or the other depending on the build. Check which commit
     the submodule points at.
@@ -58,10 +60,13 @@ Three places answer most questions before you get here:
     `CONFIG_ESPOS_HTTPD_UI_EMBED` off, or a custom `DIR`, the page comes from
     the `storage` partition, and that partition is empty. One of three things
     happened:
-    the project never called `espos_project_ui_partition()` after `project()`;
-    a custom `DIR` is missing, which CMake only warns about;
-    or the image was written with `idf.py app-flash`, which skips
-    `storage.bin` (`idf.py flash` writes it).
+
+    * the project never called `espos_project_ui_partition()` after
+      `project()`;
+    * a custom `DIR` is missing, which CMake only warns about;
+    * the image was written with `idf.py app-flash`, which skips
+      `storage.bin` (`idf.py flash` writes it).
+
     A missing default bundle (`espos_httpd/ui-dist`) stops the configure step;
     restore it from git. [Web UI](ui.md).
 
@@ -96,8 +101,15 @@ Three places answer most questions before you get here:
 ## WiFi
 
 **No `espOS-xxxx` network appears**
-:   Work through these in order:
+:   Check these:
 
+    * **Is the application holding it?** Firmware can force it up or down with
+      `espos_wifi_portal_open()`, which wins over everything below except
+      `portal_enabled`. `GET /api/v1/wifi/status` shows this as `portal.force`
+      (`auto`, `up` or `down`), so no setup network and `force: down` means the
+      application is keeping it shut. A forced-up setup network appears when
+      the current connection attempt ends, whether it worked or not. A reboot
+      clears the setting.
     * **Is another link up?** While Ethernet (or any other link) carries the
       network, there is no setup network, because you can reach the device that
       way. `GET /api/v1/net/status` names the link. `wifi.portal_online = true`
@@ -107,11 +119,6 @@ Three places answer most questions before you get here:
       configured it comes up after `wifi.portal_after_s` (90 s) of failed
       attempts. It never comes up while connected, or when
       `wifi.portal_enabled` is off.
-    * **Is the application holding it?** Firmware can force it up or down with
-      `espos_wifi_portal_open()`, which wins over everything above except
-      `portal_enabled`. `GET /api/v1/wifi/status` shows this as `portal.force`
-      (`auto`, `up` or `down`). A forced-up setup network still waits for the
-      current connection attempt to finish. A reboot clears the setting.
 
     If a phone doesn't open the sign-in page by itself, browse to
     `http://192.168.4.1`. Setting `wifi.portal_psk` puts a password on the
@@ -151,11 +158,11 @@ Three places answer most questions before you get here:
     * a receive block-ack window of 16 (ESP-IDF raises
       `CONFIG_WIFI_RMT_RX_BA_WIN` from 6 as soon as PSRAM is on);
     * the transport memory pool in PSRAM together with 128-byte cache lines,
-      which makes the SDIO driver reject the buffers.
+      which makes the SDIO driver reject the buffers with `ESP_ERR_INVALID_ARG`.
 
     A third cause shows at boot as `SDIO mode mismatch … Aborting`: streaming
     mode has to stay on. The fix is a restart, and the link watchdog does it
-    after three missed 20 s heartbeats. Never call `esp_hosted_deinit()` and
+    after three missed 20 s heartbeats (the co-processor heartbeat watchdog). Never call `esp_hosted_deinit()` and
     `init()` to recover; that crashes instead of failing.
     [WiFi → Co-processor link watchdog](wifi.md#co-processor-link-watchdog-esp_hosted-boards).
 
@@ -179,7 +186,7 @@ Three places answer most questions before you get here:
     settings), then press **Request access** on the device's Signal K page
     (`POST /api/v1/sk/request`).
 
-**It was approved, and now it asks again with a new entry in Access Requests**
+**It was approved, and now it is `requesting` again, with a new entry in Access Requests**
 :   The token was revoked. Either the device was deleted under Security →
     Devices, or the server was reinstalled and has a new self URN, so the old
     token no longer counts. The device drops the token on the first `401` and
@@ -280,7 +287,7 @@ Three places answer most questions before you get here:
     [Health → The reset record](health.md#the-reset-record).
 
 **An ESP32-P4 restarts about 60 s after the network stops working**
-:   That is the radio link watchdog. The jammed link is the fault and the
+:   That is the co-processor heartbeat watchdog. The jammed link is the fault and the
     restart is the cure ([WiFi](#wifi) above).
 
 **Turning the restarts off**
