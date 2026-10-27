@@ -39,8 +39,8 @@ A line points at what a component needs. Three of them are worth knowing:
 * `espos_n2k`, `espos_voice` and `espos_audio` are not part of the start
   order. The application starts them when its board has the hardware.
 
-Why the clock and the two update paths are wired the way they are is in
-[Decisions](decisions.md#how-the-clock-and-updates-avoid-dependency-loops).
+Why the clock and the two kinds of update are wired the way they are is in
+[Decisions](decisions.md#why-the-clock-and-the-update-checks-use-weak-references).
 
 ## What espos_start() does, in order
 
@@ -52,21 +52,32 @@ void app_main(void) { ESP_ERROR_CHECK(espos_start(NULL)); /* your application */
 | Step | Call | Why at this point |
 |---|---|---|
 | 1 | `espos_log_init()` | So the boot itself shows up in `/api/v1/logs`. |
-| 2 | `espos_config_init()` | Everything after this reads its settings. Posts `CONFIG_READY`. |
-| | `espos_health_policy_start()` | The device watchdog, armed before anything can hang ([health](health.md)). On by default; turn it off with `espos_start_opts_t.health_watchdog` or `CONFIG_ESPOS_CORE_HEALTH_WATCHDOG`. If it fails to start, the boot carries on without it. |
+| 2 | `espos_config_init()` | Everything after this reads its settings. |
+| 3 | `espos_health_policy_start()` | The device watchdog, armed before anything can hang ([health](health.md)). `espos_core` also starts listening for `NETWORK_UP` and `NETWORK_DOWN` here, to raise and clear the `netDown` warning. Then `espos_init()` posts `CONFIG_READY`. |
 | | your `before_network` hook | For anything that must exist before someone connects, such as a display that shows the setup network's name. |
-| 3 | `espos_httpd_start()` | The setup page has to be there as soon as there is a link or a setup network. Posts `HTTPD_STARTED`. |
-| 4 | `espos_net_start()` | Device id, hostname (`net.hostname`), `/net/status` and the mDNS responder (`<hostname>.local`, [net](net.md)). It comes before WiFi so the hostname is set on every interface. Posts `NETWORK_UP` and `NETWORK_DOWN`; `MDNS_READY` follows every `NETWORK_UP`. |
-| 5 | `espos_time_start()` | The clock ([time](time.md)). It keeps a time carried through deep sleep and starts SNTP on the first `NETWORK_UP`. A device that doesn't know the time still does everything else. |
-| 6 | `espos_wifi_start()` | Station, setup network and `/wifi`, if WiFi is in the build. Every chip with a radio or a radio co-processor has it; the H-series chips don't. |
-| 7 | `espos_sk_start()` | Signal K, if built. It needs `espos_net` for discovery and the stream. Just before it, the application name is set, so the access request reads `<app> <hostname>`. It also sets the clock from `navigation.datetime` while the clock is unset. |
-| 8 | `espos_ota_start()` | Updates, if built. Its API sits on the web server and it watches `espos_net` to decide when to confirm a new image. |
-| 9 | `espos_ble_start()` | The Bluetooth gateway, if built. It signs in with the Signal K token. It only counts as built when both the component and `CONFIG_BT_BLUEDROID_ENABLED` are in. |
+| 4 | `espos_httpd_start()` | The setup page has to be there as soon as there is a link or a setup network. Posts `HTTPD_STARTED`. |
+| 5 | `espos_net_start()` | Device id, hostname (`net.hostname`), `/net/status` and the mDNS responder (`<hostname>.local`, [net](net.md)). It comes before WiFi and Ethernet so the hostname is set on every interface. Posts `NETWORK_UP` and `NETWORK_DOWN`. |
+| 6 | `espos_time_start()` | The clock ([time](time.md)). It keeps a time carried through deep sleep and starts SNTP on the first `NETWORK_UP`. |
+| 7 | `espos_wifi_start()` | Station, setup network and `/wifi`, when WiFi is in the build and `CONFIG_ESPOS_WIFI` is on. Every chip with a radio or a radio co-processor has the component; the H-series chips don't. |
+| 8 | `espos_eth_start()` | Wired Ethernet, when the component is in, the chip has its own EMAC and `CONFIG_ESPOS_ETH` is on. It runs beside WiFi, and `espos_net` prefers the cable. |
+| 9 | `espos_sk_start()` | Signal K, if built. It needs `espos_net` for discovery and the stream. Just before it, the application name is set, so the access request reads `<app> <hostname>`. It also sets the clock from `navigation.datetime` while the clock is unset. |
+| 10 | `espos_ota_start()` | Updates, if built. Its API sits on the web server and it watches `espos_net` to decide when to confirm a new image. |
+| 11 | `espos_ble_start()` | The Bluetooth gateway, if built. It signs in with the Signal K token. It only counts as built when both the component and `CONFIG_BT_BLUEDROID_ENABLED` are in. |
+| 12 | `espos_prov_start()` | Bluetooth WiFi setup ([provisioning](provisioning.md)), if built with `CONFIG_ESPOS_PROV`, and only while no WiFi network is configured. |
+| 13 | `espos_power_start()` | The deep-sleep duty cycle ([power](power.md)), if built. Last, because it waits for everything above. |
 
-`espos_init()` runs steps 1 and 2 and `espos_start_network()` runs 3 to 9,
+The time, Ethernet, Bluetooth, provisioning and power steps don't stop the
+boot when they fail. The device logs a warning and comes up without that
+part, because a device that serves its web page is more use than one that
+restarts in a loop. A watchdog that fails to start doesn't stop it either.
+
+`espos_init()` runs steps 1 to 3 and `espos_start_network()` runs 4 to 13,
 for an application that wants to do its own work in between
 ([`two_phase_boot`](examples.md)). Every start function can be called twice
-safely.
+safely. To turn the watchdog off, clear
+`CONFIG_ESPOS_CORE_HEALTH_WATCHDOG`, or set
+`espos_start_opts_t.health_watchdog` to false. The option only works through
+`espos_start()`, so a two-phase boot uses the Kconfig switch.
 
 "If built" means the component is in your project. `espos_core` links
 `espos_sk`, `espos_ota` and `espos_ble` only when you list them, so you pick
@@ -82,8 +93,10 @@ with `ESP_ERR_INVALID_STATE` and logs what is missing, for example
 | `espos_net_start()` | config and the web server |
 | `espos_time_start()` | config and the web server |
 | `espos_wifi_start()` | the web server and `espos_net` |
+| `espos_eth_start()` | `espos_net` |
 | `espos_sk_start()` | `espos_net` |
 | `espos_ota_start()` | the web server and `espos_net` |
+| `espos_power_start()` | `espos_start_network()` |
 
 On the serial monitor a device tells you where it is, in this order: the
 espOS and app versions, the setup network to join (or the WiFi it joined),
@@ -116,11 +129,14 @@ matters when you take a lock:
 Some calls block, so they need a task of your own:
 
 * `espos_sk_http_*` and `espos_sk_get_value/meta` wait up to twice their
-  timeout. Never call them from the stream task, an event handler or a web
-  handler; [`two_phase_boot`](examples.md) shows a worker task for them.
-* `espos_mdns_start/add_service/remove_service` and
-  `espos_wifi_refresh_rssi()` can take a few milliseconds. Not from an event
-  or web handler.
+  timeout. Never call them from the stream task, an event handler, a
+  Bluetooth callback or a web handler; [`two_phase_boot`](examples.md) shows
+  a worker task for them.
+* `espos_mdns_start/add_service/remove_service` can take a few milliseconds.
+  Not from an event or web handler.
+* `espos_wifi_refresh_rssi()` asks the radio co-processor on a P4 and waits
+  for the answer, which can take the whole transport timeout when the link is
+  stuck. Never from a display task or an event handler.
 
 The calls that send things are safe from any task, callbacks included:
 `espos_sk_publish_*`, `espos_sk_notify`, `espos_health_report`,
@@ -160,16 +176,17 @@ them.
 
 | Event | When | Data |
 |---|---|---|
-| `CONFIG_READY` | settings are loaded | |
+| `CONFIG_READY` | `espos_init()` has loaded the settings and armed the watchdog | |
 | `HTTPD_STARTED` | the web server runs | |
 | `NETWORK_UP` | the device has an address on some link | `{ip, hostname}` |
 | `NETWORK_DOWN` | it lost it. One per `NETWORK_UP`; moving to another link is a DOWN then an UP | |
-| `MDNS_READY` | after every `NETWORK_UP` once mDNS runs | |
+| `MDNS_READY` | after every `NETWORK_UP` once mDNS runs, and once from `espos_mdns_start()` if the network is already up | |
 | `SK_SERVER_SELECTED` | a Signal K server was picked or changed | `{host, port}` |
 | `SK_TOKEN_APPROVED` | the server approved the device | |
 | `SK_STREAM_CONNECTED` / `_DISCONNECTED` | the data stream opened or closed | |
 | `OTA_AVAILABLE` | a newer firmware is on offer | `{version}` |
 | `TIME_SYNCED` | something set the clock, every time | `{source, unix_ms}` |
+| `PORTAL_UP` / `PORTAL_DOWN` | the setup network came up or went away. On a P4 WiFi and Bluetooth share one radio, so anything that scans should pause in between | |
 | `UPDATE_STARTED` / `_FINISHED` | a firmware or radio co-processor update began or ended, successful or not. Bluetooth scanning pauses in between | |
 
 The full names start with `ESPOS_EVENT_`, and the data types are
