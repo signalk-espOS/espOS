@@ -47,11 +47,11 @@ ESP32-P4.
 . $IDF_PATH/export.sh
 git clone https://github.com/signalk-espOS/espOS.git
 cd espOS/components/espos_core/examples/minimal
-idf.py set-target esp32c6
+idf.py set-target esp32c6            # or your chip
 idf.py build flash monitor
 ```
 
-On a small or shared machine, build with espOS's `scripts/build.sh build`
+On a small or shared machine, build with `../../../../scripts/build.sh build`
 instead of `idf.py build`. It caps the job count so the machine stays usable.
 
 The serial monitor tells you what to do next: join the `espOS-xxxx` WiFi
@@ -89,7 +89,9 @@ Coming from SensESP? Start with [Migrating from SensESP](docs/migration-from-sen
 ## Components
 
 Each part is its own ESP-IDF component, so a firmware only pulls in what it
-uses. `espos_core` starts the others in the right order.
+uses. `espos_start()` brings up the core, plus Signal K, updates and the
+Bluetooth gateway when they are in the build. The application starts the rest,
+such as NMEA 2000, when its board has the hardware.
 
 | Component | What it does | Docs |
 |---|---|---|
@@ -98,7 +100,7 @@ uses. `espos_core` starts the others in the right order.
 | `espos_httpd` | The device's web server, REST API and web UI | [rest-api](docs/rest-api.md), [ui](docs/ui.md) |
 | `espos_net` | Network status, mDNS and the device id, whatever the link | [net](docs/net.md) |
 | `espos_wifi` | WiFi and the setup portal | [wifi](docs/wifi.md) |
-| `espos_eth` | Ethernet (P4 EMAC, W5500 over SPI) | [net](docs/net.md) |
+| `espos_eth` | Ethernet over the chip's own EMAC | [net](docs/net.md) |
 | `espos_log` | The device log, readable over the network | [rest-api](docs/rest-api.md) |
 | `espos_health` | Warnings and alarms about the device itself | [health](docs/health.md) |
 | `espos_event` | Events other components post: network up, server found, … | [concepts](docs/concepts.md) |

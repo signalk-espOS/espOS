@@ -171,7 +171,9 @@ Keep the `^` in each version. Before 1.0 a minor release can break the API,
 and the caret stops at the next minor. All components are released together,
 so give each the same version.
 
-Then make the signing key, once, before the first build:
+Then make the signing key, once, before any `idf.py` command in the project,
+`set-target` included. Each of them configures the project, and a key that
+appears after that is not picked up:
 
 ```sh
 espsecure generate-signing-key --version 2 --scheme rsa3072 secure_boot_signing_key.pem

@@ -72,7 +72,9 @@ void app_main(void)
 ## Components
 
 Each part is its own ESP-IDF component, so a firmware only pulls in what it
-uses. `espos_core` starts the others in the right order.
+uses. `espos_start()` brings up the core, plus Signal K, updates and the
+Bluetooth gateway when they are in the build. The application starts the rest,
+such as NMEA 2000, when its board has the hardware.
 
 | Component | What it does | Docs |
 |---|---|---|
@@ -81,7 +83,7 @@ uses. `espos_core` starts the others in the right order.
 | `espos_httpd` | The device's web server, REST API and web UI | [rest-api](rest-api.md), [ui](ui.md) |
 | `espos_net` | Network status, mDNS and the device id, whatever the link | [net](net.md) |
 | `espos_wifi` | WiFi and the setup portal | [wifi](wifi.md) |
-| `espos_eth` | Ethernet (P4 EMAC, W5500 over SPI) | [net](net.md) |
+| `espos_eth` | Ethernet over the chip's own EMAC | [net](net.md) |
 | `espos_log` | The device log, readable over the network | [rest-api](rest-api.md) |
 | `espos_health` | Warnings and alarms about the device itself | [health](health.md) |
 | `espos_event` | Events other components post: network up, server found, … | [concepts](concepts.md) |
