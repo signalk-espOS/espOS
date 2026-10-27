@@ -146,6 +146,55 @@ PSRAM itself, the L2 cache line with the hosted mempool in PSRAM and the
 block-ack window with PSRAM — and fails the configure with the exact line to
 add.
 
+## Using the components from the registry
+
+The components are published on the ESP Component Registry under
+`signalk-espos`, so a firmware can use espOS without the submodule:
+
+```sh
+idf.py add-dependency "signalk-espos/espos_sk^0.24.0"   # x-release-please-version
+```
+
+`espos_sk` pulls in the rest of the core. Keep the `^`: before 1.0 a minor
+release can break the API, and the caret stops at the next minor. All
+components are released together, so use the same version for each.
+
+Without the submodule there is no prologue, so the project needs three files
+of its own:
+
+1. **A root `CMakeLists.txt`**, plain IDF plus the web UI partition:
+
+   ```cmake
+   cmake_minimum_required(VERSION 3.22)
+   include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+   project(my_firmware)
+   espos_project_ui_partition()
+   ```
+
+2. **A partition table** with two OTA slots and a `storage` partition. Copy
+   one of the bundled tables into the project, since `managed_components/` is
+   a build directory:
+
+   ```sh
+   cp managed_components/signalk-espos__espos_core/partitions/4mb.csv partitions.csv
+   ```
+
+3. **`sdkconfig.defaults`** with the task stacks, core dump, OTA rollback,
+   image signing, the partition table and the flash size. `espos_core`
+   checks these when CMake configures and prints each missing line with the
+   reason.
+
+Then make the signing key once and keep it safe. A device only accepts
+updates signed with the key it was flashed with ([OTA](ota.md)), which is why
+no build step makes one for you:
+
+```sh
+espsecure generate-signing-key --version 2 --scheme rsa3072 secure_boot_signing_key.pem
+```
+
+[`components/espos_core/examples/from_registry`](https://github.com/signalk-espOS/espOS/tree/main/components/espos_core/examples/from_registry)
+is a complete project set up this way, and CI builds it on every change.
+
 ## Multi-target
 
 One build directory per target, each with its own `sdkconfig`:

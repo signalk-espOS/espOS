@@ -1,10 +1,9 @@
 # Contributing
 
-espOS is the plumbing every SignalK ESP32 device needs — WiFi, config, web
-UI, SignalK, OTA and the optional gateways — consumed as a git submodule by
-firmware projects. This is what you need to know to change it. The build and
-test details live in [docs/development.md](docs/development.md); this file
-is about how a change gets in.
+espOS is a set of ESP-IDF components that Signal K firmware projects build
+on, either as a git submodule or from the ESP Component Registry. This file
+says how a change gets in. Building and testing are in
+[docs/development.md](docs/development.md).
 
 ## Where to start
 
@@ -131,6 +130,18 @@ the person with the hardware — say in the PR which board that was.
   clean. Files that cannot carry a header are listed in `REUSE.toml`.
 * Warnings are errors (IDF 6 default); keep every target's build clean, not
   just the one on your desk.
+* Docs are read by boat owners and by people who have never used ESP-IDF.
+  Write the way you would explain it to someone at the dock:
+    * Lead with what the reader does or gets, then the reason if they need
+      it. Design reasoning goes in [docs/decisions.md](docs/decisions.md).
+    * Short sentences, one idea per paragraph. If a sentence needs a dash or
+      brackets to hold a second thought, make it two sentences.
+    * Concrete over clever: a number, a file name or an example rather than
+      "robust", "seamless" or "deliberately".
+    * Signal K with a space, espOS with a small e, signalk-espOS for the
+      whole project. espOS is a firmware base, not an operating system.
+    * Read what you wrote, including anything drafted with AI, before you
+      open the pull request. Cut what a reader would skip.
 
 ## The web UI
 
