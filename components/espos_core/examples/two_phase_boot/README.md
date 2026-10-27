@@ -32,7 +32,7 @@ monitor after each connect: `navigation.position = {"latitude":…}`, or
 ## Why the queue
 
 Every callback in espOS runs on a task that is not yours (docs/concepts.md,
-"Threading contracts"). `ESPOS_EVENT` handlers run on the default event
+"Which task calls you"). `ESPOS_EVENT` handlers run on the default event
 loop — the task the WiFi driver's own events queue behind — and
 `espos_sk_get_value()` blocks for up to twice its timeout; one called from
 the other stalls WiFi. So the handler posts a word-sized job and returns,

@@ -27,7 +27,7 @@ registers with `espos_httpd_register_ex(&uri, ESPOS_HTTPD_PUBLIC)` instead.
 
 `/api/v1/app/` is the application's prefix; espOS never uses it. Handlers run on
 the one `esp_http_server` task — build, send, return, nothing that waits
-(docs/concepts.md, "Threading contracts") — and are registered after `espos_start()`,
+(docs/concepts.md, "Which task calls you") — and are registered after `espos_start()`,
 because the server has to exist. `curl` is a client too: the C side needs none of what follows.
 
 ## A page in the web UI

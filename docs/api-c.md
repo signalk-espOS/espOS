@@ -31,7 +31,7 @@ and `tools/check_public_headers.py` checks them in CI.
   of the C++ components).
 
 Every callback's threading contract is stated in its header and collected in
-[Concepts → Threading contracts](concepts.md#threading-contracts); read that
+[Concepts → Which task calls you](concepts.md#which-task-calls-you); read that
 table before calling anything from inside a callback.
 
 ## Headers by component

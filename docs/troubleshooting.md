@@ -3,7 +3,7 @@
 By symptom; each entry says why it happens and what fixes it, and links the
 component page that owns the behaviour. Three places answer most questions
 before any of this: the **monitor** (`idf.py monitor`), which narrates the
-boot ([Concepts](concepts.md#espos_start-the-order-and-why)); the device's
+boot ([Concepts](concepts.md#what-espos_start-does-in-order)); the device's
 **log ring** at `GET /api/v1/logs` and the Logs page of the web UI, which
 keep the boot log without a cable ([below](#logs)); and `GET /api/v1/system/info`,
 whose `reset_reason` and `last_reset` say why the device last restarted.
