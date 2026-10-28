@@ -121,7 +121,7 @@ dependencies:
       type: service
     version: 1.8.0
   espressif/mdns:
-    component_hash: b5b30022c46302eab89c1d2e3b6fb5918a627563a7462f0ee284b22b9a934967
+    component_hash: ef0766474b37459f6ad22461e453a8713e780e831a7c993b16919d817988dff6
     dependencies:
     - name: idf
       require: private
@@ -129,7 +129,7 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.14.0
+    version: 1.14.1
   idf:
     source:
       type: idf
@@ -252,7 +252,7 @@ dependencies:
     - name: espressif/mdns
       rules:
       - if: target != linux
-      version: ==1.14.0
+      version: ==1.14.1
     source:
       path: components/espos_net
       type: local
@@ -351,7 +351,7 @@ dependencies:
     - name: espressif/esp_hosted
       rules:
       - if: target == esp32p4
-      version: ==3.0.10
+      version: ==3.0.9
     - name: espressif/esp_wifi_remote
       rules:
       - if: target == esp32p4
@@ -388,6 +388,6 @@ direct_dependencies:
 - signalk-espos/espos_sk_flow
 - signalk-espos/espos_time
 - signalk-espos/espos_wifi
-manifest_hash: c9afcb5e065ef03fb139b605fc4909828f3f3d8ca1a58bd861a3619d2cd76206
+manifest_hash: 0ba8ea0eaf99381020307dda158a45dd9b8a0f2db2dc3d1edec57e1be248eff8
 target: esp32s3
 version: 3.0.0
