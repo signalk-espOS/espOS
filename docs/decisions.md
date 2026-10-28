@@ -188,3 +188,25 @@ was retired.
   so the node sees the clients' claims and the clients see the node. That needed the receiver to feed several listeners
   (`TwaiReceiver::add_listener()`), which is also what lets a firmware keep
   the candump server next to N2K code of its own.
+
+## Why the clock and the update checks use weak references
+
+`espos_time` depends on `espos_httpd` for its `/time` endpoints, and not on
+`espos_sk`, although the Signal K stream is one of the clock's sources.
+`espos_sk` already reads the clock for its delta timestamps, so a dependency
+the other way would close a loop. Instead `espos_time` offers
+`espos_time_set()` and `espos_sk` calls it. `espos_log` and `espos_httpd`
+want the clock too and can't depend on it for the same reason. Each declares
+a weak "there is no clock" function, which `espos_time` overrides when it is
+in the build. A firmware without `espos_time` behaves as before, and neither
+component names the other.
+
+The two kinds of firmware update use weak references for a different reason:
+each component is optional to the other. A host update (`espos_ota`) and a
+radio co-processor update (`espos_wifi`, [hardware](hardware.md#over-the-link))
+both end in a restart, so neither may start while the other runs. Each asks
+the other's busy check (`espos_ota_busy()`, `espos_wifi_coproc_busy()`)
+through a weak reference, which is NULL when that component isn't linked,
+instead of requiring it. `espos_power` reads both to stay awake through
+either: `espos_ota_busy()` directly when it is built with `espos_ota`, and
+`espos_wifi_coproc_busy()` weakly.

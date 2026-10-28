@@ -13,7 +13,7 @@ import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
-from espos_apply_bump import apply, bump_text, main  # noqa: E402
+from espos_apply_bump import apply, bump_text, main, superseded  # noqa: E402
 
 BLOCK = """dependencies:
   idf: ">=6.0.0"
@@ -145,3 +145,44 @@ class ExitCodes(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Superseded(unittest.TestCase):
+    def setUp(self):
+        self.root = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.root)
+
+    def _pin(self, where: str, version: str):
+        d = self.root / where
+        d.mkdir(parents=True)
+        (d / "idf_component.yml").write_text(BLOCK.replace("1.11.3", version))
+
+    def test_a_newer_pin_supersedes_the_bump(self):
+        self._pin("a", "1.14.1")
+        self._pin("b", "1.14.1")
+        self.assertTrue(superseded(self.root, "espressif/mdns", "1.14.0"))
+        self.assertTrue(superseded(self.root, "espressif/mdns", "1.14.1"))
+
+    def test_an_older_pin_leaves_the_bump_to_do(self):
+        # Main moved off the bump's --from, but not as far as its --to: the
+        # pull request still has work in it and must not be closed.
+        self._pin("a", "1.12.0")
+        self.assertFalse(superseded(self.root, "espressif/mdns", "1.14.0"))
+
+    def test_one_manifest_behind_is_enough_to_keep_it(self):
+        self._pin("a", "1.14.0")
+        self._pin("b", "1.11.3")
+        self.assertFalse(superseded(self.root, "espressif/mdns", "1.14.0"))
+
+    def test_a_component_nothing_pins_is_not_superseded(self):
+        self._pin("a", "1.14.0")
+        self.assertFalse(superseded(self.root, "espressif/esp_hosted", "3.0.10"))
+
+    def test_the_flag_edits_nothing(self):
+        self._pin("a", "1.11.3")
+        before = (self.root / "a" / "idf_component.yml").read_text()
+        with contextlib.redirect_stderr(io.StringIO()):
+            rc = main(["--root", str(self.root), "--name", "espressif/mdns",
+                       "--from", "1.11.3", "--to", "1.14.0", "--superseded"])
+        self.assertEqual(rc, 1)
+        self.assertEqual((self.root / "a" / "idf_component.yml").read_text(), before)
