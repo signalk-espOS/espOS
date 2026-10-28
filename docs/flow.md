@@ -1,11 +1,10 @@
 # The data-flow graph
 
-`espos_flow` is the layer that turns "read a pin, scale it, publish it" from
-thirty lines of C into four lines of wiring. It is the piece
-[migrating from SensESP](migration-from-sensesp.md) promised as the "planned
-facade": producer/consumer nodes, `Poll<T>`, chained with `connect_to()` or
-`>>`. It is sugar over the C API, never a replacement for it — the C shape in
-that document is what a graph produces underneath.
+`espos_flow` turns "read a pin, scale it, publish it" from thirty lines of C
+into a few lines of wiring. It gives you SensESP-style nodes such as
+`Poll<T>`, joined with `connect_to()` or `>>`
+([Migrating from SensESP](migration-from-sensesp.md)). It is built on the C
+API and does not replace it: a graph makes the same calls underneath.
 
 It comes in two halves, and you can use either without the other:
 

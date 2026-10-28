@@ -1,12 +1,11 @@
 # Concepts
 
-What espOS is made of, in what order it comes up, which task calls you back,
-and how a setting travels from a JSON descriptor to the web UI. The
-per-component documents ([config](config.md), [net](net.md), [wifi](wifi.md),
-[signalk](signalk.md), [ota](ota.md), [health](health.md), [REST
-API](rest-api.md)) go deeper; this one is the map.
+This page is the map. It shows which components espOS has, the order
+`espos_start()` brings them up in, which task calls your callbacks, how a
+setting gets from a JSON file to the settings page, and which events you can
+listen to. Each component's own page goes into detail.
 
-## Component graph
+## The components
 
 ```
                  application (main/)
@@ -16,191 +15,196 @@ API](rest-api.md)) go deeper; this one is the map.
    ┌────────┬───────────┼───────────┬────────────┬───────────┐
 espos_log  espos_config  espos_health  espos_httpd  espos_net   espos_event
                                           │            │
-                                          ├─espos_time │                the wall clock; SNTP arms on NETWORK_UP
+                                          ├─espos_time │      the clock; SNTP starts on NETWORK_UP
                                           │            │
-                                          │        [espos_wifi]           transport: reports into espos_net; absent on esp32h2/h21/h4
+                                          │        [espos_wifi]     reports into espos_net; not on esp32h2/h21/h4
                                           │            │
                                           └─────┬──────┘
-                                             espos_sk                 optional, started if built
+                                             espos_sk              optional, started if built
                                                 │
-                                            espos_ota                 optional
-                                            espos_ble                 optional
-                       espos_n2k · espos_voice · espos_audio          optional, application-started
+                                            espos_ota              optional
+                                            espos_ble              optional
+                       espos_n2k · espos_voice · espos_audio       optional, the application starts them
 ```
 
-Arrows point at what a component needs. `espos_event` is a leaf: it needs
-nothing of espOS, so anything may post to it without creating a cycle.
-`espos_health` is likewise a leaf so that raising a condition never drags the
-SignalK stack in ([health.md](health.md)). `espos_net` is the network seam
-([net.md](net.md)): transports (`espos_wifi`, later Ethernet) report their
-link into it, and `espos_sk`, `espos_ota` and the mDNS responder ask it —
-never a radio — so a firmware without WiFi keeps all three. `espos_n2k`,
-`espos_voice` and `espos_audio` have no start order of their own; an
-application starts them when its board has the hardware.
+A line points at what a component needs. Three of them are worth knowing:
 
-`espos_time` ([time.md](time.md)) is the device's wall clock. It sits on
-`espos_httpd` (its `/time` endpoints) and pointedly NOT on `espos_sk`, even
-though the SignalK stream is one of its sources: `espos_sk` reads the clock for
-its delta timestamps, so the dependency already runs that way and the reverse
-would close a cycle. `espos_time` offers `espos_time_set()` instead and
-`espos_sk` calls it. `espos_log` and `espos_httpd` want the clock too and may
-not depend on it for the same reason; both declare a weak "there is no clock"
-function that `espos_time` overrides when it is in the build, so a firmware
-without the component behaves exactly as it did before and neither names the
-other.
+* `espos_event` and `espos_health` need nothing else in espOS, so any
+  component can post an event or raise a warning without a dependency loop
+  ([health](health.md)).
+* `espos_net` is where every network link reports in, WiFi or Ethernet
+  ([net](net.md)). Signal K, updates and mDNS ask `espos_net` whether the
+  network is up and never talk to a radio, so a firmware without WiFi keeps
+  all three.
+* `espos_n2k`, `espos_voice` and `espos_audio` are not part of the start
+  order. The application starts them when its board has the hardware.
 
-Firmware updates are tied together the same way. A host OTA (`espos_ota`) and
-a radio co-processor update (`espos_wifi`, [hardware.md](hardware.md#over-the-link))
-each end in a restart, so neither starts while the other runs; each declares
-the other's busy check weak (`espos_ota_busy()`, `espos_wifi_coproc_busy()`)
-rather than depending on it, and `espos_power` reads both to stay awake through
-either.
+Why the clock and the two kinds of update are wired the way they are is in
+[Decisions](decisions.md#why-the-clock-and-the-update-checks-use-weak-references).
 
-## espos_start(): the order and why
+## What espos_start() does, in order
 
 ```c
 #include "espos.h"
 void app_main(void) { ESP_ERROR_CHECK(espos_start(NULL)); /* your application */ }
 ```
 
-| Step | Call | Why here |
+| Step | Call | Why at this point |
 |---|---|---|
-| 1 | `espos_log_init()` | The ring must exist before the first line worth keeping; `/api/v1/logs` shows the boot. |
-| 2 | `espos_config_init()` | Everything after this reads its settings from the store. Posts `ESPOS_EVENT_CONFIG_READY`. |
-| — | `espos_health_policy_start()` | Still inside `espos_init()`, when `espos_start_opts_t.health_watchdog` is set (the default) and `CONFIG_ESPOS_CORE_HEALTH_WATCHDOG` is on: the device watchdog is armed before anything can stall ([health.md](health.md)). `espos_core` also subscribes to `NETWORK_UP`/`NETWORK_DOWN` here to raise and clear the `netDown` warning. A failure logs and the boot goes on without the watchdog. |
-| — | `before_network` hook | Display up, so it can show the portal SSID; anything that must exist before a client can connect. |
-| 3 | `espos_httpd_start()` | Before the network: `/net/status` and the provisioning portal's page have to be there the moment there is a link or an access point. Posts `HTTPD_STARTED`. |
-| 4 | `espos_net_start()` | Base MAC and device id, hostname (`net.hostname`, moved once from a 0.7 `wifi.hostname`), `/net/status`, the `net` SSE event, and the mDNS responder (`<hostname>.local`, `_http._tcp`, `_espos._tcp`, [net.md](net.md)). Before any transport, so the hostname is on every interface they create. Posts `NETWORK_UP` / `NETWORK_DOWN` as the default route comes, goes or moves; `MDNS_READY` follows every `NETWORK_UP`. |
-| 5 | `espos_time_start()` | The wall clock ([time.md](time.md)): adopts a time carried through a deep sleep, registers `/time`, and arms SNTP so it starts polling on the first `NETWORK_UP` — after `espos_net` so that event is not missed, before every transport so it does not matter which one produces it. Not a `STAGE`: a device that boots without knowing the time still does everything else, and the log says which it is. |
-| 6 | `espos_wifi_start()` (if built and `CONFIG_ESPOS_WIFI`) | Station, portal, `/wifi` endpoints; reports its link into `espos_net`. Built on every chip with a radio or a co-processor, excluded on the 802.15.4-only H-series. |
-| 7 | `espos_sk_start()` (if built) | Discovery is mDNS and the stream needs a link; both ask `espos_net`, so it must exist. Just before it, `espos_sk_set_app_name(espos_app_name())`, so the access request reads `<app> <hostname>` in the server's list. Also starts the SignalK clock fallback (`src/sk_time.c`), which follows `navigation.datetime` while the clock is unset. |
-| 8 | `espos_ota_start()` (if built) | Its API sits on the HTTP server; its confirm/rollback policy watches `espos_net`. |
-| 9 | `espos_ble_start()` (if built) | Authenticates with the SignalK token. For BLE "built" means both the component in the list and `CONFIG_BT_BLUEDROID_ENABLED`; a firmware may link `espos_ble` without the stack and nothing is started. |
+| 1 | `espos_log_init()` | So the boot itself shows up in `/api/v1/logs`. |
+| 2 | `espos_config_init()` | Everything after this reads its settings. |
+| 3 | `espos_health_policy_start()` | The device watchdog, armed before anything can hang ([health](health.md)), unless it is turned off (below) or fails to start. `espos_core` also starts listening for `NETWORK_UP` and `NETWORK_DOWN` here, to raise and clear the `netDown` warning. Then `espos_init()` posts `CONFIG_READY`. |
+| | your `before_network` hook | For anything that must exist before someone connects, such as a display that shows the setup network's name. |
+| 4 | `espos_httpd_start()` | The setup page has to be there as soon as there is a link or a setup network. Posts `HTTPD_STARTED`. |
+| 5 | `espos_net_start()` | Device id, hostname (`net.hostname`), `/net/status` and the mDNS responder (`<hostname>.local`, [net](net.md)). It comes before WiFi and Ethernet so the hostname is set on every interface. Posts `NETWORK_UP` and `NETWORK_DOWN`. |
+| 6 | `espos_time_start()` | The clock ([time](time.md)). It keeps a time carried through deep sleep and starts SNTP on the first `NETWORK_UP`. |
+| 7 | `espos_wifi_start()` | Station, setup network and `/wifi`, when WiFi is in the build and `CONFIG_ESPOS_WIFI` is on. Every chip with a radio or a radio co-processor has the component; the H-series chips don't. |
+| 8 | `espos_eth_start()` | Wired Ethernet, when the component is in and both `CONFIG_ETH_USE_ESP32_EMAC` (the chip's own EMAC) and `CONFIG_ESPOS_ETH` are on. It runs beside WiFi, and `espos_net` prefers the cable. |
+| 9 | `espos_sk_start()` | Signal K, if built. It needs `espos_net` for discovery and the stream. Just before it, the application name is set, so the access request reads `<app> <hostname>`. It also sets the clock from `navigation.datetime` while the clock is unset. |
+| 10 | `espos_ota_start()` | Updates, if built. Its API sits on the web server and it watches `espos_net` to decide when to confirm a new image. |
+| 11 | `espos_ble_start()` | The Bluetooth gateway, if built. It signs in with the Signal K token. It only counts as built when both the component and `CONFIG_BT_BLUEDROID_ENABLED` are in. |
+| 12 | `espos_prov_start()` | Bluetooth WiFi setup ([provisioning](provisioning.md)), if built with both `CONFIG_ESPOS_PROV` and `CONFIG_BT_BLUEDROID_ENABLED`, and only while no WiFi network is configured. |
+| 13 | `espos_power_start()` | The deep-sleep duty cycle ([power](power.md)), if built. Last, because it waits for everything above. |
 
-`espos_init()` is steps 1–2, `espos_start_network()` steps 3–9; both are
-idempotent, as is every `espos_*_start()`. "If built" is decided at
-configure time: `espos_core` links `espos_sk`, `espos_ota` and `espos_ble`
-only when they are in the project's component list, so a firmware picks its
-stacks by listing components, not by editing a start sequence.
+The time, Ethernet, Bluetooth, provisioning and power steps don't stop the
+boot when they fail. The device logs a warning and comes up without that
+part, because a device that serves its web page is more use than one that
+restarts in a loop. A watchdog that fails to start doesn't stop it either.
 
-The order is also enforced at runtime. Each start checks its prerequisite
-and fails with `ESP_ERR_INVALID_STATE` plus one log line naming the missing
-call — `espos_wifi_start: call espos_httpd_start() first (or espos_start())`:
+`espos_init()` runs steps 1 to 3 and `espos_start_network()` runs 4 to 13,
+for an application that wants to do its own work in between
+([`two_phase_boot`](examples.md)). Calling a start function twice is harmless,
+except `espos_prov_start()`, which returns `ESP_ERR_INVALID_STATE` while it
+runs. To turn the watchdog off, clear
+`CONFIG_ESPOS_CORE_HEALTH_WATCHDOG`, or set
+`espos_start_opts_t.health_watchdog` to false. The option only works through
+`espos_start()`, so a two-phase boot uses the Kconfig switch.
 
-| Call | Requires |
+"If built" means the component is in your project. `espos_core` links
+`espos_sk`, `espos_ota` and `espos_ble` only when you list them, so you pick
+features by listing components, not by editing a start sequence.
+
+If you call the start functions yourself in the wrong order, the call fails
+with `ESP_ERR_INVALID_STATE` and logs what is missing, for example
+`espos_wifi_start: call espos_httpd_start() first (or espos_start())`:
+
+| Call | Needs first |
 |---|---|
-| `espos_httpd_start()` | `espos_config_is_ready()` |
-| `espos_net_start()` | `espos_config_is_ready()` and `espos_httpd_handle() != NULL` |
-| `espos_time_start()` | `espos_config_is_ready()` and `espos_httpd_handle() != NULL` |
-| `espos_wifi_start()` | `espos_httpd_handle() != NULL` and `espos_net` started (`espos_net_get_status()` answers) |
-| `espos_sk_start()` | `espos_net` started |
-| `espos_ota_start()` | HTTP server and `espos_net` started |
+| `espos_httpd_start()` | config |
+| `espos_net_start()` | config and the web server |
+| `espos_time_start()` | config and the web server; call it after `espos_net_start()` or it can miss the first `NETWORK_UP` |
+| `espos_wifi_start()` | the web server and `espos_net` |
+| `espos_eth_start()` | `espos_net` |
+| `espos_sk_start()` | `espos_net` |
+| `espos_ota_start()` | the web server and `espos_net` |
+| `espos_power_start()` | `espos_start_network()` |
 
-A device coming up narrates itself on the monitor in this order: `espOS
-<version> on <target> — app <name> <version>`; `no network configured: join
-"<portal ssid>" and open http://192.168.4.1` (or `connected to "<ssid>" as
-<ip> — web UI: http://<hostname>.local`); `found signalk-server "<name>" at
-<host>:<port>`; `access requested — approve it in the server UI: Security →
-Access Requests`; `approved, streaming`.
+On the serial monitor a device tells you where it is, in this order: the
+espOS and app versions, the setup network to join (or the WiFi it joined),
+the Signal K server it found, the access request, and finally
+`approved, streaming`. [Getting started](getting-started.md#2-read-the-monitor)
+shows the lines.
 
-## Threading contracts
+## Which task calls you
 
-Every callback in espOS runs on a task that is not yours. The rule is the
-same everywhere — copy what you need, return quickly, never block on
-something that may itself be waiting for the task you are on — but the task
-differs, and it matters when you reach for a lock:
+Most callbacks run on an espOS task, and some on whichever task did the
+thing they report, which can be yours. The rule is the same everywhere: copy what you need, return quickly, and don't wait for
+anything that might be waiting for the task you are on. Which task it is
+matters when you take a lock:
 
-| Callback | Runs on | Notes |
+| Callback | Runs on | Watch out for |
 |---|---|---|
-| `espos_config_subscribe` change callback | the writer's task (an HTTP handler, usually) | Store lock released; the callback may read or write config. |
-| `espos_sk_subscribe` update callback | the SK stream task | Strings valid only during the call. Never call an `espos_sk_*` that could wait on the stream. |
-| `espos_sk_put` result callback | the SK stream task | Same rules. |
-| `espos_health_add_sink` sink | the reporting task | No lock held; a sink may report conditions of its own. |
-| `espos_sk_http_*`, `espos_sk_get_value/meta` | the caller | **Blocks** up to 2×timeout_ms; not from the stream task, an event handler or a URI handler. |
-| `espos_mdns_start/add_service/remove_service` | the caller | **May block** a few ms on the responder task; not from an event or URI handler. |
-| `espos_net_subscribe` callback | the task of the transport that reported the change — for WiFi the default event loop task | No `espos_net` lock held; the status is valid for the call only. Copy it out and return; never block. |
-| `espos_net_report()` (transports only) | the caller | Runs the subscribers and posts `NETWORK_UP/DOWN` before returning; never call it under a lock a subscriber might want. |
-| `espos_health` policy tick | the `esp_timer` task | Every 10 s: reports `lowMemory`/`taskStalled`, counts strikes, restarts; sinks run there on that tick. |
-| `espos_time_subscribe` callback | the task of the source that set the clock — IDF's SNTP task for `sntp`, the SignalK stream task for `sk`, the HTTP server's for a manual `PUT` | No `espos_time` lock held. Copy what you need and return; never block. Note that `espos_log`'s wall-clock prefix takes the `espos_time` lock while holding the ring lock, so nothing inside `espos_time` may log under its own lock. |
-| HTTP URI handlers (`espos_httpd_register`) | the `esp_http_server` task | One task for all requests; a slow handler stalls the UI. |
-| `espos_httpd_sse_on_connect` callback | the `esp_http_server` task | Send the client its snapshot with `espos_httpd_sse_send()` and return. |
-| `espos_log_set_notify` callback | a FreeRTOS timer task | At most every 500 ms, never from inside the logging call — so it may itself log. |
-| `ESPOS_EVENT` handlers | the default esp_event loop task | Shared with `WIFI_EVENT`/`IP_EVENT`; a blocked handler stalls the WiFi driver's own events. |
-| `espos_log_read` visitor | the caller, with the ring locked | Do not log from inside. |
-| `espos_wifi_refresh_rssi()` | the caller | **May block** on a co-processor RPC; not from a UI or event task. |
+| `espos_config_subscribe` | the task that changed the setting, usually a web request | You may read and write config from it. |
+| `espos_sk_subscribe` | the Signal K stream task | Strings are only valid during the call. Don't call anything that waits on the stream. |
+| `espos_sk_put` result | the Signal K stream task | Same as above. |
+| `espos_health_add_sink` | the task that raised the condition; when you register, the conditions so far are replayed on your task | You may raise conditions of your own. |
+| `espos_net_subscribe` | the task of the link that changed; for WiFi, the default event loop | The status is only valid during the call. |
+| `espos_time_subscribe` | whatever called `espos_time_set()`: SNTP's task, the Signal K stream task, a web request, or your own code | Don't block. |
+| `espos_httpd_register` handlers | the web server task | One task serves every request, so a slow handler stalls the web page. |
+| `espos_httpd_sse_on_connect` | the web server task | Send the new client its first update and return. |
+| `espos_log_set_notify` | a timer task | At most every 500 ms. You may log from it. |
+| `espos_log_read` visitor | your task, with the log locked | Don't log from it. |
+| `ESPOS_EVENT` handlers | the default event loop | WiFi uses the same task, so a handler that blocks stalls WiFi. |
+| `espos_health` policy | the `esp_timer` task, every 10 s | Health sinks run there on that tick. |
 
-Publishing is the other way round: `espos_sk_publish_*`, `espos_sk_notify`,
-`espos_health_report`, `espos_event_post`, `espos_net_get_status`,
-`espos_net_is_up`, `espos_time_now_ms` and `espos_time_is_synced` are
-thread-safe and never block for long (none of them touches a driver or waits
-on a network), so they are safe from any task, including the callbacks above.
+Some calls block, so they need a task of your own:
 
-## Descriptor → keys → UI
+* `espos_sk_http_*` and `espos_sk_get_value/meta` wait up to twice their
+  timeout. Never call them from the stream task, an event handler, a
+  Bluetooth callback or a web handler; [`two_phase_boot`](examples.md) shows
+  a worker task for them.
+* `espos_mdns_start/add_service/remove_service` can take a few milliseconds.
+  Not from an event or web handler.
+* `espos_wifi_refresh_rssi()` asks the radio co-processor on a P4 and waits
+  for the answer, which can take the whole transport timeout when the link is
+  stuck. Never from a display task or an event handler.
 
-A setting exists in exactly one place: a JSON descriptor per NVS namespace,
-registered by the component that owns it
-(`espos_config_add_descriptor(config/myns.json)` in its `CMakeLists.txt`).
-At build time the generator turns every registered descriptor into
+The calls that send things are safe from any task, callbacks included:
+`espos_sk_publish_*`, `espos_sk_notify`, `espos_health_report`,
+`espos_event_post`, `espos_net_get_status`, `espos_net_is_up`,
+`espos_time_now_ms` and `espos_time_is_synced`. None of them waits on a
+driver or the network.
 
-* `espos_cfg_keys.h` — `ESPOS_CFG_NS_<NS>` and `ESPOS_CFG_<NS>_<KEY>`
-  constants, so code never spells an NVS key by hand;
-* the C tables `espos_config` validates against at runtime — types, ranges,
-  defaults, `secret`, `restart_required`;
-* the JSON Schema served at `GET /api/v1/config/schema`, from which the web
-  UI renders its forms without knowing any component.
+Two notes for people writing transports or touching the clock code:
+`espos_net_report()` runs the subscribers and posts the event before it
+returns, so don't call it while holding a lock a subscriber might want. And
+`espos_log` takes the `espos_time` lock while it holds its own, so nothing
+inside `espos_time` may log under its lock.
 
-So a new setting is one JSON entry: the key constant, the validation, the
-REST document and the settings page all follow. A project that registers no
-descriptor of its own still builds (empty tables, an empty schema).
-Details, migrations and the descriptor format: [config.md](config.md).
+## From a JSON file to the settings page
+
+Every setting is written down once, in a JSON file that belongs to the
+component that uses it. The component registers the file in its
+`CMakeLists.txt` with `espos_config_add_descriptor(config/myns.json)`. The
+build then makes three things from it:
+
+* `espos_cfg_keys.h`, with a constant for every key, so code never types an
+  NVS key by hand;
+* the tables `espos_config` checks every write against: type, range,
+  default, whether it is secret, whether it needs a restart;
+* the schema at `GET /api/v1/config/schema`, which the web page turns into
+  forms.
+
+So a new setting is one JSON entry, and the constant, the check, the REST
+API and the field on the settings page all follow from it.
+[Config](config.md) has the file format and how to migrate a key.
 
 ## Events
 
-`ESPOS_EVENT` on the default esp_event loop; subscribe with
-`espos_event_subscribe(id, handler, arg)`, `ESP_EVENT_ANY_ID` for all.
+espOS posts `ESPOS_EVENT` on the default esp_event loop. Subscribe with
+`espos_event_subscribe(id, handler, arg)`, or `ESP_EVENT_ANY_ID` for all of
+them.
 
-| Event | Posted by | Data |
+| Event | When | Data |
 |---|---|---|
-| `ESPOS_EVENT_CONFIG_READY` | `espos_init()` after the store is up | — |
-| `ESPOS_EVENT_HTTPD_STARTED` | `espos_httpd_start()` | — |
-| `ESPOS_EVENT_NETWORK_UP` | `espos_net`, a default route exists (a transport reported an address) | `espos_event_network_t {ip, hostname}` |
-| `ESPOS_EVENT_NETWORK_DOWN` | `espos_net`, the default route is gone (one per UP; a route that moves to another interface or address is DOWN then UP) | — |
-| `ESPOS_EVENT_MDNS_READY` | `espos_net` (mdns.c): on every `NETWORK_UP` once the responder runs, and once from `espos_mdns_start()` if the route is already up | — |
-| `ESPOS_EVENT_SK_SERVER_SELECTED` | `espos_sk`, a server was chosen or changed | `espos_event_sk_server_t {host, port}` |
-| `ESPOS_EVENT_SK_TOKEN_APPROVED` | `espos_sk`, token verified | — |
-| `ESPOS_EVENT_SK_STREAM_CONNECTED` / `_DISCONNECTED` | `espos_sk` stream task, on every transition | — |
-| `ESPOS_EVENT_OTA_AVAILABLE` | `espos_ota`, manifest names a newer build | `espos_event_ota_t {version}` |
-| `ESPOS_EVENT_TIME_SYNCED` | `espos_time`, a source set the wall clock (every set, not only the first) | `espos_event_time_t {source, unix_ms}` |
-| `ESPOS_EVENT_UPDATE_STARTED` / `_FINISHED` | `espos_ota` around an install's download, and `espos_wifi` around a radio co-processor update; one FINISHED per STARTED, whether it succeeded or not. `espos_ble` suspends scanning in between | — |
+| `CONFIG_READY` | `espos_init()` has loaded the settings and tried to arm the watchdog, if it is on | |
+| `HTTPD_STARTED` | the web server runs | |
+| `NETWORK_UP` | the device has a default route, or it moved to another link | `{ip, hostname}` |
+| `NETWORK_DOWN` | the default route is gone. One per `NETWORK_UP`; moving to another link is a DOWN then an UP | |
+| `MDNS_READY` | after every `NETWORK_UP` once mDNS runs, and once from `espos_mdns_start()` if the network is already up | |
+| `SK_SERVER_SELECTED` | a Signal K server was picked or changed | `{host, port}` |
+| `SK_TOKEN_APPROVED` | the server approved the device | |
+| `SK_STREAM_CONNECTED` / `_DISCONNECTED` | the data stream opened or closed | |
+| `OTA_AVAILABLE` | a newer firmware is on offer | `{version}` |
+| `TIME_SYNCED` | something set the clock, every time | `{source, unix_ms}` |
+| `PORTAL_UP` / `PORTAL_DOWN` | the setup network came up or went away. On a P4 WiFi and Bluetooth share one radio, so anything that scans should pause in between | |
+| `UPDATE_STARTED` / `_FINISHED` | a firmware or radio co-processor update began or ended, successful or not. Bluetooth scanning pauses in between | |
 
-Events are notifications, not state: a subscriber that comes late asks the
-component's status API (`espos_net_get_status()`, `espos_wifi_get_status()`,
-`espos_sk_get_server()`, `espos_ota_status_json()`) for the current picture and uses events to learn
-about changes from then on. Handlers run on the event loop task (see above).
-Ids are part of the ABI and are only ever appended.
+The full names start with `ESPOS_EVENT_`, and the data types are
+`espos_event_network_t`, `espos_event_sk_server_t`, `espos_event_ota_t` and
+`espos_event_time_t`.
 
-## From SensESP's model to espOS's
+An event tells you something changed; it doesn't tell you the state. If
+your code starts late, ask the component first (`espos_net_get_status()`,
+`espos_wifi_get_status()`, `espos_sk_get_server()`, `espos_ota_status_json()`)
+and use events for changes after that. Handlers run on the event loop task,
+so the rules above apply. New events are only ever added at the end, so the
+ids don't change.
 
-SensESP is a graph: sensors, transforms and outputs are objects created in
-`setup()`, wired with `connect_to()`, and ticked by one event loop; a
-setting is an object's `config_path` plus a `ConfigItem()`. espOS is a
-runtime with a C API: the components above come up in one call, and the
-application is a task that reads, computes and calls `espos_sk_publish_*()`;
-a setting is one entry in a descriptor. Both reach the same wire — deltas to
-`vessels.self`, an access request, metadata for non-standard paths — and
-that is why a SensESP author is at home here after one afternoon. A typed
-C++ facade over this API is planned for a later tranche; until it exists the
-C shape below is the shape. The full mapping, symbol by symbol, and a worked
-port of SensESP's `analog_input.cpp` are in
-[migration-from-sensesp.md](migration-from-sensesp.md).
+## Coming from SensESP
 
-| SensESP | espOS |
-|---|---|
-| `SensESPAppBuilder` … `get_app()` | `espos_start(NULL)` |
-| `event_loop()->onRepeat()` + `RepeatSensor` | a task with `vTaskDelay()`, or an `esp_timer` |
-| `connect_to()` chain of transforms | arithmetic in C between the read and the publish |
-| `SKOutputFloat`, `SKMetadata` | `espos_sk_publish_number()`, `espos_sk_declare_meta()` |
-| `SKValueListener` / `SKPutRequest` | `espos_sk_subscribe()` / `espos_sk_put()` |
-| `config_path` + `ConfigItem()` | a key in `config/<ns>.json`; `espos_config_get_*()`, `espos_config_subscribe()` |
-| `SystemStatusLed`, `enable_wifi_watchdog()` | `espos_health` sinks and its policy |
-| `enable_ota()` | `espos_ota`: signed, rolled back, manifest-driven |
+SensESP wires sensors, transforms and outputs into a graph. espOS can do the
+same with [`espos_flow`](flow.md), or you can write plain C: a task that
+reads, computes and calls `espos_sk_publish_*()`. Both send the same data.
+[Migrating from SensESP](migration-from-sensesp.md) maps each SensESP class
+to espOS and ports the `analog_input` example both ways.

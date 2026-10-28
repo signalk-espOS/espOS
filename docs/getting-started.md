@@ -1,34 +1,33 @@
 # Getting started
 
-From a fresh clone to a device that streams a value into Signal K. Most of
-the wall-clock time is the toolchain install and the first build; the espOS
-part is a handful of commands and two clicks in the server's UI.
+This page takes you from a fresh clone to a device that sends a value to
+Signal K. Installing ESP-IDF and the first build take the most time. The
+espOS part is a few commands and two clicks in the server.
 
-## Prerequisites
+## What you need
 
-* **ESP-IDF 6.0.x.** espOS is tested on the release named in `.idf-version`;
-  any other 6.0.x builds with one warning, and anything outside
-  6.0 is refused ([Troubleshooting](troubleshooting.md#build)). Install it
-  with the [Espressif Installation Manager](https://docs.espressif.com/projects/idf-im-ui/en/latest/)
-  or the [classic guide](https://docs.espressif.com/projects/esp-idf/en/latest/esp32c6/get-started/index.html),
-  then export it in every shell you build from — the installer prints the
-  exact line, which is a form of
+* **ESP-IDF 6.0.x.** espOS is tested on the release named in
+  `.idf-version`. Another 6.0.x release builds with a warning, and anything
+  outside 6.0 is refused ([Troubleshooting](troubleshooting.md#build)).
+  Install it with the [Espressif Installation Manager](https://docs.espressif.com/projects/idf-im-ui/en/latest/)
+  or the [classic guide](https://docs.espressif.com/projects/esp-idf/en/latest/esp32c6/get-started/index.html).
+  Then export it in every shell you build from. The installer prints the
+  exact line, which looks like this:
 
   ```sh
   . $IDF_PATH/export.sh
   ```
 
-* **A board** with an ESP32, ESP32-S3, ESP32-C3, ESP32-C6 or ESP32-P4
-  ([Hardware](hardware.md)). The commands below say `esp32c6`; substitute
-  your chip.
-* **A signalk-server** (2.x — espOS is verified against 2.31) on the same
-  network, with security enabled, which is the default. Without security
-  the device streams without a token and step 4 does not apply.
-* `git`. Node is **not** needed — the web UI bundle is committed — and
-  Python is IDF's own. `libbsd-dev` is for the host tests only
-  ([Development](development.md)), not for a device.
+* **A board** with an ESP32, ESP32-S3, ESP32-C3, ESP32-C5, ESP32-C6 or
+  ESP32-P4 ([Hardware](hardware.md)). The commands below say `esp32c6`; use
+  your chip instead.
+* **A Signal K server** 2.x on the same network, with security on, which is
+  the default. espOS is tested against 2.31. Without security the device
+  sends data without a token and you can skip step 4.
+* **git.** You don't need Node, because the web UI is committed already, and
+  ESP-IDF brings its own Python.
 
-## 1. Clone and build the minimal example
+## 1. Build the minimal example
 
 ```sh
 git clone https://github.com/signalk-espOS/espOS.git
@@ -38,17 +37,19 @@ idf.py build flash monitor
 ```
 
 Every example is a complete ESP-IDF project, so `idf.py` works inside its
-directory as in any other. Two lines of the first configure are expected: a
-warning that a *development* signing key was generated (every image is
-signed; [OTA](ota.md#signing-key)), and `partition table
-…/partitions/4mb.csv`. If `flash` cannot find the port, add
-`-p /dev/ttyACM0` (or `/dev/ttyUSB0`). On a shared or small machine use
-`/path/to/espOS/scripts/build.sh build` in place of `idf.py build` — one lock
-per machine, half the cores ([Development](development.md)).
+folder as usual. The first build prints two lines you can ignore. One says a
+development signing key was made, since every image is signed
+([OTA](ota.md#signing-key)). The other names the partition table,
+`…/partitions/4mb.csv`.
 
-## 2. What the monitor prints, in order
+If `flash` cannot find the board, add `-p /dev/ttyACM0` (or `/dev/ttyUSB0`).
+On a small or shared machine, build with `../../../../scripts/build.sh build`
+instead of `idf.py build`. It caps the job count so the machine stays usable
+([Development](development.md)).
 
-The device narrates itself. After IDF's own boot lines:
+## 2. Read the monitor
+
+After ESP-IDF's own boot lines, the device tells you what it is doing:
 
 ```text
 I (612) espos: espOS 0.7.0 on esp32c6 — app minimal 0.7.0-12-gabc1234
@@ -56,23 +57,21 @@ I (702) espos_wifi: no network configured: join "espOS-1a2b" and open http://192
 I (710) minimal: publishing environment.inside.temperature every second
 ```
 
-The banner names espOS's version and the target, then the application and
-*its* version — `git describe`, so a build between two releases is
-distinguishable from the release. Nothing is configured yet, so the
-provisioning portal is up at once and the second line says what to do. The
-third is the application: `espos_start()` has returned and it publishes
-already — the values are batched and buffered until the stream is up, then
-drained oldest first.
+The first line names the espOS version, the chip, and your application's
+version from `git describe`. The second says there is no WiFi set up yet, so
+the setup network is already on. The third comes from the application. It
+publishes straight away; espOS holds the values until it reaches the server
+and then sends them in order.
 
-## 3. Join the portal and pick your WiFi
+## 3. Pick your WiFi
 
-On a phone or laptop, join the open WiFi network **`espOS-1a2b`** (the four
-hex digits are the end of the device's MAC and differ per device). Most
-phones pop their "sign in to network" sheet by themselves; otherwise open
-`http://192.168.4.1`. The page scans, you pick your network and enter its
-password, save. The portal drops the moment the station connects — your
-phone loses the `espOS-…` network, which is expected — and the monitor goes
-on:
+On a phone or laptop, join the open WiFi network **`espOS-1a2b`**. The four
+characters come from the device's MAC address, so every device has its own.
+Most phones open a sign-in page by themselves. If yours doesn't, open
+`http://192.168.4.1`. Pick your network, enter its password and save.
+
+The setup network goes away as soon as the device joins yours, so your phone
+drops it. That is expected. The monitor carries on:
 
 ```text
 I (9310) espos_wifi: connected to "Boat" as 192.168.1.23 — web UI: http://espos-1a2b.local
@@ -80,60 +79,55 @@ I (9420) espos_sk: found signalk-server "boat" at 192.168.1.10:3000 (discovered 
 I (9650) espos_sk: access requested — approve it in the server UI: Security → Access Requests
 ```
 
-The device found the server by mDNS (`_signalk-http._tcp`) and posted an
-access request. From now on its own web UI answers at
-`http://espos-1a2b.local`: status, WiFi, Signal K, settings, logs, OTA.
+The device found the server over mDNS and asked it for access. Its own web
+page is now at `http://espos-1a2b.local`, with status, WiFi, Signal K,
+settings, logs and updates.
 
 ## 4. Approve the device in Signal K
 
-Open the server's admin UI and go to its **Security → Access Requests**
-page. The request is listed by the device's description — the application
-name and hostname, `minimal espos-1a2b` — and its client id. Give it
-**read/write** (publishing deltas needs it) and approve. The device polls
-for the decision and says:
+In the server's admin UI, open **Security → Access Requests**. The request
+shows the application name and hostname, here `minimal espos-1a2b`. Give it
+**read/write**, which it needs to send data, and approve it. The device
+checks back and prints:
 
 ```text
 I (17040) espos_sk: approved, streaming
 ```
 
-The token is stored in NVS, keyed by the server's identity, and survives
-reboots and re-flashing the application; a factory reset or `POST
-/api/v1/sk/forget` discards it. Denied by mistake? Nothing retries by
-itself; **Request again** on the device's Signal K page does
+The device keeps the token across reboots and new firmware. A factory reset
+or `POST /api/v1/sk/forget` deletes it. If you denied it by mistake, use
+**Request access** on the device's Signal K page
 ([Troubleshooting](troubleshooting.md#signal-k)).
 
 ## 5. Find the value
 
 In the server's **Data Browser**, look under `vessels.self` for
-`environment.inside.temperature`: `293.65` — Signal K stores SI units, so
-kelvin, 20.5 °C — refreshed every second. The source column reads
-`espos.<hostname>`, so with several devices you know which one a value came
-from. The example's `main.c` is 40 lines; the constant is where a sensor
-read goes. Next to it every espOS device publishes its own health every 10 s
-under `espos.<hostname>.*` — uptime, heap, RSSI, reconnect counts — so a
-dashboard sees the device without any application code
-([Signal K → Delta stream](signalk.md#delta-stream-m4)).
+`environment.inside.temperature`. It reads `293.65`, refreshed every second.
+Signal K stores SI units, so that is kelvin, or 20.5 °C. The source column
+reads `espos.<hostname>`, so you can tell devices apart.
 
-## Set a key before the boat leaves the marina
+The example's `main.c` is 40 lines, and the constant is where your sensor
+reading would go. Every espOS device also publishes its own health every 10
+seconds under `espos.<hostname>.*`: uptime, free memory, WiFi signal and
+reconnects ([Signal K](signalk.md#delta-stream-m4)).
 
-The web UI and REST API are open by default so the first minutes need no
-password. Once the device works, set `httpd.api_key` on the **Config** page
-(the Generate button makes a 20-character key and shows it once); from then on
-the UI asks for it, scripts send `Authorization: Bearer <key>`, and the
-setup-portal network stays exempt so you can never lock yourself out
-([security](security.md)).
+## Set a password before the boat leaves the marina
+
+The web page and REST API are open at first, so setting up needs no
+password. Once the device works, set `httpd.api_key` on the **Config** page.
+**Generate** makes a 20-character key and shows it once. After that the page
+asks for it and scripts send `Authorization: Bearer <key>`. If you lose the
+key, power-cycle the device three times: the setup network then lets you set
+a new one for ten minutes ([Security](security.md)).
 
 ## Next steps
 
-* **A setting of your own.** One entry in a JSON descriptor becomes a key
-  constant, a validated value and a field on the settings page:
-  [Add a setting](tutorials/add-a-setting.md); example `custom_settings`.
-* **Your own sensor.** Read it on your task, publish with
-  `espos_sk_publish_number()`, declare its metadata:
-  [Your first sensor](tutorials/first-sensor.md); example `analog_input`.
-* **The other examples**, one concept each, all built the same way:
-  [Examples](examples.md).
-* **How it fits together** — the start order, which task calls you back and
-  what you may do there: [Concepts](concepts.md). Read it before writing the
-  first callback.
-* **Coming from SensESP:** [Migrating from SensESP](migration-from-sensesp.md).
+* **Add a setting of your own.** One entry in a JSON file becomes a stored
+  value and a field on the settings page:
+  [Add a setting](tutorials/add-a-setting.md), example `custom_settings`.
+* **Read a real sensor** and publish it with `espos_sk_publish_number()`:
+  [Your first sensor](tutorials/first-sensor.md), example `analog_input`.
+* **Browse the other examples**, one idea each: [Examples](examples.md).
+* **Learn how it fits together** before you write your first callback:
+  [Concepts](concepts.md) covers the start order and which task calls you.
+* **Coming from SensESP?** [Migrating from SensESP](migration-from-sensesp.md).

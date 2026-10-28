@@ -125,7 +125,7 @@ dependencies:
       type: service
     version: 1.8.0
   espressif/mdns:
-    component_hash: ef0766474b37459f6ad22461e453a8713e780e831a7c993b16919d817988dff6
+    component_hash: b5b30022c46302eab89c1d2e3b6fb5918a627563a7462f0ee284b22b9a934967
     dependencies:
     - name: idf
       require: private
@@ -133,7 +133,7 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.14.1
+    version: 1.14.0
   espressif/tinyusb:
     component_hash: 16c8d774dab1f484d3e0c0f61105624d2424bbae864efd19818baf7b451b41e7
     dependencies:
@@ -155,7 +155,7 @@ dependencies:
       type: idf
     version: 6.0.3
   joltwallet/littlefs:
-    component_hash: 3af20a3d75c49db9dc2286fd50862c34055c9f578419ad1f2bf7ed3ed01391fe
+    component_hash: e1a0f4a6adf821759cb34703a91107bbdce5d7ff6f4728f40ab012bb87842974
     dependencies:
     - name: idf
       require: private
@@ -163,7 +163,7 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.22.3
+    version: 1.23.1
   signalk-espos/espos_audio:
     dependencies:
     - name: idf
@@ -235,7 +235,7 @@ dependencies:
     - name: joltwallet/littlefs
       rules:
       - if: target != linux
-      version: ==1.22.3
+      version: ==1.23.1
     - name: signalk-espos/espos_event
       override_path: ../espos_event
       version: ^0.24.0
@@ -272,7 +272,7 @@ dependencies:
     - name: espressif/mdns
       rules:
       - if: target != linux
-      version: ==1.14.1
+      version: ==1.14.0
     source:
       path: components/espos_net
       type: local
@@ -408,6 +408,6 @@ direct_dependencies:
 - signalk-espos/espos_sk_flow
 - signalk-espos/espos_time
 - signalk-espos/espos_wifi
-manifest_hash: 1b81681101119c1a3a6761aafa6b31a607e71e30e6c026c522b0f031c24212fb
+manifest_hash: 2faea505584201ef15c2016254404eb81fe8dce9027f7550d75508e300de8693
 target: esp32s3
 version: 3.0.0

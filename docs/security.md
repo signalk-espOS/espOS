@@ -1,205 +1,219 @@
 # Security notes
 
-What protects a device running espOS, what does not, and what to expect on
-the wire. The short version: the REST API and web UI are guarded by a shared
-API key once one is set, firmware images are signature-checked whatever their
-source, and everything travels over plain http on the boat LAN.
+This page says what protects an espOS device, what doesn't, and what
+travels over the network. In short:
 
-## Threat model
+* Once you set an API key, the REST API needs it, and so does everything the
+  web page does beyond showing its login.
+* The device only installs firmware with a valid signature, wherever the
+  image came from.
+* The device's own web server speaks plain http, so anyone who can capture
+  traffic on the boat's network can read the key.
 
-An espOS device sits on a boat's own network next to the SignalK server,
-the chartplotter and everyone's phone, and occasionally on a marina's shared
-WiFi. Its REST API can change any setting, reboot the device, factory-reset
-it, drop and re-request the SignalK token, and — through an application's own
-endpoints — do whatever the firmware exposes. The people to keep out are:
+## Who this keeps out
 
-* **the casual and the accidental** — a guest's phone that found
-  `espos-1a2b.local`, a script pointed at the wrong host, a browser tab left
-  open on the marina WiFi;
-* **a hostile web page** in the operator's own browser, trying to drive the
-  device through that browser (CSRF);
-* **the curious neighbour** on a shared network who can send requests but is
-  not capturing traffic.
+An espOS device sits on the boat's network next to the Signal K server, the
+chartplotter and everyone's phone, and now and then on a marina's shared
+WiFi. Its REST API can change any setting, reboot or factory-reset the
+device, drop and re-request the Signal K token, and do whatever the
+firmware's own endpoints allow. The API key is meant to keep out:
 
-Not in the model: someone **sniffing the LAN** (the key crosses it in clear,
-see Transport), someone with **the USB port** (no Secure Boot, no flash
-encryption in a development build), and the SignalK server itself, which the
-device trusts by design.
+* **accidents**: a guest's phone that found `espos-1a2b.local`, a script
+  pointed at the wrong address, a browser tab left open on the marina WiFi;
+* **a hostile web page** in your own browser that tries to use your browser
+  to reach the device (CSRF);
+* **a curious neighbour** on a shared network who can send requests but
+  isn't capturing traffic.
+
+It does not protect against someone **capturing traffic** on the network
+(the key crosses it in clear, see [Transport](#transport)), someone with
+**the USB port** (a development build has no Secure Boot and no flash
+encryption), or the Signal K server, which the device trusts by design.
 
 ## REST authentication
 
-Every endpoint is *protected* unless it is one of the few *public* ones
-([rest-api.md](rest-api.md) marks each). Protection is decided by one
-setting, **`httpd.api_key`**:
+Every endpoint is protected unless it is one of the few public ones
+([REST API](rest-api.md) marks each). One setting, **`httpd.api_key`**,
+decides what protected means:
 
 | `httpd.api_key` | Effect |
 |---|---|
-| empty (the default) | the API is **open** to anyone on the network, as before — a device that predates authentication keeps working after an update, and the first setup needs no key |
-| set (8–64 characters) | every protected request needs a credential, else `401` |
+| empty (the default) | The API is **open** to anyone on the network. A device from before authentication existed keeps working after an update, and first setup needs no key. |
+| set (up to 64 characters; under 8 is accepted with a warning) | Every protected request needs a credential, or it gets `401`. |
 
-Two credentials, one central check, before any handler runs:
+There are two kinds of credential, both checked in one place before any
+handler runs:
 
-* **`Authorization: Bearer <key>`** — for machine clients: the
-  signalk-hmi-designer, a fleet plugin, `curl`. Stateless; nothing is kept on
-  the device.
-* **A session cookie** — for browsers. `POST /api/v1/auth/login {"key": …}`
-  answers with `espos_sid`, `HttpOnly; SameSite=Strict; Path=/`, valid for
-  `httpd.session_ttl_s` (a day by default). `fetch()` and `EventSource` send
-  it by themselves; the web UI shows its login page when the device asks.
-  Sessions are a small RAM table (`CONFIG_ESPOS_HTTPD_MAX_SESSIONS`, 4): one
-  login too many evicts the one idle longest, a reboot forgets them all, and
-  changing the key drops every session at once — whoever knew the old key
-  logs in again with the new one.
+* **`Authorization: Bearer <key>`**, for programs: the HMI designer, a fleet
+  plugin such as the manager, `curl`. The device keeps nothing for these.
+* **A session cookie**, for browsers. `POST /api/v1/auth/login {"key": …}`
+  answers with the cookie `espos_sid` (`HttpOnly; SameSite=Strict; Path=/`),
+  valid for `httpd.session_ttl_s`, a day by default. `fetch()` and
+  `EventSource` send it by themselves, and the web UI shows its login page
+  when the device asks for one. The device keeps sessions in a small table in
+  RAM (`CONFIG_ESPOS_HTTPD_MAX_SESSIONS`, 4). One login too many pushes out
+  the session idle longest, a reboot forgets them all, and changing the key
+  ends every session, so everyone logs in again with the new key.
 
-A cookie is sent by the browser with whatever a page asks for, so a
-cookie-authenticated **state-changing** request (`PUT`, `POST`, `DELETE`)
-must also come from the device's own origin: `Origin` (or `Referer`) host
-must equal `Host`, else `403 forbidden`. This sits on top of the existing
-rule that state-changing requests carry `Content-Type: application/json`,
-which a browser cannot send cross-origin without a CORS preflight the device
-never grants. Bearer requests skip the origin check: the header is not
-something a browser adds on its own.
+The cookie is `SameSite=Strict`, so other sites' pages don't get it sent.
+As a second line of defence, a cookie-authenticated request that **changes something**
+(`PUT`, `POST`, `DELETE`) must also come from the device's own page: the
+host in `Origin` (or `Referer`) must equal `Host`, or the answer is
+`403 forbidden`. That comes on top of the older rule that such requests carry
+`Content-Type: application/json`, which a browser can't send to another site
+without a CORS preflight the device never allows. Bearer requests skip the
+origin check, because a browser never adds that header by itself.
 
-Guessing is slowed rather than blocked: after **five wrong keys within 60 s**
-every key check — login and Bearer alike, the right key included — answers
+Guessing is slowed down, not blocked. After **five wrong keys within 60 s**,
+every key check (login and Bearer, even with the right key) answers
 `429 too_many_attempts` with `Retry-After` for **30 s**. The counter is
-global (a device cannot tell clients apart cheaply); live cookies are not
-key checks and keep working. Key and session-id comparisons run in constant
-time over the maximum length.
+shared by all clients, because the device can't cheaply tell them apart.
+Sessions that are already logged in aren't key checks and keep working. Keys
+and session ids are compared in constant time over their maximum length, so
+not even the key's length leaks through timing.
 
-Applications get this for free: an endpoint registered through
-`espos_httpd_register()` is protected, an endpoint that must stay reachable
+Applications get this for free. An endpoint registered with
+`espos_httpd_register()` is protected. One that must stay reachable
 registers with `espos_httpd_register_ex(uri, ESPOS_HTTPD_PUBLIC)`, and a
 public handler can still ask `espos_httpd_request_authenticated()`. The
-public set is the UI bundle, `GET /api/v1/system/ping` (liveness: app,
-version, whether a key is wanted), the captive-portal probe URLs, and
-`/api/v1/auth/*` itself.
+public endpoints are the web UI files, `GET /api/v1/system/ping` (app,
+version, and whether a key is needed), the captive-portal probe URLs, and
+`/api/v1/auth/*`.
 
 ### The setup portal, and the way back in
 
-A request that arrives **on the device's own access point** is exempt from
-authentication **only while no key is set**. That is what the portal is for:
-`http://192.168.4.1` on a device straight off the bench, or one that has just
-been factory reset, is where the first `httpd.api_key` gets entered. The check
-compares the local socket address with the AP interface's IP, so it is not a
-header a remote client could forge, and it never applies to a request that came
-in over the station or Ethernet link.
+While **no key is set**, a request that arrives on the device's own setup
+network needs no authentication. That is what the setup network is for:
+`http://192.168.4.1` on a new or factory-reset device is where you enter the
+first `httpd.api_key`. The device checks the local address the request came
+in on, so a remote client can't fake it, and it never applies to requests
+over the station WiFi or Ethernet.
 
-Once a key is set, the access point is treated like any other network: Bearer
-or a login, the Origin rule, the throttle. Being on it is not evidence that
-anyone is at the device, because `wifi.portal_psk` is empty by default — so the
-access point is **open** — and espos_wifi raises it unattended:
-`wifi.portal_after_s` after a station link drops, or at once when no station
-network is configured. (It no longer raises one while another transport has the
-network, which is the Ethernet-only case — [wifi.md](wifi.md#portal-softap-provisioning)
-— but that is a reduction of the surface, not a credential.) Earlier releases
-exempted the access point unconditionally; [decisions.md](decisions.md) records
-why that changed.
+Once a key is set, the setup network is treated like any other: a Bearer key
+or a login, the origin rule, the throttle. Being on it proves nothing about
+who is near the device. `wifi.portal_psk` is empty by default, so the setup
+network is open, and the device raises it unattended:
+`wifi.portal_after_s` after the WiFi link drops, or at once when no network
+is configured. (It doesn't come up while another link such as Ethernet
+carries the network, see [WiFi](wifi.md#portal-softap-provisioning). That
+shrinks the exposure, but it is not a credential.) Earlier releases trusted the setup network
+always; [Decisions](decisions.md) records why that changed.
 
-**A lost key, with no cable.** Switch the device **off and on again three
-times**, waiting for it to come up each time and cycling within 20 s of each
-boot. The third cycle exempts the portal for 10 minutes: join `espOS-xxxx`,
-open the Config page and set a new key. `GET /api/v1/auth/status` reports
-`recovery_s`, the seconds left. The log says so too:
+**If you lose the key and have no cable**, switch the device **off and on
+three times**. Let it come up each time, and switch it off again within 20 s
+of the first two boots. After the third power-on, leave it running: for 10
+minutes the setup network needs no key. Join `espOS-xxxx`, open the Config
+page and set a new key.
+The setup network has to be up for this. A device connected to your WiFi
+doesn't show one, so switch that access point off or take the device out of
+its range; the setup network then comes up after `wifi.portal_after_s`
+(90 s).
+`GET /api/v1/auth/status` shows the seconds left as `recovery_s`, and the
+log says:
 
 ```
 W espos_auth: 3 power cycles: the setup access point is exempt from the API key for 600 s — set a new one
 ```
 
 > **On a device that is online over Ethernet, unplug the cable first.** The
-> window exempts requests that arrive on the access point; it does not raise
-> one, and there is none while another transport has the network. Unplugging
-> brings it back — at once on a device with no WiFi network configured, and
-> otherwise once its `portal_after_s` deadline has passed, measured from when
-> the station link dropped rather than from the unplug. The Ethernet side stays
-> authenticated throughout, so a key cannot be recovered
-> over the cable, only over the access point the cable was suppressing. Doing
-> the three cycles with the cable already out is the simpler order.
-> `wifi.portal_online = true`, set while you still have the key, avoids the
-> question; an application with presence hardware can also call
+> recovery window only applies to the setup network; it doesn't raise one,
+> and there is none while Ethernet carries the network. Unplugging brings it
+> back: at once if no WiFi network is configured, otherwise once
+> `portal_after_s` has passed since the WiFi link dropped (not since the
+> unplug). Ethernet stays protected the whole time, so you can't recover a
+> key over the cable. The easy order is to unplug first, then power-cycle.
+> Setting `wifi.portal_online = true` while you still have the key avoids
+> all this. Firmware with a real presence button can also call
 > `espos_wifi_portal_open(true)` and `espos_httpd_auth_recovery_open()`
 > together.
 
-Only a **power-on** reset counts — a watchdog reboot, a panic or a software
-restart does not, so a device in a reboot loop cannot cycle its way open — and
-the count is kept in NVS (RTC memory does not survive the power being removed),
-written only while a key is set, so an open device pays no flash writes for it.
-A boot that lasts longer than `CONFIG_ESPOS_HTTPD_RECOVERY_CLEAR_S` clears the
-count, so only cycles in quick succession add up. The window lives in RAM: a
-reboot ends it. The numbers are
-`CONFIG_ESPOS_HTTPD_RECOVERY_CYCLES`, `CONFIG_ESPOS_HTTPD_RECOVERY_CLEAR_S` and
-`CONFIG_ESPOS_HTTPD_RECOVERY_WINDOW_S`; `CONFIG_ESPOS_HTTPD_PORTAL_RECOVERY=n`
-removes the path entirely for a device whose power an untrusted person can
-reach — keep a cable for that one.
+The details:
 
-A consumer that can prove presence properly — a recessed button, a jumper, a
-key switch — calls `espos_httpd_auth_recovery_open(seconds)` from that event
-instead. Do not call it from a timer or a network request: that gives the API
-key away. The window never relaxes anything on the station side, and a lockout
-does not apply to it, because being locked out is one of the things it exists to
-recover from.
+* Only switching the **power** off counts. A watchdog reboot, a crash or a
+  software restart doesn't, so a device stuck in a reboot loop can't open
+  itself up.
+* The count is kept in NVS, because RTC memory doesn't survive a power cut.
+  It is only written while a key is set, so a device without a key pays no
+  flash writes for it.
+* A boot that lasts longer than `CONFIG_ESPOS_HTTPD_RECOVERY_CLEAR_S` resets
+  the count, so only quick cycles add up.
+* The window lives in RAM, so a reboot ends it.
+* The numbers are `CONFIG_ESPOS_HTTPD_RECOVERY_CYCLES`,
+  `CONFIG_ESPOS_HTTPD_RECOVERY_CLEAR_S` and
+  `CONFIG_ESPOS_HTTPD_RECOVERY_WINDOW_S`.
+  `CONFIG_ESPOS_HTTPD_PORTAL_RECOVERY=n` removes this path completely, for a
+  device whose power switch strangers can reach. Keep a cable for that one.
 
-A factory reset (`POST /api/v1/system/factory-reset`, which needs the key) also
-gets you back, by leaving the device with no key at all — and takes the
-settings, WiFi and the SignalK token with it. There is no other back door: no
-default key, no reset URL on the station side.
+Firmware that can prove someone is physically there, with a recessed button,
+a jumper or a key switch, should call `espos_httpd_auth_recovery_open(seconds)`
+from that event instead. Never call it from a timer or a network request:
+that gives the key away. The window never relaxes anything on the station
+side, and the guessing lockout doesn't apply to it, since a lockout is one of
+the things it is there to get you out of.
 
-**While you are at it**, set `wifi.portal_psk`. An open access point is a
-nuisance even when nothing behind it is reachable, and a device that keeps its
-portal up permanently is advertising one all the time.
+A factory reset (`POST /api/v1/system/factory-reset`, which needs the key)
+also gets you back in, because it leaves the device with no key. It also
+deletes the settings, the WiFi networks and the Signal K token. There is no
+other way in: no default key, and no reset URL on the station side.
+
+**While you're at it, set `wifi.portal_psk`.** An open setup network is a
+nuisance even when nothing behind it is reachable, and a device that keeps
+it up all the time advertises it all the time.
 
 ### For products: `CONFIG_ESPOS_HTTPD_AUTH_REQUIRED`
 
-The open default is right for a device someone flashes at home. A product
-that must never ship open builds with `CONFIG_ESPOS_HTTPD_AUTH_REQUIRED=y`:
-while `httpd.api_key` is empty, protected endpoints answer
-`403 auth_unconfigured` instead of serving — except from the portal
-network, where the first key gets set. The web UI explains exactly that when
-it sees the 403. The portal exemption that lets the first key be set is the
-no-key one above, so it closes the moment that key exists.
+An open default suits a device someone flashes at home. A product that must
+never ship open builds with `CONFIG_ESPOS_HTTPD_AUTH_REQUIRED=y`. Then, while
+`httpd.api_key` is empty, protected endpoints answer `403 auth_unconfigured`,
+except on the setup network, where the first key gets set. The web UI
+explains this when it sees the 403. That exception is the no-key one above,
+so it closes as soon as a key exists.
 
-### What it does and does not stop
+### What it does and doesn't stop
 
-Does: the guest's phone, the misdirected script, the tab on the marina WiFi,
-the hostile page in the operator's browser, and idle guessing.
-Does not: anyone who can **capture traffic** between a client and the device
-— over plain http the key crosses the network in clear on every Bearer
-request and at every login, exactly the way the SignalK access token does
-between the device and the server. On a boat's own network that is the
-accepted trade (the same network carries unauthenticated NMEA); on a shared
-marina network, treat the key as exposed and change it back home.
+It stops the guest's phone, the misdirected script, the tab on the marina
+WiFi, a hostile page in your browser, and casual guessing.
+
+It doesn't stop anyone who can **capture traffic** between a client and the
+device. Over plain http the key crosses the network in clear with every
+Bearer request and every login, just like the Signal K token does between
+the device and the server. On a boat's own network that is an accepted
+trade-off; the same network carries NMEA with no authentication at all. On a
+shared marina network, treat the key as seen and change it when you are back
+on your own network.
 
 ## Transport
 
-Traffic to the SignalK server is plain `http`/`ws` unless the firmware is
-talking to the server over TLS (`sk.scheme`, `auto` by default)
-([signalk.md](signalk.md)). The consequence to be clear about: the access
-token travels in an `Authorization` header over an unencrypted connection,
-so anyone who can capture traffic on the boat LAN can replay it against the
-server with whatever permissions the token was granted.
+Traffic to the Signal K server is plain `http` and `ws` unless the device
+talks to the server over TLS (`sk.scheme`, `auto` by default,
+[Signal K](signalk.md)). So the access token travels in an `Authorization`
+header over an unencrypted connection, and anyone who can capture traffic on
+the boat's network can reuse it against the server, with whatever access the
+token has.
 
-The device's own web server is http-only, deliberately. A TLS server costs
-RAM the smaller targets do not have to spare, and a self-signed certificate
-on a boat LAN gives the browser nothing to verify against. The Kconfig
-symbol `CONFIG_ESPOS_HTTPD_TLS` is **reserved** (off, no effect) so that a
-future implementation has a stable name; until then the API key protects
-against use, not against eavesdropping. Firmware updates do not depend on
-transport security either way: images are signature-verified by the running
-app, so a plain-http image source cannot be substituted (see below).
+The device's own web server is http only, on purpose. A TLS server costs RAM
+the smaller chips don't have, and a self-signed certificate on a boat
+network gives the browser nothing to check it against.
+`CONFIG_ESPOS_HTTPD_TLS` is **reserved** (off, and it does nothing) so that a
+later implementation has a stable name. Until then the API key protects
+against use, not against eavesdropping. Firmware updates don't depend on the
+transport either way: the device checks every image's signature, so an image
+fetched over plain http can't be swapped (see below).
 
-## Secrets at rest
+## Secrets on the device
 
-The API key, WiFi passwords and the SignalK token live in NVS, marked
-`secret` in their descriptors: the API never returns them (they read back as
-`"********"`), and the web UI shows only whether they are set. For
-production builds enable flash encryption; IDF then defaults
-`CONFIG_NVS_ENCRYPTION=y` and encrypts the `nvs` partition transparently
-using keys in the `nvs_keys` partition (present in every bundled
-`components/espos_core/partitions/*.csv`, flagged `encrypted`), or the HMAC peripheral on chips
-that have one.
+The API key, the WiFi passwords and the Signal K token are stored in NVS and
+marked `secret`. The API never returns them (they read back as
+`"********"`), and the web UI only shows whether they are set.
 
-The release overlay is `sdkconfig.d/release.defaults`, selected with
-`espos_project_prologue(... PROFILE release)` or `-DESPOS_PROFILE=release`:
+For production builds, turn on flash encryption. ESP-IDF then sets
+`CONFIG_NVS_ENCRYPTION=y` and encrypts the `nvs` partition with keys from
+the `nvs_keys` partition, which every bundled table in
+`components/espos_core/partitions/` has and marks `encrypted` (a table of
+your own needs that flag too), or with the HMAC peripheral on
+chips that have one. The release overlay `sdkconfig.d/release.defaults`
+does this; select it with `espos_project_prologue(... PROFILE release)` or
+`-DESPOS_PROFILE=release`:
 
 ```
 CONFIG_SECURE_FLASH_ENC_ENABLED=y
@@ -207,33 +221,38 @@ CONFIG_SECURE_FLASH_ENCRYPTION_MODE_RELEASE=y
 CONFIG_NVS_ENCRYPTION=y
 ```
 
-Development boards stay unencrypted so `idf.py flash` keeps working
-without burning eFuses. Note: `nvs_flash` on the linux host target does not
-support encryption (host tests always run unencrypted).
+Development boards stay unencrypted, so `idf.py flash` keeps working without
+burning eFuses. The host tests always run unencrypted, because `nvs_flash`
+on the linux target doesn't support encryption.
 
 ## Request handling
 
 * Authentication is checked before a handler runs, for every registered
-  endpoint; a refused request never reaches the handler's body parsing.
-* Request bodies are capped (`CONFIG_ESPOS_HTTPD_MAX_BODY`, default 16 KiB;
-  `413` beyond that).
-* All JSON input is validated against the descriptor before any write.
-* Config values are validated on *read* too, so a hostile or stale NVS
-  content cannot push out-of-range values into the application.
-* Static file paths refuse `..` and `//`; anything under `/api/` that is
-  not registered is a JSON `404`, never a file.
+  endpoint that isn't public, so a refused request never reaches the
+  handler's parsing.
+* Request bodies are capped at `CONFIG_ESPOS_HTTPD_MAX_BODY` (16 KiB by
+  default); anything larger gets `413`.
+* All JSON input is checked against the settings descriptor before anything
+  is written.
+* Settings are checked again when they are read, so bad or stale values in
+  NVS can't reach the application out of range.
+* Static file paths refuse `..` and `//`. Anything under `/api/` that isn't
+  registered gets a JSON `404`, never a file.
 
 ## Firmware updates
 
-Every app image is signed (RSA-3072, `SECURE_SIGNED_APPS_NO_SECURE_BOOT`)
-and the running firmware verifies the signature of any update it writes
-against its compiled-in public key, so a device on the network only takes
-firmware from whoever holds `secure_boot_signing_key.pem` — regardless of
-whether the image came over `http://` or `https://`, and regardless of who
-asked for the update (`POST /api/v1/ota` is protected like everything
-else). This does **not** stop someone with the USB port (no hardware Secure
-Boot, no flash encryption); those remain release-overlay options. Rollback
-protection is the bootloader's `APP_ROLLBACK_ENABLE` plus the
-confirm-on-network policy in `espos_ota` ([ota.md](ota.md)). Keep the
-signing key out of the repository: it is git-ignored, and a missing key
-yields a *development* key with a loud CMake warning.
+Every app image is signed (RSA-3072, `SECURE_SIGNED_APPS_NO_SECURE_BOOT`).
+The running firmware checks the signature of any update against its built-in
+public key before it installs it. So a device only takes firmware from
+whoever holds `secure_boot_signing_key.pem`, whether the image came over
+`http://` or `https://`, and whoever asked for the update
+(`POST /api/v1/ota` needs the key like everything else).
+
+This doesn't stop someone with the USB port, because there is no hardware
+Secure Boot and no flash encryption by default. The release overlay turns on
+flash encryption; hardware Secure Boot is not in it and has to be configured
+separately. Rollback is the bootloader's `APP_ROLLBACK_ENABLE` plus
+`espos_ota`'s rule that a new image confirms itself once it reaches the
+network ([OTA](ota.md)). Keep the signing key out of the repository. It is
+git-ignored, and without one the build makes a development key and warns
+about it loudly.

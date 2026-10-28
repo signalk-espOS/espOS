@@ -72,13 +72,42 @@ def apply(root: pathlib.Path, name: str, old: str, new: str) -> list[pathlib.Pat
     return changed
 
 
+def superseded(root: pathlib.Path, name: str, new: str) -> bool:
+    """True when every exact pin of `name` is already at `new` or past it.
+
+    That is a bump pull request with nothing left to do, because a newer bump
+    of the same component merged first. A pin that merely left the bump's
+    `--from` for an older version than `new` is not superseded: the bump
+    still moves it forward.
+    """
+    pins = []
+    for f in manifests(root):
+        text = f.read_text(encoding="utf-8")
+        for pat in (_INLINE, _BLOCK):
+            for m in pat.finditer(text):
+                if m.group(1) != name:
+                    continue
+                start, end = _scalar_span(m)
+                if text[start:end].startswith("=="):
+                    pins.append(text[start + 2 : end])
+    return bool(pins) and all(parse_version(p) >= parse_version(new) for p in pins)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--root", default=".", type=pathlib.Path)
     ap.add_argument("--name", required=True, help="e.g. espressif/mdns")
     ap.add_argument("--from", dest="old", required=True, help="the pin to replace")
     ap.add_argument("--to", dest="new", required=True)
+    ap.add_argument(
+        "--superseded",
+        action="store_true",
+        help="edit nothing; exit 0 when every pin is already at --to or past it, 1 otherwise",
+    )
     args = ap.parse_args(argv)
+
+    if args.superseded:
+        return 0 if superseded(args.root, args.name, args.new) else 1
 
     # --from is required and matched exactly, so a rerun over an already-bumped
     # tree changes nothing and says so, rather than being an edit whose effect
