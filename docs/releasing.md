@@ -221,6 +221,27 @@ Exit status is 1 when anything is `behind`, `unpinned` or `unparsed`, and 0
 otherwise. Anything above 1 is the tool itself failing, which the workflow
 turns into a failed job rather than an empty report.
 
+### Keeping bump pull requests mergeable
+
+`dependencies.lock` ends in one `manifest_hash` over every manifest, so any two
+pull requests that change a manifest conflict on that line. Merging one bump,
+or a release, which rewrites every `espos_*` manifest, leaves every other open
+bump conflicting in the lock.
+
+`.github/workflows/refresh-bump-prs.yml` repairs them. On every push to `main`
+that changes a manifest or the lock, it merges `main` into each open `deps/*`
+branch, takes `main`'s side of the lock conflict and regenerates it with
+`scripts/regen_lock.sh`, the same way the `release-lock` job treats the release
+branch. A conflict anywhere else needs a person and fails the job. A bump that
+`main` already carries or has moved past, because a newer version of the same
+component merged first, is closed as superseded. It also runs daily, which
+retries a refresh that a push to the same branch got in the way of, and can be
+run by hand from the Actions tab.
+
+It pushes with `DRIFT_PR_TOKEN`, like the bump job. Without that secret CI does
+not run on the refreshed branch, and closing and reopening the pull request
+starts it.
+
 ### Reviewing a bump pull request
 
 Read the component's changelog. A bump can change behaviour without breaking
