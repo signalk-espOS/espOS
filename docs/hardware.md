@@ -8,9 +8,9 @@ it builds for and a radio.
 ## Chips
 
 CI builds the reference application for six targets on every change to code
-(`.github/workflows/ci.yml`). A pull request builds each example once, for
-`esp32c6` or, when it needs hardware the C6 lacks, for `esp32p4`; main adds the
-other targets each example supports.
+(`.github/workflows/ci.yml`). A pull request builds each example on one target,
+`esp32c6` or, when it needs hardware the C6 lacks, `esp32p4` (`from_registry`
+also on `esp32`); main adds the other targets each example supports.
 
 | Target | Status | What to know |
 |---|---|---|

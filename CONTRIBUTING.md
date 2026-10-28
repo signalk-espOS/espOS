@@ -75,7 +75,7 @@ the person with the hardware — say in the PR which board that was.
 
 A pull request that changes only Markdown, `docs/` or `mkdocs.yml` skips the
 firmware builds, host tests and fuzzers. One that changes code builds each
-example on one target; main builds them on all of theirs. To get main's full
+example on one main target; main builds them on all of theirs. To get main's full
 matrix on a branch before merging, run the CI workflow on it by hand
 (Actions, CI, Run workflow).
 
