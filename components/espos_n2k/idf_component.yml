@@ -59,6 +59,6 @@ dependencies:
     override_path: "../espos_config"
   # mDNS left the IDF core in 5.0; exact-pinned like the other registry deps.
   espressif/mdns:
-    version: "==1.14.0"
+    version: "==1.14.1"
     rules:
       - if: "target != linux"
