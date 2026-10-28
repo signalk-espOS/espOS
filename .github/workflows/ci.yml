@@ -214,9 +214,11 @@ jobs:
       # corpus; the coverage-guided run is what finds anything new, and both
       # bugs this job exists because of were found that way.
       - run: sudo apt-get update && sudo apt-get install -y clang
+      # Shorter on pull requests: four harnesses at 120 s made this the
+      # longest job but one. main still runs the full two minutes each.
       - name: fuzz
         env:
-          FUZZ_SECONDS: 120
+          FUZZ_SECONDS: ${{ github.event_name == 'pull_request' && 30 || 120 }}
         run: ./test/fuzz/run.sh
       # A crash is written next to the corpus that produced it. Keeping it is
       # the difference between "the fuzz job went red" and a reproducer.
