@@ -274,7 +274,7 @@ until someone switches it off and on, which is what happened before.
 
 ## esp_hosted 2.x → 3.x key names
 
-espOS pins `espressif/esp_hosted` at exactly `3.0.9`. Version 3.0 renamed
+espOS pins `espressif/esp_hosted` at exactly `3.0.10`. Version 3.0 renamed
 most of the main chip's Kconfig options and **removed** the 2.x names.
 ESP-IDF leaves `KCONFIG_WARN_UNDEF_ASSIGN` off, so a setting for an option
 that no longer exists is dropped silently. A project that still carries 2.x
