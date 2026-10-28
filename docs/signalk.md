@@ -17,17 +17,19 @@ Every `sk.discover_s` (60 s by default, and at once when the network comes
 up), the device looks for `_signalk-http._tcp` and `_signalk-https._tcp`
 over mDNS. It remembers up to 12 servers (`ESPOS_SK_MAX_SERVERS`) with their
 TXT records (`self`, `roles`, `swname`, `swvers`). mDNS loses answers now and
-then, so a server that misses one round stays on the list for two more.
+then, so a server stays on the list for two intervals plus 5 s after it last
+answered, which covers two missed rounds.
 `GET /api/v1/sk/servers` lists them, and an `sk_servers` SSE event goes out
 after every round.
 
-The mDNS responder itself belongs to `espos_net` ([Net](net.md#mdns));
-`espos_sk` only asks it questions. A round waits for `espos_mdns_is_ready()`,
-because the link reports connected a few milliseconds before the responder is
-ready, and an empty first round would only be repeated a whole interval
+The mDNS responder belongs to `espos_net` ([Net](net.md#mdns)), which also
+uses it for the device's own `<hostname>.local`, `_http._tcp` and
+`_espos._tcp` records; `espos_sk` only asks it questions. A round waits for
+`espos_mdns_is_ready()`, because the link reports connected a few
+milliseconds before the responder posts `ESPOS_EVENT_MDNS_READY`, and an empty first round would only be repeated a whole interval
 later. Without a network a round finds nothing. In a build with
-`CONFIG_ESPOS_NET_MDNS=n` there is no responder, discovery is off, and you
-must set `sk.server_host`.
+`CONFIG_ESPOS_NET_MDNS=n` there is no responder: the device has no `.local`
+name, discovery is off, and you must set `sk.server_host`.
 
 Which server the device uses:
 
@@ -44,7 +46,7 @@ off) is skipped for five minutes, so one dead entry can't hold everything up.
 
 To send data to a server with security on, the device needs an access token,
 and someone has to approve it in the server's admin page. `sk_token_sm.c`
-handles that. It is plain C that does its HTTP calls, storage and timers
+handles that (`components/espos_sk/src/token_sm.c`). It is plain C that does its HTTP calls, storage and timers
 through a small interface, and `test/host/espos_sk_test` tests every
 transition. The status codes and replies below are what signalk-server 2.31
 actually sends.
@@ -59,7 +61,7 @@ NO_SERVER ──server known──▶ evaluate:
         404 (security disabled)     ▶ OPEN  (no token needed; re-POSTed every 60 s,
                                             GET /self is blind to security when allow_readonly is on)
         403 (device requests off)   ▶ DENIED
-        400 "already requested"     ▶ ERROR, retry in 60 s
+        400 "already requested"     ▶ ERROR, retry 60 s doubling to 10 min
         unreachable / 5xx           ▶ ERROR, backoff 10 s → 5 min
 REQUESTED: GET href every 5 s, ×1.5 up to 60 s
         state PENDING               ▶ keep polling
@@ -90,8 +92,8 @@ What is worth knowing about it:
   the same `self`; DHCP can give the address to another server.
   * A server with the same `self` at another address is a twin. The device
     only tries it once the known address has dropped out of the discovery
-    list (two discovery intervals plus 5 s without an answer) and stayed
-    silent for two more rounds in which some server did answer. Rounds where
+    list (two discovery intervals plus 5 s without an answer) and has gone
+    unheard for two rounds in which some server did answer. Rounds where
     nothing answered, because the network is down, don't count.
   * Even then the twin is only a stand-in (`server.by_self` in
     `GET /sk/status`). A 401 or 403 from it, or a 404 for the pending request,
@@ -569,8 +571,9 @@ What `auto` does depends on how the server was found:
   answers on the plain port, the device tries https once before deciding the
   host is down. **The probe carries no token.** The address isn't known to
   be our server yet, and handing the token to whatever answers is exactly what
-  must not happen. A manual host that discovery saw recently (picked from the
-  server list, say) uses the scheme it advertised, with no probe.
+  must not happen. A manual host that discovery saw within the last two intervals
+  plus 5 s (picked from the server list, say) uses the scheme it advertised,
+  with no probe.
 
   No answer on either is not an answer. The host may be off, still starting,
   or not reachable yet; on a boat the server often starts after its devices.
@@ -633,8 +636,8 @@ whatever the last one noted.
 The save runs on whichever task made the request. When that task's stack is
 in PSRAM (the BLE gateway's can be), the NVS write goes to a short-lived task
 with a stack in internal RAM instead, and so does a retried load of the
-record after a failed one at boot. Writing flash switches off the cache, and
-PSRAM with it, so a task whose stack is in PSRAM would crash mid-write. A save
+record after a failed one at boot. Reading or writing flash switches off the
+cache, and PSRAM with it, so a task whose stack is in PSRAM would crash. A save
 that fails is tried again on the next connection.
 
 The record is kept in the `skstate` NVS namespace next to the token
@@ -863,10 +866,12 @@ away. Without a notification, these look like a device that has quietly
 stopped doing its job, which is indistinguishable from a hardware fault and
 expensive to track down.
 
-It is a thin layer over [`espos_health`](health.md): `espos_sk_notify()`
-calls `espos_health_report()`, refusing only when Signal K isn't running,
-and `espos_sk`'s sink publishes every health condition, whoever raised it.
-So:
+It is a thin layer over [`espos_health`](health.md). With
+`CONFIG_ESPOS_SK_NOTIFICATIONS` on (the default), `espos_sk`'s sink publishes
+every health condition, whoever raised it, and `espos_sk_notify()` calls
+`espos_health_report()`. It returns `ESP_ERR_INVALID_STATE` when that sink
+isn't running (Signal K not started, or the sink couldn't register), and
+`ESP_ERR_NOT_SUPPORTED` in a build with the option off. So:
 
 * **Reporting the same thing twice is harmless.** The same state and message
   again sends nothing, so you can report on every poll. The first report
