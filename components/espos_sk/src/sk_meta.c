@@ -2,8 +2,8 @@
  * SPDX-FileCopyrightText: 2026 Dirk Wahrheit
  * SPDX-License-Identifier: Apache-2.0
  *
- * What one meta reconciliation leg means for the pass. Pure, so the host
- * tests can drive it.
+ * What one meta reconciliation leg means for the pass, and the table that
+ * tracks which paths are done. Pure, so the host tests can drive it.
  *
  * A leg that gets no HTTP answer at all has already spent its whole timeout,
  * and every further path would spend another: on a server that accepts the
@@ -16,6 +16,10 @@
  * A reply whose meta cannot be read is the server's meta all the same:
  * PUTting ours over it would replace what the user configured.
  */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 #include "espos_sk_priv.h"
 
 espos_sk_meta_step_t espos_sk_meta_after_get(int status, espos_sk_meta_seen_t seen)
@@ -47,4 +51,96 @@ espos_sk_meta_step_t espos_sk_meta_after_put(int status)
         return ESPOS_SK_META_UNAUTHORIZED;
     }
     return ESPOS_SK_META_LATER;
+}
+
+esp_err_t espos_sk_meta_declare(espos_sk_meta_table_t *t, const char *path, char *meta_json, uint32_t period_ms)
+{
+    espos_sk_meta_entry_t *e = NULL;
+    for (size_t i = 0; i < t->n; i++) {
+        if (strcmp(t->e[i].path, path) == 0) {
+            e = &t->e[i];
+            break;
+        }
+    }
+    if (e && e->meta_json && strcmp(e->meta_json, meta_json) == 0 && e->period_ms == period_ms) {
+        /* Unchanged: nothing for the server to hear, and no reason to cut a
+         * running backoff short. */
+        free(meta_json);
+        return ESP_OK;
+    }
+    if (!e) {
+        if (t->n >= ESPOS_SK_META_CAP) {
+            free(meta_json);
+            return ESP_ERR_NO_MEM;
+        }
+        e = &t->e[t->n++];
+        snprintf(e->path, sizeof(e->path), "%s", path);
+    }
+    free(e->meta_json);
+    e->meta_json = meta_json;
+    e->period_ms = period_ms;
+    e->gen++;
+    e->reconciled = false;
+    t->dirty = true;
+    t->round = 0; /* a new declaration does not wait out an old backoff */
+    return ESP_OK;
+}
+
+void espos_sk_meta_connected(espos_sk_meta_table_t *t)
+{
+    /* The server may be another one, or have lost what it was sent. */
+    for (size_t i = 0; i < t->n; i++) {
+        t->e[i].reconciled = false;
+        t->e[i].gen++;
+    }
+    t->dirty = t->n > 0;
+    t->round = 0;
+}
+
+uint32_t espos_sk_meta_wait(const espos_sk_meta_table_t *t, bool connected, uint32_t now_ms)
+{
+    if (!connected || !t->dirty) {
+        return UINT32_MAX;
+    }
+    int32_t left = (int32_t)(t->retry_at_ms - now_ms);
+    return t->round == 0 || left <= 0 ? 0 : (uint32_t)left;
+}
+
+size_t espos_sk_meta_index(const espos_sk_meta_table_t *t, size_t n, size_t k)
+{
+    /* From where the last round stopped, so a path the server keeps failing
+     * with a 5xx cannot hold back the ones declared after it. */
+    size_t start = t->next < n ? t->next : 0;
+    return (start + k) % n;
+}
+
+void espos_sk_meta_leg_done(espos_sk_meta_table_t *t, size_t i, uint32_t gen, espos_sk_meta_step_t step)
+{
+    if (step == ESPOS_SK_META_DONE) {
+        /* Unless it was redeclared, or the stream reconnected, while the legs
+         * ran: the server was asked about something that no longer holds. */
+        if (t->e[i].gen == gen) {
+            t->e[i].reconciled = true;
+        }
+    } else if (step == ESPOS_SK_META_UNAUTHORIZED || step == ESPOS_SK_META_BACK_OFF) {
+        t->next = i + 1;
+    }
+}
+
+uint32_t espos_sk_meta_round_end(espos_sk_meta_table_t *t, uint32_t now_ms, uint32_t delay_ms)
+{
+    bool any = false;
+    for (size_t i = 0; i < t->n; i++) {
+        any |= !t->e[i].reconciled;
+    }
+    t->dirty = any;
+    if (!any) {
+        t->round = 0;
+        return 0;
+    }
+    if (t->round < 30) {
+        t->round++;
+    }
+    t->retry_at_ms = now_ms + delay_ms;
+    return delay_ms;
 }

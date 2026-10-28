@@ -245,9 +245,7 @@ past the path that ended the round so one failing path holds back no other (1 s,
 doubling up to 5 minutes, back to the start on every new connection and
 every changed declaration). Values may reach the server a moment before
 their metadata on a first connect. These are blocking HTTP calls, so they run on the
-client task with the token machine's, not on the stream task: a server that
-accepts the stream but is too busy for REST, as a starting signalk-server
-often is, used to hold the stream for one timeout per path.
+client task with the token machine's and not on the stream task.
 
 **Device health.** Every `sk.health_s` (10 s by default, 0 turns it off) the
 stream task publishes
@@ -769,9 +767,8 @@ its default:
   stream task: putting frames together, parsing deltas, the server's PUTs
   and the notification sink.
 
-The measurements below predate moving the metadata calls from the stream
-task to the client task. The client task's default still leaves over 6 KB
-above its highest measured use, and the stream task keeps its default.
+The measurements below were taken with the metadata calls on the stream
+task. The client task was not re-measured with them.
 
 Measured on an ESP32-C5 running the BLE gateway against a live server
 (discovery, an approved token, metadata for the published paths), with
