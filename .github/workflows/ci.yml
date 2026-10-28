@@ -6,26 +6,23 @@ on:
     tags: ["v*"]
   pull_request:
 
-# CI fans out to thirty jobs, and several fire at once around a release: the
-# merge to main, and the pull request release-please reopens for the next
-# version immediately after. Without a group they all queue against the
-# repository's concurrent-job ceiling and the publish job, last in its chain,
-# waits behind them.
+# CI fans out to sixty-odd jobs against the repository's concurrent-job
+# ceiling, so a run nobody needs any more holds up the ones that matter.
 #
 # One run per ref, superseded ones cancelled: a new push to a branch makes the
-# run already in flight for it pointless. main and tags are keyed per-commit
-# (github.sha) instead, so a release's own run is never cancelled by the push
-# that follows it -- those runs gate the release and must finish.
+# run already in flight for it pointless. That includes main: no release waits
+# for this workflow (release-please.yml and publish.yml check what they need
+# themselves), and several merges in a row would otherwise each run the whole
+# matrix -- four merges inside a minute once kept a pull request queued for an
+# hour. The newest commit's run covers the ones it cancelled.
 #
-# Tags are keyed apart from main even though a release tags the commit it
-# merged: the tag run is the only one that runs the version job (it is
-# `if: startsWith(github.ref, 'refs/tags/v')`), so letting the two share a
-# group would let the push cancel the run that carries that check.
+# Tags are keyed per commit: the tag run is the only one that runs the version
+# job (it is `if: startsWith(github.ref, 'refs/tags/v')`), so nothing may
+# cancel it.
 concurrency:
   group: >-
     ci-${{ github.workflow }}-${{
       startsWith(github.ref, 'refs/tags/') && format('tag-{0}', github.sha)
-      || github.ref == 'refs/heads/main' && format('main-{0}', github.sha)
       || github.ref
     }}
   cancel-in-progress: true
