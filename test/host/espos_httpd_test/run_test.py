@@ -2172,7 +2172,11 @@ class SkTests(unittest.TestCase):
         self.mock.meta["espos.test.a"] = {"units": "kV"}
         puts0 = self.mock.meta_puts.count("espos.test.a")
         req("POST", "/api/v1/sk/publish", {"path": "espos.test.a", "value": 2, "meta": {"units": "V"}})
-        time.sleep(1.5)
+        # The declaration clears the path's reconciled flag before the POST
+        # returns; the count is back to declared only once a round has
+        # decided on it.
+        js = wait_sk(lambda j: j["ws"]["meta"]["reconciled"] == j["ws"]["meta"]["declared"], timeout=15)
+        self.assertIsNotNone(js, sk_status())
         self.assertEqual(self.mock.meta_puts.count("espos.test.a"), puts0)
         self.assertEqual(self.mock.meta["espos.test.a"]["units"], "kV")
         # health values arrive under espos.<label>.*
