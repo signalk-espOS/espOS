@@ -6,8 +6,8 @@
 // This is SensESP's analog_input example written as an espOS graph, and it is
 // worth reading next to two other files:
 //
-//   * docs/migration-from-sensesp.md, whose "planned facade" column this
-//     implements — RepeatSensor is Poll, Linear is a two-parameter Lambda,
+//   * docs/migration-from-sensesp.md, which maps SensESP's classes onto these
+//     nodes: RepeatSensor is Poll, Linear is a two-parameter Lambda here,
 //     SKOutputFloat is a Sink.
 //   * components/espos_sk/examples/analog_input, the same device written in
 //     plain C. That version is not obsolete: the graph is sugar over exactly

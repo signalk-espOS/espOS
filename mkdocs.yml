@@ -13,8 +13,8 @@
 
 site_name: espOS
 site_description: >-
-  ESP-IDF-native runtime for Signal K devices on ESP32 — WiFi, config, web UI,
-  Signal K discovery and streaming, signed OTA. The successor to SensESP.
+  A firmware base for ESP32 boards that talk to Signal K: WiFi setup, a
+  settings page, Signal K discovery and data, and signed updates over the air.
 site_url: https://signalk-espos.github.io/espOS/
 repo_url: https://github.com/signalk-espOS/espOS
 repo_name: signalk-espOS/espOS

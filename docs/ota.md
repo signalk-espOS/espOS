@@ -1,70 +1,86 @@
-# OTA (`espos_ota`) — signed updates with rollback — M6
+# Updates over the air (`espos_ota`)
+
+`espos_ota` installs new firmware over the network. It only takes images
+signed with the key the device trusts, and it goes back to the old firmware
+if the new one doesn't come up properly.
 
 ## What happens
 
-1. **Source.** Either a direct URL (`POST /api/v1/ota {"url": …}`, the OTA
-   page's "From a URL") or a **version manifest** (`ota.manifest_url` +
-   `ota.channel`), fetched ~20 s after WiFi comes up and then every
-   `ota.check_h` hours when `ota.auto_check` is on. A newer matching build
-   shows up as *available*; with `ota.auto_install` it is installed right
-   away, otherwise someone clicks *Install*.
-2. **Download + verify.** `esp_https_ota` streams the image into the other
-   OTA slot. Before writing, the image header is checked: it must be an
-   ESP-IDF app whose `project_name` equals the running one (an `espos`
-   device does not accept a `myotherapp` image). At the end the image's
-   SHA-256 **and its RSA-3072 signature** are verified
-   (`CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT`); the public key is
-   compiled into the running firmware. Anything else is rejected with
+1. **Finding an update.** Either someone gives the device a URL
+   (`POST /api/v1/ota {"url": …}`, or **From a URL** on the OTA page), or
+   the device reads a **manifest** (`ota.manifest_url` and `ota.channel`).
+   While `ota.auto_check` is on, it checks the manifest once the network is
+   up and at least 20 s have passed since boot
+   (`CONFIG_ESPOS_OTA_BOOT_CHECK_DELAY_S`), then every `ota.check_h` hours.
+   A newer build for the device's target, channel and app shows up as
+   *available*. With `ota.auto_install` it installs at
+   once; otherwise someone presses **Install**.
+2. **Download and check.** `esp_https_ota` writes the image into the other
+   app slot. Before writing, it checks the header: the image must be an
+   ESP-IDF app with the same `project_name` as the running one, so an
+   `espos` device won't take a `myotherapp` image. At the end it checks the
+   image's SHA-256 and its **RSA-3072 signature**
+   (`CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT`) against the public key
+   built into the running firmware. Anything else is rejected with
    `image rejected: bad signature or corrupt`, and nothing changes.
-3. **Reboot into the new slot** ~1.5 s after the status says `ready`.
-4. **Confirm or roll back.** The new image boots as `pending_verify`
-   (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`). It marks itself valid as soon
-   as WiFi is connected (or, if no station is configured/enabled, after
-   60 s of uptime). If it panics before that, the bootloader boots the
-   previous slot on the next reset. If it runs but cannot reach the network
-   within `ota.confirm_tmo_s` (default 600 s), it marks itself invalid and
-   reboots into the previous slot. `POST /api/v1/ota/confirm` confirms by
-   hand, `POST /api/v1/ota/rollback` goes back on purpose. The status shows
-   `running.rolled_back` when the other slot holds an image that failed.
+3. **Restart.** About 1.5 s after the status says `ready`, the device
+   restarts into the new slot.
+4. **Keep it or go back.** The new image starts as `pending_verify`
+   (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`). It marks itself good as soon
+   as the network is up, on WiFi or Ethernet. A firmware with WiFi that has
+   no network configured, or WiFi turned off, marks itself good after 60 s
+   instead (`CONFIG_ESPOS_OTA_NO_STA_GRACE_S`, which must stay below
+   `ota.confirm_tmo_s`).
+   * If it crashes before that, the bootloader starts the old slot at the
+     next reset.
+   * If it runs but can't reach the network within `ota.confirm_tmo_s`
+     (600 s by default), it marks itself bad and restarts into the old slot.
+   * `POST /api/v1/ota/confirm` keeps it by hand, and
+     `POST /api/v1/ota/rollback` goes back on purpose.
 
-Plain `http://` sources are allowed (`CONFIG_ESP_HTTPS_OTA_ALLOW_HTTP`):
-integrity and authenticity come from the signature, not the transport.
-`https://` uses the ESP-IDF certificate bundle; `ota.allow_insecure` skips
-the certificate check for self-signed boat servers.
+   The status shows `running.rolled_back` when the other slot holds an image
+   that failed.
+
+Plain `http://` sources are allowed (`CONFIG_ESP_HTTPS_OTA_ALLOW_HTTP`),
+because the signature protects the image, not the connection. `https://`
+uses the ESP-IDF certificate bundle, and `ota.allow_insecure` skips the
+certificate check for a boat server with a self-signed certificate.
 
 ## Signing key
 
-Not to be confused with `httpd.api_key`, the password for the REST API
-([rest-api.md](rest-api.md)) that a fleet manager such as
-signalk-espos-manager calls its "fleet API key". That key guards the web API
-and the web UI login ([ui.md](ui.md)), and can be changed at any time. The signing key decides which firmware a
-device will install, and losing it means a USB reflash for every device.
-With hardware Secure Boot the keys in eFuse decide instead (see below), and
-even a USB reflash must be signed with one of them.
+Don't confuse it with `httpd.api_key`. That is the password for the REST API
+([REST API](rest-api.md)), which signalk-espos-manager calls the "fleet API
+key". It guards the web API and the web UI login ([Web UI](ui.md)), and you
+can change it any time. The signing key decides which firmware a device will
+install, and losing it means reflashing every device over USB. With hardware
+Secure Boot the keys in eFuse decide instead (see below), and then even a USB
+flash has to be signed with one of them.
 
-Who holds which signing key: a developer's own build signs with a key
-generated in their checkout, so only devices they flashed from it accept
-their updates. A published release is signed by its project owner with a
-key kept as a CI secret. The firmware registry neither signs nor verifies
-images; it records a project's key fingerprint (`signingKeyId`), when the
-project supplies one. When both that and the device's `running.key_fp` are
-known, a fleet manager can tell before downloading that a device without
-hardware Secure Boot would refuse an update; with either missing it cannot.
+Who holds which key:
 
-`sdkconfig.d/espos.defaults` turns on *Require signed app images* with the RSA
-scheme and signs every build with `secure_boot_signing_key.pem` in the
-project root. That file is **git-ignored and never committed**. When it is
-missing, `espos_project_prologue()` generates a *development* key
-(`espsecure generate_signing_key --version 2 --scheme rsa3072`) with a
-warning, so a fresh checkout builds — but a device flashed with a
-dev-key build only accepts updates signed with that same dev key.
+* A developer's own build is signed with a key made in their checkout, so
+  only devices they flashed from that checkout accept their updates.
+* A published release is signed by the project's owner, with a key kept as a
+  CI secret.
+* The firmware registry neither signs nor checks images. It records a
+  project's key fingerprint (`signingKeyId`) when the project gives one.
+  When both that and the device's `running.key_fp` are known, a fleet manager
+  can tell before downloading that a device without hardware Secure Boot
+  would refuse the update. If either is missing, it can't.
 
-**Every project directory gets its own key**, because the key lives beside
-the project and is generated when it is missing. espOS's own tree is one
-project; so is each example under `components/*/examples/`; so is every
-firmware built on espOS. Build the same application from two directories
-and you get two keys, and an image from one is refused by a device flashed
-from the other:
+`sdkconfig.d/espos.defaults` turns on *Require signed app images* with the
+RSA scheme, and every build is signed with `secure_boot_signing_key.pem` in
+the project folder. That file is **git-ignored and never committed**. When
+it is missing, `espos_project_prologue()` makes a *development* key
+(`espsecure generate_signing_key --version 2 --scheme rsa3072`) and warns
+about it, so a fresh checkout builds. But a device flashed with a
+development-key build only accepts updates signed with that same key.
+
+**Every project folder gets its own key**, because the key lives next to the
+project and is made when it is missing. espOS's own tree is one project, each
+example under `components/*/examples/` is another, and so is every firmware
+built on espOS. Build the same application in two folders and you get two
+keys, and a device flashed from one refuses images from the other:
 
 ```
 E (21719384) esp_image: Secure boot signature verification failed
@@ -74,21 +90,21 @@ E (21719547) espos_ota: install failed: image rejected: bad signature or
                         corrupt (ESP_ERR_OTA_VALIDATE_FAILED)
 ```
 
-That is the device working correctly — the whole point of signing is that it
-refuses an image it was not told to trust — but "signature bad" says nothing
-about *which* key it wanted. To find out, compare the public key inside the
-running image with the one you signed with:
+The device is doing its job: it refuses an image it wasn't told to trust.
+But "signature bad" doesn't say which key it wanted. To find out, check the
+image against the key you signed with:
 
 ```sh
 espsecure verify-signature --version 2 --keyfile <key>.pem <image>.bin
 ```
 
-Without the key file, `GET /api/v1/ota/status` names the key too:
-`running.key_fp` is the first 16 hex characters of the SHA-256 digest of
-the public key in the running image's first signature block (`null` when
-the image carries none; an image signed with more than one key, mid
-rotation, reports the first). It is the same digest espsecure prints, so it can be
-compared with an image or a key without a device:
+Without the key file, `GET /api/v1/ota/status` names the key too.
+`running.key_fp` is the first 16 hex characters of the SHA-256 digest of the
+public key in the running image's first signature block. It is `null` when
+the image has no signature, and also when signed updates are off, the scheme
+isn't RSA or ECDSA v2, or an original ESP32 is below revision 3. An image
+signed with more than one key, during a key change, reports the first. It is the same digest `espsecure` prints, so you can
+compare it with an image or a key without a device:
 
 ```sh
 espsecure signature-info-v2 <image>.bin          # "Public key digest for block 0: …"
@@ -96,15 +112,15 @@ espsecure digest-sbv2-public-key --keyfile <key>.pem -o digest.bin
 od -An -tx1 digest.bin | tr -d ' \n' | cut -c1-16    # the digest file is raw bytes
 ```
 
-The firmware registry's `signingKeyId` uses the same fingerprint, so a fleet
-manager can see that an update will be refused before sending it. That
-holds for signed apps without hardware Secure Boot, where the running
-image's first signature block is the key updates are checked against.
-With hardware Secure Boot enabled the keys burned into eFuse decide, and
-`key_fp` only names the key the running image was signed with.
+The registry's `signingKeyId` uses the same fingerprint, so a fleet manager
+can see before sending an update that it will be refused. That holds for
+signed apps without hardware Secure Boot, where the running image's first
+signature block is the key updates are checked against. With hardware
+Secure Boot the keys in eFuse decide, and `key_fp` only names the key the
+running image was signed with.
 
-The fix is to name the key rather than let a directory invent one, which is
-what `SIGNING_KEY` below is for.
+The fix is to name the key instead of letting each folder make one up. That
+is what `SIGNING_KEY` below is for.
 
 For anything you ship:
 
@@ -113,32 +129,34 @@ espsecure generate_signing_key --version 2 --scheme rsa3072 secure_boot_signing_
 # keep it outside the repo (password manager, CI secret) and copy it in for release builds
 ```
 
-Or leave it where it is and name it: `espos_project_prologue(... SIGNING_KEY
-/path/to/key.pem)`. The prologue then hands that path to IDF's signing step
-(`CONFIG_SECURE_BOOT_SIGNING_KEY`, through a generated defaults fragment) and
-never generates a key there — a named key that is missing stops the build.
-Because defaults only reach a fresh `sdkconfig`, an existing one that names a
-different key also stops the configure with an explanation: it would
-otherwise keep signing with the old key.
+Or leave it where it is and name it:
+`espos_project_prologue(... SIGNING_KEY /path/to/key.pem)`. The prologue
+passes that path to ESP-IDF's signing step (`CONFIG_SECURE_BOOT_SIGNING_KEY`,
+through a generated defaults file) and never makes a key there. If the named
+key is missing, the build stops. Defaults only reach a fresh `sdkconfig`, so
+if an existing one names a different key, the configure step stops too and
+explains why; otherwise it would keep signing with the old key.
 
-Every device that should take your updates must have been flashed at least
-once (USB) with a build carrying that key's public part. Rotating the key
-means one signed update built with the *old* key that already contains the
-*new* public key. ESP32 (original) needs chip rev ≥ 3 for the RSA scheme
-(`sdkconfig.d/espos.defaults.esp32` pins `ESP32_REV_MIN_3`). This is *signed apps
-without Secure Boot*: it protects against network-side tampering, not
-against someone with the USB port. Hardware Secure Boot / flash encryption
-are release-overlay decisions ([security.md](security.md)).
+Every device that should take your updates must have been flashed over USB
+at least once with a build carrying your key's public half. To change keys,
+ship one update signed with the *old* key that already contains the *new*
+public key. The original ESP32 needs chip revision 3 or later for the RSA
+scheme (`sdkconfig.d/espos.defaults.esp32` sets `ESP32_REV_MIN_3`).
+
+This is *signed apps without Secure Boot*. It protects against tampering
+over the network, not against someone with the USB port. Hardware Secure
+Boot and flash encryption are decisions for the release overlay
+([Security](security.md)).
 
 ### Swapping the key
 
-ESP-IDF's signing step depends on the unsigned binary alone, so replacing
-`secure_boot_signing_key.pem` and rebuilding **keeps the previous
-signature** — no source changed, nothing re-links, and the build log looks
-normal. The root `CMakeLists.txt` fingerprints the key and forces a
-re-link when it differs, so this is handled; if you copy that block into
-your own project, copy the fingerprinting with it. Verify before flashing
-anything you cannot recover over the air:
+ESP-IDF only re-signs when the unsigned binary changes. So if you replace
+`secure_boot_signing_key.pem` and rebuild, the build **keeps the old
+signature**: no source changed, nothing re-links, and the log looks normal.
+The root `CMakeLists.txt` takes a fingerprint of the key and forces a re-link
+when it changes, so espOS handles this. If you copy that block into your own
+project, copy the fingerprint part with it. Before flashing anything you
+can't recover over the air, check it:
 
 ```sh
 espsecure verify-signature --version 2 --keyfile <key>.pem build/<app>.bin
@@ -146,42 +164,42 @@ espsecure verify-signature --version 2 --keyfile <key>.pem build/<app>.bin
 
 ### Releasing, and forking
 
-Signing is inherited by every project built on espOS, so this applies to
-them and to anyone who forks one.
+Every project built on espOS inherits signing, so this applies to them and
+to anyone who forks one.
 
-Ordinary builds need nothing: the development key is generated
-automatically, so pushes and pull requests build on a fork unchanged.
-**Publishing a release is the decision point**, because that artefact is
-what other people install.
+Ordinary builds need nothing. The development key is made automatically, so
+pushes and pull requests build on a fork unchanged. **Publishing a release
+is where you decide**, because that file is what other people install.
 
-- **You run devices that take OTA updates** — generate a key, keep it, and
-  give it to CI as a secret:
+- **You run devices that take updates over the air.** Make a key, keep it,
+  and give it to CI as a secret:
 
   ```sh
   espsecure generate-signing-key --version 2 --scheme rsa3072 signing_key.pem
   gh secret set <APP>_SIGNING_KEY_PEM < signing_key.pem
   ```
 
-  Losing that file means no already-flashed device can ever take another
-  OTA. It is the one thing worth backing up.
+  If you lose that file, no device already flashed can ever take another
+  update. It is the one thing worth backing up.
 
-- **You just want a flashable binary** — release without a key, and say so
-  in the release. Set the repository *variable*
+- **You just want a binary people can flash.** Release without a key, and
+  say so in the release. Set the repository *variable*
   `ESPOS_ALLOW_UNSIGNED_RELEASE=true`, which `build-firmware.yml` and
-  `release-firmware.yml` read (a workflow of your own may use its own name,
-  as the cockpit's `COCKPIT_ALLOW_UNSIGNED_RELEASE` does): the build uses a throwaway key and
-  the release notes are marked USB-only. Devices flashed from it reject
-  every OTA, including later releases from the same fork.
+  `release-firmware.yml` read. Your own workflow may use its own name, as the
+  cockpit's `COCKPIT_ALLOW_UNSIGNED_RELEASE` does. The build then uses a
+  throwaway key, and the release notes say USB only. Devices flashed from it
+  refuse every update over the air, including later releases from the same
+  fork.
 
-A release workflow should **fail** when neither is set rather than quietly
-falling back to a throwaway key. That fallback produces a release which
-installs fine and then rejects every future update — a failure that
-surfaces on the device, over the air, long after CI went green.
+When neither is set, a release workflow should **fail**, not quietly fall
+back to a throwaway key. That fallback makes a release that installs fine
+and then refuses every future update, and you only find out on the device,
+long after CI went green.
 
 There is deliberately **no committed default key**. A private key in a
-public repository is a key everyone has, and any device trusting it would
-accept firmware signed by anyone. Making the safe path opt-in would also
-mean most forks ship the shared key without noticing.
+public repository is a key everyone has, and a device trusting it would take
+firmware signed by anyone. And if the safe path were opt-in, most forks
+would ship that shared key without noticing.
 
 ## Manifest format (`schema: 1`)
 
@@ -199,76 +217,93 @@ mean most forks ship the shared key without noticing.
 }
 ```
 
-* `app` (optional, top level or per build) must equal the device's
-  project name when present.
-* Per build: `version`, `target` (the IDF target name, compared verbatim
-  with the device's own; CI builds `esp32 esp32s3 esp32c3 esp32c5 esp32c6
-  esp32p4`),
-  `url` (absolute, or relative to the manifest URL) are required;
-  `channel` defaults to `stable`; `size`, `sha256`, `notes`, `date` are
-  informational (`sha256` is not what protects the image — the signature
-  is).
-* The device takes the **highest version** among builds matching its
-  target, channel and app, and calls it *available* when it is strictly
-  newer than the running version. Versions compare as dotted numbers with
-  a `-prerelease` suffix sorting below the release (`1.2.10 > 1.2.9`,
-  `1.0.0-beta.1 < 1.0.0`); anything unparsable compares as a plain string.
-  The running version is `version.txt` in the project root (`PROJECT_VER`).
-* Content type does not matter; the manifest must be ≤ 16 KiB.
+* `schema` must be 1 when present; any other number rejects the manifest.
+* `app` is optional, at the top or per build. When present it must equal
+  the device's project name.
+* Each build needs `version`, `target` and `url`. `target` is the ESP-IDF
+  target name, compared exactly with the device's own (CI builds `esp32
+  esp32s3 esp32c3 esp32c5 esp32c6 esp32p4`). `url` is absolute, or relative
+  to the manifest's URL. A build without all three as strings is skipped,
+  not reported.
+* `channel` defaults to `stable`. `size`, `sha256`, `notes` and `date` are
+  for information only; `sha256` isn't what protects the image, the
+  signature is.
+* The device picks the **highest version** among the builds that match its
+  target, channel and app, and offers it when it is strictly newer than the
+  running version. Versions compare as dotted numbers, and a `-prerelease`
+  suffix sorts below the release (`1.2.10 > 1.2.9`, `1.0.0-beta.1 < 1.0.0`).
+  Anything that doesn't parse compares as plain text. The running version is
+  `version.txt` in the project folder (`PROJECT_VER`).
+* The content type doesn't matter, but the manifest must be 16 KiB or less.
 
-A boat-side distribution service only has to serve this file and the
-images (static hosting is enough) — that is the deferred "firmware
-distribution service" of the plan, and nothing in espOS ties it to a host.
+A boat-side update service only has to serve this file and the images;
+static hosting is enough, and nothing in espOS ties it to one host. This is
+the "firmware distribution service" the original plan left for later.
 
-## Configuration (`ota` namespace)
+## Settings (`ota` namespace)
 
-`manifest_src` (url), `manifest_url`, `manifest_path`, `channel` (stable),
-`auto_check` (on), `check_h` (24), `auto_install` (off), `allow_insecure`
-(off), `confirm_tmo_s` (600).
+| Key | Default |
+|---|---|
+| `manifest_src` | `url` |
+| `manifest_url` | |
+| `manifest_path` | `/plugins/signalk-espos-updates/manifest.json` |
+| `channel` | `stable` |
+| `auto_check` | on |
+| `check_h` | 24 |
+| `auto_install` | off |
+| `allow_insecure` | off |
+| `confirm_tmo_s` | 600 |
 
-### Finding updates through the SignalK server
+### Finding updates through the Signal K server
 
-`manifest_src = "signalk"` derives the manifest URL from whichever server the
-device is already connected to, appending `manifest_path`
-(`/plugins/signalk-espos-updates/manifest.json` by default) to the server's
+With `manifest_src = "signalk"`, the device builds the manifest URL from the
+server it is already connected to, by adding `manifest_path` to the server's
 address.
 
-The point is that **nothing has to be typed per device**. A fresh device that
-finds its server also finds its updates, and a server that moves does not
-strand a fleet on a URL that no longer resolves. It needs a plugin on that
-server actually serving a manifest at that path.
+That way **nothing has to be typed in per device**. A new device that finds
+its server also finds its updates, and a server that moves doesn't leave
+devices pointing at a URL that no longer works. It needs a plugin on the
+server that serves a manifest at that path.
 
-Two failures are reported plainly rather than papered over:
+For now the automatic checks also need `ota.manifest_url` to be non-empty,
+although this source ignores its value ([#261](https://github.com/signalk-espOS/espOS/issues/261)).
+The OTA page's **Check for updates** button is greyed out without it too.
+Until that is fixed, put any value there, or call `POST /api/v1/ota/check`.
 
-* **No server selected yet** — ordinary at boot, before discovery has run.
-  The next scheduled check finds one.
-* **This firmware has no SignalK client** — the setting asks for something
-  the build cannot do. It does *not* fall back to `manifest_url`, because
-  silently checking a different place than the one configured is worse than
-  saying so.
+Two failures are reported as they are:
 
-`espos_sk` is an optional dependency of `espos_ota` for this, not a required
-one: a firmware can do OTA with no SignalK at all, and requiring it for one
-convenience would be the wrong trade.
+* **No server selected yet.** Normal at boot, before discovery has run. The
+  next scheduled check finds one.
+* **This firmware has no Signal K client.** The setting asks for something
+  the build can't do. It does *not* fall back to `manifest_url`, because
+  quietly checking somewhere other than where you asked is worse than saying
+  so.
+
+`espos_sk` is an optional dependency of `espos_ota` for this. A firmware can
+do updates without Signal K at all, and requiring it for one convenience
+would be the wrong trade.
 
 ## API
 
-`GET /api/v1/ota/status`, `POST /api/v1/ota/check`, `POST /api/v1/ota
-{"url"?}`, `POST /api/v1/ota/confirm`, `POST /api/v1/ota/rollback`, SSE
-`ota` — see [rest-api.md](rest-api.md).
+`GET /api/v1/ota/status`, `POST /api/v1/ota/check`,
+`POST /api/v1/ota {"url"?}`, `POST /api/v1/ota/confirm`,
+`POST /api/v1/ota/rollback`, and the SSE event `ota`; see
+[REST API](rest-api.md).
 
 ## Testing
 
-* Host: `test/host/espos_ota_test` (manifest selection, version compare,
-  URL resolution) and `run_test.py OtaTests OtaRollbackTimeoutTests`
-  (sim port: manifest check, install with progress, rejected images —
-  wrong project / bad signature / not an image / 404 —, busy handling,
-  confirm-once-connected, rollback after the timeout, manual rollback).
-* Device (done on the ESP32-P4 panel, 2026-08-18): flash 0.6.0 by USB;
-  serve `build/espos.bin` of a 0.6.1 build plus a manifest with
-  `python3 -m http.server`; set `ota.manifest_url`; check → available →
-  install → reboot into `ota_1` → `new image confirmed (network up)`.
-  `build/espos-unsigned.bin` from the same build → `image rejected`. A
-  build with `idf.py -DESPOS_BROKEN_BUILD=1 build` (aborts in `app_main`)
-  → installed → boots, aborts, the bootloader boots the previous slot →
-  status `rolled_back: true, other_version: 0.6.2`.
+* **Host:** `test/host/espos_ota_test` covers picking a build from a
+  manifest, comparing versions and resolving URLs.
+  `run_test.py OtaTests OtaRollbackTimeoutTests` runs on the simulator: a
+  manifest check, an install with progress, rejected images (wrong project,
+  bad signature, not an image, 404), a busy device, confirming once
+  connected, rollback after the timeout, and rollback by hand.
+* **Device** (done on the ESP32-P4 panel, 2026-08-18): flash 0.6.0 over USB.
+  Serve `build/espos.bin` from a 0.6.1 build and a manifest with
+  `python3 -m http.server`, and set `ota.manifest_url`. Check, see it
+  available, install, and the device restarts into `ota_1` and logs
+  `new image confirmed (network up)`. `build/espos-unsigned.bin` from the
+  same build gives `image rejected`. A build made with
+  `idf.py -DESPOS_BROKEN_BUILD=1 build` (it aborts in `app_main`) installs,
+  starts, aborts, and the bootloader starts the old slot; the status then
+  shows `rolled_back: true, other_version: 0.6.2`.

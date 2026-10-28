@@ -9,9 +9,10 @@ menu "espOS health"
             reserved for the life of the firmware). The set of conditions a
             firmware can raise is fixed at build time, so size this to what
             it actually raises; further keys are rejected with ESP_ERR_NO_MEM.
-            espOS itself uses five: lowMemory, memoryTrough, taskStalled,
-            netDown and skLinkStalled, which is why the minimum is 5 rather
-            than 1. A table too small to hold them drops one silently, and if
+            espOS itself raises up to eleven, depending on the components in
+            the build (docs/health.md lists them); the minimum of 5 covers
+            lowMemory, memoryTrough, taskStalled, netDown and skLinkStalled,
+            which every networked firmware raises. A table too small to hold them drops one silently, and if
             the dropped key is a fatal one the device stops restarting on a
             condition that should restart it. Raise this for a firmware that
             adds keys of its own.
