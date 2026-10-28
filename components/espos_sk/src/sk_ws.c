@@ -427,8 +427,8 @@ void espos_sk_ws_meta_round(void)
     if (any) {
         ESP_LOGW(TAG, "meta: %s, next round in %u s",
                  stop == ESPOS_SK_META_UNAUTHORIZED ? "token refused"
-                 : stop == ESPOS_SK_META_BACK_OFF ? "no answer or a server error"
-                                                      : "paths left unreconciled",
+                 : stop == ESPOS_SK_META_BACK_OFF   ? "no answer or a server error"
+                                                    : "paths left unreconciled",
                  (unsigned)(d / 1000));
     }
 }
