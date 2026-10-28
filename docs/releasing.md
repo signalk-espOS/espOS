@@ -240,7 +240,11 @@ run by hand from the Actions tab.
 
 It pushes with `DRIFT_PR_TOKEN`, like the bump job. Without that secret CI does
 not run on the refreshed branch, and closing and reopening the pull request
-starts it.
+starts it. Make that token a fine-grained one for this repository with
+**Contents**, **Pull requests** and **Workflows** set to read and write.
+GitHub refuses a push that changes `.github/workflows`, even a merge of
+`main` that only carries changes already there, from any token without the
+Workflows permission, and the workflow token can never have it.
 
 ### Reviewing a bump pull request
 

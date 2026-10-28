@@ -109,13 +109,14 @@ jobs:
           # main would then conflict in the manifests, so this is asked first,
           # against a copy of main. The title rather than a commit subject,
           # because the title is what dependency-drift.yml wrote and a person
-          # pushing to the branch does not change it.
+          # pushing to the branch does not change it. Main's copy of the tool:
+          # a branch cut before --superseded existed does not know the flag.
           title=$(gh pr view "$BRANCH" -R "$GITHUB_REPOSITORY" --json title --jq .title)
           re='^chore\(deps\): ([^ ]+) ([^ ]+) -> ([^ ]+)$'
           if [[ "$title" =~ $re ]]; then
             git worktree add --quiet --detach "$RUNNER_TEMP/main" origin/main
             rc=0
-            python3 tools/espos_apply_bump.py --root "$RUNNER_TEMP/main" --superseded \
+            python3 "$RUNNER_TEMP/main/tools/espos_apply_bump.py" --root "$RUNNER_TEMP/main" --superseded \
               --name "${BASH_REMATCH[1]}" --from "${BASH_REMATCH[2]}" \
               --to "${BASH_REMATCH[3]}" || rc=$?
             git worktree remove --force "$RUNNER_TEMP/main"
@@ -194,8 +195,16 @@ jobs:
           trap 'rm -f "$askpass"' EXIT
           # A fast-forward of what was checked out: if someone pushed to the
           # branch meanwhile, the push is refused and the daily run retries.
-          GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 \
-            git push "https://x-access-token@github.com/$GITHUB_REPOSITORY.git" "HEAD:$BRANCH"
+          # GitHub also refuses a push whose commits change .github/workflows,
+          # a merge of main included, unless the token may write workflows,
+          # which the workflow token never may.
+          if ! GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 \
+               git push "https://x-access-token@github.com/$GITHUB_REPOSITORY.git" "HEAD:$BRANCH"; then
+            if ! git diff --quiet "origin/$BRANCH" HEAD -- .github/workflows; then
+              echo "::error::The merge of main changes .github/workflows, which only a DRIFT_PR_TOKEN with Workflows: read and write may push."
+            fi
+            exit 1
+          fi
           if [ "$BORROWED" = "true" ]; then
             echo "::warning::DRIFT_PR_TOKEN is not set, so CI does not run on the refreshed $BRANCH. Close and reopen its pull request to run CI on the new head."
           fi
