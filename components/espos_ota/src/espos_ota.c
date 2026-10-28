@@ -83,6 +83,7 @@ static struct {
     bool auto_check, auto_install, allow_insecure;
     int32_t check_h, confirm_tmo_s;
     bool cfg_dirty;
+    bool server_selected; /* set on the event task, consumed by the OTA task after load_config() */
 } s;
 
 static void lock(void) { xSemaphoreTake(s.lock, portMAX_DELAY); }
@@ -132,7 +133,8 @@ static void on_config(const char *ns, const char *key, void *arg)
 
 /* With the signalk source a new server is a new manifest URL. Discovery
  * often finishes after the boot check, and waiting a full check_h for the
- * next try would skip a day, so the next scheduled check moves up to now. */
+ * next try would skip a day, so the OTA task moves the next scheduled check
+ * up to now. Only recorded here: the config snapshot may still be stale. */
 static void on_server_selected(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     (void)arg;
@@ -140,9 +142,7 @@ static void on_server_selected(void *arg, esp_event_base_t base, int32_t id, voi
     (void)id;
     (void)data;
     lock();
-    if (s.auto_check && strcmp(s.manifest_src, "signalk") == 0 && s.next_check_at) {
-        s.next_check_at = espos_ota_port_uptime_s();
-    }
+    s.server_selected = true;
     unlock();
 }
 
@@ -524,9 +524,16 @@ static void ota_task(void *arg)
         bool up = espos_net_is_up();
         uint32_t now = espos_ota_port_uptime_s();
         lock();
+        bool signalk_src = strcmp(s.manifest_src, "signalk") == 0;
+        if (s.server_selected) {
+            s.server_selected = false;
+            if (signalk_src && s.next_check_at) {
+                s.next_check_at = now;
+            }
+        }
         /* With the signalk source the server supplies the URL, so an empty
          * manifest_url is the normal setup there, not "manual only". */
-        bool auto_check = s.auto_check && (s.manifest_url[0] || strcmp(s.manifest_src, "signalk") == 0);
+        bool auto_check = s.auto_check && (s.manifest_url[0] || signalk_src);
         bool due = auto_check && up && ((!boot_check_done && now >= boot_check_at) || (boot_check_done && s.next_check_at && now >= s.next_check_at));
         bool busy = s.state == ESPOS_OTA_DOWNLOADING || s.state == ESPOS_OTA_VERIFYING || s.state == ESPOS_OTA_READY;
         unlock();
