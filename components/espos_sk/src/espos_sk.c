@@ -608,6 +608,7 @@ static bool select_server(void)
         espos_sk_tok_event(&s.sm, ESPOS_SK_EV_SERVER, &chosen);
     }
     if (changed) {
+        espos_event_sk_server_t ev = { 0 };
         if (have) {
             /* The advertised instance name is what the operator knows the
              * server as; a manual host has none unless discovery saw it. */
@@ -623,13 +624,19 @@ static bool select_server(void)
             ESP_LOGI(TAG, "found signalk-server \"%s\" at %s:%u (%s%s%s%s)", name[0] ? name : chosen.host,
                      chosen.host, chosen.port, source, chosen.tls ? ", tls" : "",
                      chosen.self[0] ? " " : "", chosen.self);
-            espos_event_sk_server_t ev = { .port = chosen.port };
+            ev.port = chosen.port;
             snprintf(ev.host, sizeof(ev.host), "%s", chosen.host);
-            (void)espos_event_post(ESPOS_EVENT_SK_SERVER_SELECTED, &ev, sizeof(ev));
         } else {
             ESP_LOGI(TAG, "no server (waiting for discovery or manual host)");
         }
         espos_sk_tok_event(&s.sm, ESPOS_SK_EV_SERVER, have ? &chosen : NULL);
+        /* A handler that asks espos_sk_get_server() or espos_sk_url() must
+         * get this server, and not every token-machine path refreshes the
+         * snapshot before it returns. */
+        if (have) {
+            p_status_changed(NULL);
+            (void)espos_event_post(ESPOS_EVENT_SK_SERVER_SELECTED, &ev, sizeof(ev));
+        }
     }
     /* After the choice is stored: a list published before it showed the
      * previous server as selected, and a pick in the list looked as if it

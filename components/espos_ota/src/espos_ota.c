@@ -141,9 +141,9 @@ static void on_server_selected(void *arg, esp_event_base_t base, int32_t id, voi
     (void)base;
     (void)id;
     (void)data;
-    lock();
-    s.server_selected = true;
-    unlock();
+    /* Never the OTA mutex here: load_config() holds it across config reads,
+     * and this runs on the event loop task. */
+    __atomic_store_n(&s.server_selected, true, __ATOMIC_RELEASE);
 }
 
 static void publish(void)
@@ -525,8 +525,7 @@ static void ota_task(void *arg)
         uint32_t now = espos_ota_port_uptime_s();
         lock();
         bool signalk_src = strcmp(s.manifest_src, "signalk") == 0;
-        if (s.server_selected) {
-            s.server_selected = false;
+        if (__atomic_exchange_n(&s.server_selected, false, __ATOMIC_ACQ_REL)) {
             if (signalk_src && s.next_check_at) {
                 s.next_check_at = now;
             }
