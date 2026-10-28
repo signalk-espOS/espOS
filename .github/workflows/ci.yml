@@ -31,6 +31,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Documentation-only changes skip the jobs that build or run firmware code:
+  # the doc PRs are most of the traffic, and each one queued sixty-odd builds
+  # behind the repository's concurrent-job ceiling. scripts/ci_changes.sh says
+  # what counts, and falls back to building whenever it cannot tell.
+  changes:
+    name: does the change touch code
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          case "$EVENT:$GITHUB_REF" in
+            pull_request:*) out=$(scripts/ci_changes.sh "origin/$BASE_REF") ;;
+            push:refs/heads/*) out=$(scripts/ci_changes.sh "$BEFORE") ;;
+            *) out=code=true ;;
+          esac
+          echo "$out" | tee -a "$GITHUB_OUTPUT"
+
   # A tag whose version.txt says something else makes every device built from
   # it report a version that matches no release. Cheap to check, impossible to
   # notice by eye once it has happened.
@@ -177,6 +204,8 @@ jobs:
 
   fuzz:
     name: fuzz the network parsers
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -315,6 +344,8 @@ jobs:
 
   firmware:
     name: build ${{ matrix.target }}
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
@@ -370,6 +401,8 @@ jobs:
   # is also the template a newcomer clones.
   examples:
     name: example ${{ matrix.example }} on ${{ matrix.target }}
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
@@ -448,6 +481,8 @@ jobs:
   # with espos_wifi excluded is the proof.
   headless:
     name: headless build esp32h2 (no espos_wifi)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -471,6 +506,8 @@ jobs:
   # apply underneath it.
   ble-without-wifi:
     name: ble_gateway on esp32p4 with WiFi off
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -494,6 +531,8 @@ jobs:
   # build-firmware.yml hands variants to the prologue this way.
   variant-defaults:
     name: board variant keeps espOS's defaults
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -522,6 +561,8 @@ jobs:
 
   host-tests:
     name: host tests (linux target)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
