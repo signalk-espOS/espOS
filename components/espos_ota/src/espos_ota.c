@@ -130,6 +130,22 @@ static void on_config(const char *ns, const char *key, void *arg)
     }
 }
 
+/* With the signalk source a new server is a new manifest URL. Discovery
+ * often finishes after the boot check, and waiting a full check_h for the
+ * next try would skip a day, so the next scheduled check moves up to now. */
+static void on_server_selected(void *arg, esp_event_base_t base, int32_t id, void *data)
+{
+    (void)arg;
+    (void)base;
+    (void)id;
+    (void)data;
+    lock();
+    if (s.auto_check && strcmp(s.manifest_src, "signalk") == 0 && s.next_check_at) {
+        s.next_check_at = espos_ota_port_uptime_s();
+    }
+    unlock();
+}
+
 static void publish(void)
 {
     char *j = espos_ota_status_json();
@@ -235,11 +251,18 @@ static void do_check(void)
             set_state(ESPOS_OTA_FAILED, "manifest source is signalk, but this firmware has no SignalK client");
             return;
         }
-        if (uerr != ESP_OK) {
+        if (uerr == ESP_ERR_NOT_FOUND) {
             /* No server selected yet -- ordinary at boot, before discovery
-             * has run. Not an error state worth alarming about; the next
-             * scheduled check will find one. */
+             * has run. Not an error state worth alarming about; the check
+             * runs again once a server is selected (on_server_selected). */
             set_state(ESPOS_OTA_FAILED, "no SignalK server selected yet");
+            return;
+        }
+        if (uerr != ESP_OK) {
+            char msg[80];
+            snprintf(msg, sizeof(msg), "cannot build the manifest URL from the server address (%s)",
+                     esp_err_to_name(uerr));
+            set_state(ESPOS_OTA_FAILED, msg);
             return;
         }
     }
@@ -501,7 +524,9 @@ static void ota_task(void *arg)
         bool up = espos_net_is_up();
         uint32_t now = espos_ota_port_uptime_s();
         lock();
-        bool auto_check = s.auto_check && s.manifest_url[0];
+        /* With the signalk source the server supplies the URL, so an empty
+         * manifest_url is the normal setup there, not "manual only". */
+        bool auto_check = s.auto_check && (s.manifest_url[0] || strcmp(s.manifest_src, "signalk") == 0);
         bool due = auto_check && up && ((!boot_check_done && now >= boot_check_at) || (boot_check_done && s.next_check_at && now >= s.next_check_at));
         bool busy = s.state == ESPOS_OTA_DOWNLOADING || s.state == ESPOS_OTA_VERIFYING || s.state == ESPOS_OTA_READY;
         unlock();
@@ -537,6 +562,9 @@ esp_err_t espos_ota_start(void)
             return ESP_ERR_NO_MEM;
         }
         espos_config_subscribe(on_config, NULL);
+        if (espos_event_subscribe(ESPOS_EVENT_SK_SERVER_SELECTED, on_server_selected, NULL) != ESP_OK) {
+            ESP_LOGW(TAG, "no server-selected events: with the signalk source a new server waits for check_h");
+        }
         esp_err_t err = espos_ota_register_api();
         if (err != ESP_OK) {
             return err;
