@@ -99,7 +99,7 @@ The portal is the setup network. It runs alongside the WiFi connection
 |---|---|
 | no network configured | up at once |
 | `sta_enabled = false` | up at once |
-| retrying without success | up after `portal_after_s` (default 90 s) |
+| retrying without success | up after `portal_after_s` (default 90 s), or when the connection attempt in progress ends, whichever is later |
 | connected | down |
 | **another link, such as Ethernet, has the network** | **down**, unless `portal_online` |
 | `portal_enabled = false` | never |
@@ -135,7 +135,9 @@ one ends. `GET /api/v1/wifi/status` shows the request as `portal.force`
 choice from the rules above.
 
 The setup network is called `portal_ssid`, by default `espOS-<id>`, where
-the id is the last 4 hex digits of the MAC address ([Net](net.md)). It is
+the id is the last 4 hex digits of the chip's base MAC address from eFuse
+([Net](net.md)). On a P4 that is not the MAC the router shows, which belongs
+to the C6 radio chip. It is
 open unless `portal_psk` (at least 8 characters) is set. The device is
 `192.168.4.1/24` and hands out addresses by DHCP. A small DNS server answers
 every name with that address, and the usual phone and laptop probe URLs
@@ -201,7 +203,7 @@ Some fields only appear in some states:
 `portal.force` is always there, because it says what was asked for, which
 matters even when the answer is no setup network. `hostname` is
 `net.hostname` as `espos_net` set it at boot. The same document goes out as
-the `wifi` SSE event on every change, and once when a client connects. For
+the `wifi` SSE event on every change, and once when an SSE client connects. For
 the view that doesn't care which link is up (is there a route, on which
 interface, with which address) use `GET /api/v1/net/status` ([Net](net.md)).
 
@@ -221,7 +223,7 @@ even ask whether it is connected. Espressif tracks this as
 and [#220](https://github.com/espressif/esp-hosted-mcu/issues/220).
 
 esp_hosted raises `ESP_HOSTED_EVENT_TRANSPORT_FAILURE` for faults it can
-see itself, such as a dropped SDIO read, and with
+see itself, such as a dropped SDIO read or an all-ones `PKT_LEN`, and with
 `CONFIG_ESP_HOSTED_HOST_TRANSPORT_RESTART_ON_FAILURE=y` (the default, which
 espOS keeps) that restarts the device. **A link that jams silently raises no
 event at all**, because there is nothing to see, only an absence.
@@ -235,7 +237,8 @@ If the radio chip announces a fresh start (`ESP_HOSTED_EVENT_CP_INIT`) after
 the first heartbeat, it reset under a running device, and the device
 restarts at once. The same event before the first heartbeat is part of
 normal boot: the main chip resets the radio chip while bringing up the link,
-and the event can arrive after the watchdog is watching. Restarting on it
+and the event can arrive after the watchdog is watching, so the watchdog
+ignores it and logs `boot handshake, ignored`. Restarting on it
 put a P4 panel into a boot loop, and on the first boot of an update any
 restart before the confirm rolls the update back.
 
@@ -297,14 +300,15 @@ looks for these names in the defaults files and stops the configure step.
 
 The reset polarity can't be set any more. 3.x always sends the pulse that
 2.x's `ACTIVE_HIGH` produced: high, 10 ms low, high (`eh_host_port_power.c`:
-*"CP reset is its EN pin: LOW asserts reset, HIGH runs it"*). So dropping the
-key changes nothing electrically on the Waveshare boards, and espOS's P4
+*"CP reset is its EN pin: LOW asserts reset, HIGH runs it"*). The Waveshare
+boards used `ACTIVE_HIGH` with 2.x, so dropping the key changes nothing
+electrically on them, and espOS's P4
 settings simply lose the line. A board that needed the **opposite** polarity
 has no setting for it any more, and its radio chip won't come out of reset.
 That is a hardware fact, so the check says so instead of suggesting a
 replacement key.
 
-A 3.x main chip still works with radio chip firmware from 0.0.6, 1.x and
+A 3.x main chip still works with radio chip firmware from 0.0.6 on, 1.x and
 2.x, so moving to 3.x doesn't by itself mean reflashing the C6. We checked
 this on a Waveshare P4 with a radio chip reporting 2.12.3: SDIO came up in
 streaming mode, RPC used V2, and WiFi and BLE both worked.
@@ -316,9 +320,11 @@ one ([Hardware](hardware.md#updating-the-c6-co-processor-firmware)).
 
 Radio chip firmware older than the version handshake reports no version at
 all, so the boot log says `Co-proc [0.0.0]` on a perfectly healthy link.
-That is also why espOS reads the version from the handshake instead of
-calling `esp_hosted_get_coprocessor_fwversion()`, which those chips don't
-answer. `hardware.coprocessor` in
+That is also why espOS reads the version from the handshake (the
+`ESP_PRIV_FIRMWARE_VERSION` field) instead of calling
+`esp_hosted_get_coprocessor_fwversion()`, which those chips don't answer.
+It falls back to that call only when esp_hosted's handshake header isn't
+reachable from the build, and then old radio chips time out on the query. `hardware.coprocessor` in
 [`GET /api/v1/system/info`](rest-api.md) and the `coprocessorStale` health
 condition report it. There, `0.0.0` means "present and answering, but silent
 about its version", which is not the same as the field being missing.
