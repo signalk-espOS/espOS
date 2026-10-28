@@ -28,8 +28,8 @@ clears an alert raised before the last reboot.
 The key (`"n2kBus"`, `"wakeService"`, `"lowMemory"`) is a name, not a
 sentence. It ends up in a Signal K path, and rules and dashboards match on
 it. The message is for people and can change without a new notification. A
-key over 24 characters or a message over 96 is refused rather than cut
-short, because a shortened key would never match the next report.
+key must be shorter than 24 characters and a message shorter than 96. A
+longer one is refused rather than cut short, because a shortened key would never match the next report.
 
 ## Sinks
 
@@ -74,9 +74,10 @@ panel's was 95 lines and had a bug the policy is now built around: it treated
 restarted about every 90 s and you could barely use it in between. The
 policy exists so that this mistake is made once, here, and not again.
 
-`espos_start()` turns the policy on, unless `espos_start_opts_t.health_watchdog`
-is false or `CONFIG_ESPOS_CORE_HEALTH_WATCHDOG` is off. Without
-`espos_start()` you call `espos_health_policy_start()`. Every 10 s
+`espos_init()`, and so `espos_start()`, turns the policy on, unless
+`espos_start_opts_t.health_watchdog` is false or
+`CONFIG_ESPOS_CORE_HEALTH_WATCHDOG` is off. A firmware that doesn't use
+`espos_init()` calls `espos_health_policy_start()` itself. Every 10 s
 (`CONFIG_ESPOS_HEALTH_POLICY_TICK_S`) it:
 
 1. looks at the free memory and raises or clears **`lowMemory`** (what is
@@ -116,20 +117,23 @@ tick, and what goes into the record.
 
 ### Built-in conditions
 
-These are the conditions espOS raises itself:
+These are the conditions espOS raises itself. Which ones a device can show
+depends on the components in its build.
 
 | Key | Raised by | State | Restarts | When |
 |---|---|---|---|---|
 | `lowMemory` | the policy | `WARN` | no | Less than 40 KB free in total (`CONFIG_ESPOS_HEALTH_HEAP_WARN_KB`), or less than 20 KB of internal RAM (`CONFIG_ESPOS_HEALTH_INTERNAL_WARN_KB`). |
 | `lowMemory` | the policy | `ALARM` | **yes** | Less than 12 KB of internal RAM free (`CONFIG_ESPOS_HEALTH_INTERNAL_ALARM_KB`), or no free internal block of 8 KB (`CONFIG_ESPOS_HEALTH_LARGEST_BLOCK_ALARM_KB`). |
-| `memoryTrough` | the policy | `WARN` | never | At some point since boot, free internal RAM was below 10 KB (`CONFIG_ESPOS_HEALTH_INTERNAL_TROUGH_WARN_KB`). |
+| `memoryTrough` | the policy | `WARN` | never | The low-water mark of internal RAM since boot is below 10 KB (`CONFIG_ESPOS_HEALTH_INTERNAL_TROUGH_WARN_KB`). Stays until the next boot. |
 | `taskStalled` | the policy | `ALARM` | **yes** | A task watched with `espos_health_watch_task()` hasn't called `espos_health_kick()` within its timeout. |
 | `netDown` | `espos_core` | `WARN` | no | The network went down. Cleared when it comes back. |
 | `skLinkStalled` | `espos_sk` | `ALARM` | **yes** | WiFi says it is connected and the Signal K stream worked earlier in this boot, but it has now been down for `sk.stall_s` (300 s, at least 60). |
 | `skCertificate` | `espos_sk` | `ALARM` | no | The Signal K server's TLS certificate was refused ([Signal K](signalk.md)). Cleared when a connection succeeds. A restart wouldn't bring a new certificate. |
-| `tlsMemory` | `espos_sk` | `WARN` | no | There wasn't a large enough free block for a TLS handshake, so the device didn't try. |
+| `tlsMemory` | `espos_sk` | `WARN` | no | There wasn't a large enough free block for a TLS handshake, so the device didn't try. Cleared when the next attempt finds one. |
 | `coprocessorStale` | `espos_wifi` | `WARN` | no | On a board with a radio co-processor, esp_hosted itself says the co-processor firmware is older than this build expects, which causes RPC timeouts. Checked once per boot, at the first co-processor heartbeat ([Hardware](hardware.md#updating-the-c6-co-processor-firmware)). |
-| `flowMailbox` | `espos_flow` | `WARN` | no | The [flow](flow.md) mailbox was full and work was dropped. |
+| `flowMailbox` | `espos_flow` | `WARN` | no | The [flow](flow.md) mailbox was full and work was dropped. Stays until the next boot. |
+| `flowConfig` | `espos_config` | `ALARM` | no | A flow node's settings couldn't be registered, so they won't appear on the settings page ([Config](config.md)). |
+| `wakeService` | `espos_voice` | `WARN` | no | The network wake word service couldn't be reached or set up, so the device uses its on-device wake word. |
 
 `coprocessorStale` uses esp_hosted's own verdict
 (`eh_host_mcu_transport_verify_fw_compat()`), not a comparison espOS makes,
@@ -183,8 +187,9 @@ and usable byte by byte (`MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT`). A classic
 ESP32 also adds spare instruction RAM to the heap, but only 32-bit accesses
 can use it, so no buffer or stack can live there, and counting it would
 overstate free internal RAM by about 31 KB. The largest-block alarm says
-"internal RAM low" when there is also little free in total, and "internal RAM
-fragmented" when there is enough free but not in one piece.
+"internal RAM low" when free internal RAM is also under the warning level
+or under the block floor itself, and "internal RAM fragmented" when there is
+more free but not in one piece.
 
 The alarm levels sit below the deepest normal dip measured so far: an
 ESP32-P4 panel goes down to about 24 KB free (23 KB largest block) while the
@@ -250,8 +255,8 @@ void ui_task(void *arg)
 * It adds the task to ESP-IDF's **task watchdog**, which espOS sets to panic
   after 30 s (`CONFIG_ESP_TASK_WDT_TIMEOUT_S` in `sdkconfig.d/espos.defaults`).
   A stuck task then leaves a core dump (`GET /api/v1/system/coredump` shows
-  the stack) and the device restarts. If that happens on the first boot of an
-  update, the update is rolled back.
+  the stack) and the device restarts. If that happens while a new update is
+  still waiting to be confirmed, the update is rolled back ([OTA](ota.md)).
 * It tells the policy about the task. Once the task has been quiet for
   `timeout_ms`, the policy raises `taskStalled` as a fatal `ALARM`. The
   timeout is shorter than the 30 s, so you see a notification before the
@@ -302,9 +307,9 @@ of a passage, that is a fair choice. So is keeping the policy and raising
 condition, if any, the policy would restart for. `POST /api/v1/health/test`
 raises a pretend one. Both are in [REST API](rest-api.md#health).
 
-The test endpoint exists because every built-in alarm that you could provoke
-restarts the device. Both `lowMemory` alarms and `taskStalled` carry the
-fatal flag, so you couldn't hold one long enough to check, say, that the
+The test endpoint exists because the built-in alarms you could provoke on
+purpose restart the device. Both `lowMemory` alarms and `taskStalled` carry
+the fatal flag, so you couldn't hold one long enough to check, say, that the
 alarm buzzer repeats and the LED turns red on a board that is already boxed
 up (espOS #137).
 
@@ -317,7 +322,8 @@ A drill reaches every sink, Signal K notifications included, so you see it on
 the chartplotter while it lasts.
 
 The `ttl_s` is a safety net, not a stopwatch. It is checked on the policy
-tick, so a drill with `ttl_s: 45` ends somewhere between 45 and 55 s.
+tick, so a drill ends up to one tick late: with `ttl_s: 45` and the default
+10 s tick, somewhere between 45 and 55 s (the tick can be set up to 60 s).
 `GET /api/v1/health` also checks it, so a script polling that endpoint sees
 the drill go sooner, and it works on a firmware with the watchdog turned off,
 where nothing ticks. To end a drill at an exact moment, clear it yourself with
@@ -326,9 +332,10 @@ where nothing ticks. To end a drill at an exact moment, clear it yourself with
 ## Sizing
 
 `CONFIG_ESPOS_HEALTH_MAX_CONDITIONS` (12 by default) is how many different
-keys the table holds. espOS itself can use up to nine of them, from the
+keys the table holds. espOS itself can use up to eleven of them, the
 [built-in conditions](#built-in-conditions) above, depending on which
-components are in the build. Each `test.` key a drill used also takes a slot,
+components are in the build. Leave room for those and your own keys: a
+fatal key that finds the table full can never restart the device. Each `test.` key a drill used also takes a slot,
 and keeps it until the next boot, so a test script should reuse one key
 rather than make up a new one every run.
 `CONFIG_ESPOS_HEALTH_MAX_SINKS` (4 by default) is how many listeners there
