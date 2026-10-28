@@ -60,7 +60,7 @@ typedef struct {
     char path[ESPOS_SK_PATH_MAX];
     char *meta_json;
     uint32_t period_ms;
-    uint32_t gen;      /* bumped by every declaration, so a round knows its answer is still for this text */
+    uint32_t gen;      /* bumped by every declaration and connect, so a round knows its answer still holds */
     bool reconciled;
 } meta_entry_t;
 
@@ -73,6 +73,7 @@ static struct {
     bool meta_dirty;                 /* something to reconcile on the live connection */
     uint32_t meta_round;             /* failed rounds in a row, for the retry backoff */
     uint32_t meta_retry_at_ms;       /* while meta_round > 0, no round before this */
+    size_t meta_next;                /* where the next round starts: past the path the last one stopped at */
     volatile bool stop;
     volatile bool cfg_dirty;
     /* config */
@@ -359,11 +360,18 @@ void espos_sk_ws_meta_round(void)
     if (espos_sk_get_server(&srv) != ESP_OK || espos_sk_get_token(token, sizeof(token)) != ESP_OK) {
         stop = ESPOS_SK_META_BACK_OFF;
     }
-    for (size_t i = 0; i < ESPOS_SK_META_CAP && stop == ESPOS_SK_META_DONE; i++) {
+    lock();
+    size_t n = s.meta_n;
+    size_t start = s.meta_next < n ? s.meta_next : 0;
+    unlock();
+    /* From where the last round stopped, so a path the server keeps failing
+     * with a 5xx cannot hold back the ones declared after it. */
+    for (size_t k = 0; k < n && stop == ESPOS_SK_META_DONE; k++) {
+        size_t i = (start + k) % n;
         char path[ESPOS_SK_PATH_MAX];
         char *meta = NULL;
         lock();
-        if (i >= s.meta_n || s.meta[i].reconciled) {
+        if (s.meta[i].reconciled) {
             unlock();
             continue;
         }
@@ -402,6 +410,9 @@ void espos_sk_ws_meta_round(void)
             unlock();
         } else if (step == ESPOS_SK_META_UNAUTHORIZED || step == ESPOS_SK_META_BACK_OFF) {
             stop = step;
+            lock();
+            s.meta_next = i + 1;
+            unlock();
         }
     }
     if (stop == ESPOS_SK_META_UNAUTHORIZED) {
@@ -897,7 +908,15 @@ static void ws_task(void *arg)
             s.st.connected = true;
             s.st.reconnects++;
             s.st.next_retry_s = 0;
-            s.meta_round = 0;   /* the client task reconciles on a new connection at once */
+            /* Every connect asks again: the server may be another one, or
+             * have lost what it was sent. The gen bump voids a round still
+             * running for the old connection. */
+            for (size_t i = 0; i < s.meta_n; i++) {
+                s.meta[i].reconciled = false;
+                s.meta[i].gen++;
+            }
+            s.meta_dirty = s.meta_n > 0;
+            s.meta_round = 0; /* the client task reconciles on a new connection at once */
             s.st.last_error[0] = '\0';
             s.connected_since_ms = now_ms();
             unlock();

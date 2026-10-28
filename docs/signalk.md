@@ -240,7 +240,8 @@ period, in seconds), the one field only the device can know.
 A reply the device cannot read (too large, cut off, not JSON) counts as
 "the server has some", never as "none", so a big user-edited meta object is
 not overwritten. A call that gets no answer or a server error ends the
-round, and so does a refused token; paths still open are tried again after a backoff (1 s,
+round, and so does a refused token; paths still open are tried again after a backoff, starting
+past the path that ended the round so one failing path holds back no other (1 s,
 doubling up to 5 minutes, back to the start on every new connection and
 every changed declaration). Values may reach the server a moment before
 their metadata on a first connect. These are blocking HTTP calls, so they run on the
