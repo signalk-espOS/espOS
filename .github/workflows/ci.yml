@@ -396,8 +396,10 @@ jobs:
           if-no-files-found: error
 
   # Every example is a complete project on the framework; CI is what keeps
-  # them building as espOS moves. minimal builds on every target because it
-  # is also the template a newcomer clones.
+  # them building as espOS moves. A pull request builds each example once, on
+  # its main target; examples-more-targets below adds the other targets on
+  # main. The firmware job already builds espOS itself on every target, so
+  # what a pull request skips is only an example's own code on a second chip.
   examples:
     name: example ${{ matrix.example }} on ${{ matrix.target }}
     needs: changes
@@ -420,6 +422,13 @@ jobs:
           - components/espos_sk/examples/listener_relay
           - components/espos_sk/examples/json_and_meta
           - components/espos_sk/examples/tls_server
+          - components/espos_flow/examples/sensor_graph
+          - components/espos_sk_flow/examples/smart_switch
+          - components/espos_sk_flow/examples/dusk_relay
+          - components/espos_nmea0183/examples/nmea0183_gps
+          - components/espos_power/examples/duty_cycle
+          - components/espos_prov/examples/ble_provisioning
+          - components/espos_sdlog/examples/sd_logger
         include:
           # The one example without the prologue: espOS named as a registry
           # dependency, plain IDF root CMakeLists, its own sdkconfig and
@@ -428,8 +437,41 @@ jobs:
           # broken even though every other example still passes.
           - { example: components/espos_core/examples/from_registry, target: esp32c6 }
           # ...and on esp32, which needs its own sdkconfig.defaults.esp32 for the
-          # Secure Boot V2 RSA scheme. That is the case a second target proves.
+          # Secure Boot V2 RSA scheme. That is the case a second target proves,
+          # and no other job builds it, so it runs on pull requests too.
           - { example: components/espos_core/examples/from_registry, target: esp32 }
+          # Hardware the C6 does not have: BLE through the P4's hosted radio,
+          # TWAI, USB device mode and the EMAC.
+          - { example: components/espos_ble/examples/ble_gateway, target: esp32p4 }
+          - { example: components/espos_n2k/examples/n2k_candump, target: esp32p4 }
+          - { example: components/espos_n2k/examples/n2k_switch_bank, target: esp32p4 }
+          - { example: components/espos_usb_storage/examples/usb_storage_follow, target: esp32p4 }
+          - { example: components/espos_eth/examples/ethernet, target: esp32p4 }
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: read pinned IDF version
+        id: idf
+        run: echo "version=$(cat .idf-version)" >> "$GITHUB_OUTPUT"
+      - uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: ${{ steps.idf.outputs.version }}
+          target: ${{ matrix.target }}
+          command: scripts/build_example.sh ${{ matrix.example }} ${{ matrix.target }}
+
+  # The same examples on their other targets, on main only. minimal builds on
+  # every target because it is also the template a newcomer clones.
+  examples-more-targets:
+    name: example ${{ matrix.example }} on ${{ matrix.target }}
+    needs: changes
+    if: github.event_name != 'pull_request' && needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
           - { example: components/espos_core/examples/minimal, target: esp32 }
           - { example: components/espos_core/examples/minimal, target: esp32s3 }
           - { example: components/espos_core/examples/minimal, target: esp32c3 }
@@ -443,24 +485,12 @@ jobs:
           - { example: components/espos_sk/examples/listener_relay, target: esp32p4 }
           - { example: components/espos_sk/examples/json_and_meta, target: esp32p4 }
           - { example: components/espos_sk/examples/tls_server, target: esp32p4 }
-          - { example: components/espos_flow/examples/sensor_graph, target: esp32c6 }
           - { example: components/espos_flow/examples/sensor_graph, target: esp32p4 }
-          - { example: components/espos_sk_flow/examples/smart_switch, target: esp32c6 }
           - { example: components/espos_sk_flow/examples/smart_switch, target: esp32p4 }
-          - { example: components/espos_sk_flow/examples/dusk_relay, target: esp32c6 }
-          - { example: components/espos_ble/examples/ble_gateway, target: esp32p4 }
-          - { example: components/espos_n2k/examples/n2k_candump, target: esp32p4 }
-          - { example: components/espos_n2k/examples/n2k_switch_bank, target: esp32p4 }
           - { example: components/espos_n2k/examples/n2k_switch_bank, target: esp32s3 }
-          - { example: components/espos_usb_storage/examples/usb_storage_follow, target: esp32p4 }
           - { example: components/espos_usb_storage/examples/usb_storage_follow, target: esp32s3 }
-          - { example: components/espos_eth/examples/ethernet, target: esp32p4 }
-          - { example: components/espos_nmea0183/examples/nmea0183_gps, target: esp32c6 }
           - { example: components/espos_nmea0183/examples/nmea0183_gps, target: esp32p4 }
-          - { example: components/espos_power/examples/duty_cycle, target: esp32c6 }
           - { example: components/espos_power/examples/duty_cycle, target: esp32p4 }
-          - { example: components/espos_prov/examples/ble_provisioning, target: esp32c6 }
-          - { example: components/espos_sdlog/examples/sd_logger, target: esp32c6 }
           - { example: components/espos_sdlog/examples/sd_logger, target: esp32p4 }
     steps:
       - uses: actions/checkout@v7
