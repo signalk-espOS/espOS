@@ -5,6 +5,9 @@ on:
     branches: [main]
     tags: ["v*"]
   pull_request:
+  # The full matrix on any branch, for a change worth proving on every target
+  # before it merges: pull requests build each example on one target only.
+  workflow_dispatch:
 
 # CI fans out to sixty-odd jobs against the repository's concurrent-job
 # ceiling, so a run nobody needs any more holds up the ones that matter.
