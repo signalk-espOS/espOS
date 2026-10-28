@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -21,6 +22,7 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "esp_transport.h"
 #include "esp_transport_tcp.h"
 #if CONFIG_ESPOS_SK_TLS
@@ -462,6 +464,20 @@ esp_err_t espos_sk_notify(const char *key, espos_sk_alert_t state, const char *m
 
 #endif
 
+/* Not now_ms() / 1000: that is the 32-bit tick count in milliseconds, which
+ * wraps after 49.7 days and would report a boat's long-running device as
+ * freshly booted. */
+static int64_t uptime_s(void)
+{
+#if CONFIG_IDF_TARGET_LINUX
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec;
+#else
+    return esp_timer_get_time() / 1000000;
+#endif
+}
+
 static void publish_health(void)
 {
     char base[64];
@@ -492,7 +508,7 @@ static void publish_health(void)
     }
     char p[ESPOS_SK_PATH_MAX];
     snprintf(p, sizeof(p), "%suptime", base);
-    espos_sk_publish_number(p, now_ms() / 1000);
+    espos_sk_publish_number(p, (double)uptime_s());
     snprintf(p, sizeof(p), "%sfreeHeap", base);
     espos_sk_publish_number(p, esp_get_free_heap_size());
     snprintf(p, sizeof(p), "%sminFreeHeap", base);
