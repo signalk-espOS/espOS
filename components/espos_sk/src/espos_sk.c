@@ -976,8 +976,18 @@ static void sk_task(void *arg)
             s.discover_due_ms = at(s.discover_interval_ms);
             continue;
         }
+        /* Metadata for the paths the device declared. Here and not on the
+         * stream task: these are blocking HTTP calls like the ones above. */
+        uint32_t meta_wait = espos_sk_ws_meta_wait_ms();
+        if (meta_wait == 0) {
+            espos_sk_ws_meta_round();
+            continue;
+        }
         /* 3. wait for a command or the next deadline */
         uint32_t wait = 1000;
+        if (meta_wait < wait) {
+            wait = meta_wait;
+        }
         if (s.timer_due_ms) {
             int32_t d = (int32_t)(s.timer_due_ms - t);
             if (d < (int32_t)wait) wait = d > 0 ? (uint32_t)d : 0;

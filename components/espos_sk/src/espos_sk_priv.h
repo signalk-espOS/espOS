@@ -130,9 +130,33 @@ esp_err_t espos_sk_tls_reset_now(void);
 esp_err_t espos_sk_ws_start(void);
 void espos_sk_ws_stop(void);
 void espos_sk_ws_config_changed(void);
-/* Meta GET/PUT (sk_http.c). *out_meta receives the JSON object text (malloc'ed) or NULL if none. */
-int espos_sk_http_get_meta(const espos_sk_server_t *srv, const char *token, const char *path, char **out_meta);
+/* What a meta GET found in a 200 reply. */
+typedef enum {
+    ESPOS_SK_META_NONE,       /* no meta object, or an empty one */
+    ESPOS_SK_META_PRESENT,    /* the server has meta for the path */
+    ESPOS_SK_META_UNREADABLE, /* a body cut off or not JSON: the server's, so never overwrite it */
+} espos_sk_meta_seen_t;
+/* Meta GET/PUT (sk_http.c); each returns the HTTP status, 0 when no answer came. */
+int espos_sk_http_get_meta(const espos_sk_server_t *srv, const char *token, const char *path,
+                           espos_sk_meta_seen_t *seen);
 int espos_sk_http_put_meta(const espos_sk_server_t *srv, const char *token, const char *path, const char *meta_json);
+
+/* One meta leg's outcome for the reconciliation round (sk_meta.c, pure). */
+typedef enum {
+    ESPOS_SK_META_DONE,         /* the server has meta for the path, its own or ours */
+    ESPOS_SK_META_PUT,          /* it has none: send ours */
+    ESPOS_SK_META_LATER,        /* a 4xx about this path: next path, this one on the retry */
+    ESPOS_SK_META_UNAUTHORIZED, /* token refused: report it and end the round */
+    ESPOS_SK_META_BACK_OFF,     /* no answer or a 5xx: end the round, the next leg would fare the same */
+} espos_sk_meta_step_t;
+espos_sk_meta_step_t espos_sk_meta_after_get(int status, espos_sk_meta_seen_t seen);
+espos_sk_meta_step_t espos_sk_meta_after_put(int status);
+
+/* Meta reconciliation, driven by the client task (sk_ws.c holds the table).
+ * The wait is UINT32_MAX while there is nothing to do: no stream, or every
+ * declared path reconciled. The round makes blocking HTTP calls. */
+uint32_t espos_sk_ws_meta_wait_ms(void);
+void espos_sk_ws_meta_round(void);
 /* JSON snippet for the status document. */
 char *espos_sk_ws_status_json(void);
 bool espos_sk_stream_allowed(void);

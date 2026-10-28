@@ -60,6 +60,7 @@ typedef struct {
     char path[ESPOS_SK_PATH_MAX];
     char *meta_json;
     uint32_t period_ms;
+    uint32_t gen;      /* bumped by every declaration, so a round knows its answer is still for this text */
     bool reconciled;
 } meta_entry_t;
 
@@ -70,6 +71,8 @@ static struct {
     meta_entry_t meta[ESPOS_SK_META_CAP];
     size_t meta_n;
     bool meta_dirty;                 /* something to reconcile on the live connection */
+    uint32_t meta_round;             /* failed rounds in a row, for the retry backoff */
+    uint32_t meta_retry_at_ms;       /* while meta_round > 0, no round before this */
     volatile bool stop;
     volatile bool cfg_dirty;
     /* config */
@@ -309,6 +312,13 @@ esp_err_t espos_sk_declare_meta(const char *path, const char *meta_json, uint32_
             break;
         }
     }
+    if (e && e->meta_json && strcmp(e->meta_json, txt) == 0 && e->period_ms == period_ms) {
+        /* Unchanged: nothing for the server to hear, and no reason to cut a
+         * running backoff short. */
+        unlock();
+        free(txt);
+        return ESP_OK;
+    }
     if (!e) {
         if (s.meta_n >= ESPOS_SK_META_CAP) {
             unlock();
@@ -321,17 +331,35 @@ esp_err_t espos_sk_declare_meta(const char *path, const char *meta_json, uint32_
     free(e->meta_json);
     e->meta_json = txt;
     e->period_ms = period_ms;
+    e->gen++;
     e->reconciled = false;
     s.meta_dirty = true;
+    s.meta_round = 0;   /* a new declaration does not wait out an old backoff */
     unlock();
     return ESP_OK;
 }
 
 /* Reconcile every not-yet-reconciled path: GET the server's meta, PUT ours
- * only if the server has none. Runs on the ws task with a live token. */
-static void reconcile_meta(const espos_sk_server_t *srv, const char *token)
+ * only if the server has none. Called by the client task (espos_sk.c), which
+ * makes the other blocking HTTP calls too: on the stream task a server slow
+ * to answer REST held the stream for one leg timeout per path, past its
+ * watchdog. A round ends early on no answer, a server error or a refused
+ * token (espos_sk_meta_after_*), and what is left waits for a backed-off
+ * retry. */
+void espos_sk_ws_meta_round(void)
 {
-    for (size_t i = 0; i < ESPOS_SK_META_CAP; i++) {
+    if (!s.lock) {
+        return;
+    }
+    espos_sk_server_t srv = { 0 };
+    char token[ESPOS_SK_TOKEN_MAX] = { 0 };
+    /* The stream may still count as connected for a moment after the server
+     * went: count that as a failed round, or the caller would spin on it. */
+    espos_sk_meta_step_t stop = ESPOS_SK_META_DONE;
+    if (espos_sk_get_server(&srv) != ESP_OK || espos_sk_get_token(token, sizeof(token)) != ESP_OK) {
+        stop = ESPOS_SK_META_BACK_OFF;
+    }
+    for (size_t i = 0; i < ESPOS_SK_META_CAP && stop == ESPOS_SK_META_DONE; i++) {
         char path[ESPOS_SK_PATH_MAX];
         char *meta = NULL;
         lock();
@@ -341,38 +369,43 @@ static void reconcile_meta(const espos_sk_server_t *srv, const char *token)
         }
         strcpy(path, s.meta[i].path);
         meta = strdup(s.meta[i].meta_json);
+        uint32_t gen = s.meta[i].gen;
         unlock();
         if (!meta) {
             continue;
         }
-        char *existing = NULL;
-        int st = espos_sk_http_get_meta(srv, token, path, &existing);
-        bool done = false;
-        if (st == 401 || st == 403) {
-            espos_sk_report_unauthorized();
-        } else if (existing) {
-            ESP_LOGI(TAG, "meta %s: server has its own, keeping it", path);
-            done = true;
-        } else if (st == 200 || st == 404) {
-            int put = espos_sk_http_put_meta(srv, token, path, meta);
-            if (put >= 200 && put < 300) {
+        espos_sk_meta_seen_t seen;
+        int st = espos_sk_http_get_meta(&srv, token, path, &seen);
+        espos_sk_meta_step_t step = espos_sk_meta_after_get(st, seen);
+        if (step == ESPOS_SK_META_DONE) {
+            ESP_LOGI(TAG, "meta %s: server has its own%s, keeping it", path,
+                     seen == ESPOS_SK_META_UNREADABLE ? " (too large or not JSON to read)" : "");
+        } else if (step == ESPOS_SK_META_PUT) {
+            int put = espos_sk_http_put_meta(&srv, token, path, meta);
+            step = espos_sk_meta_after_put(put);
+            if (step == ESPOS_SK_META_DONE) {
                 ESP_LOGI(TAG, "meta %s: sent", path);
-                done = true;
-            } else if (put == 401 || put == 403) {
-                espos_sk_report_unauthorized();
             } else {
                 ESP_LOGW(TAG, "meta %s: PUT → %d", path, put);
             }
         } else {
             ESP_LOGW(TAG, "meta %s: GET → %d", path, st);
         }
-        free(existing);
         free(meta);
-        if (done) {
+        if (step == ESPOS_SK_META_DONE) {
             lock();
-            s.meta[i].reconciled = true;
+            /* Unless it was redeclared while the legs ran: the new text is
+             * not the one the server was asked about. */
+            if (s.meta[i].gen == gen) {
+                s.meta[i].reconciled = true;
+            }
             unlock();
+        } else if (step == ESPOS_SK_META_UNAUTHORIZED || step == ESPOS_SK_META_BACK_OFF) {
+            stop = step;
         }
+    }
+    if (stop == ESPOS_SK_META_UNAUTHORIZED) {
+        espos_sk_report_unauthorized();
     }
     lock();
     bool any = false;
@@ -380,7 +413,39 @@ static void reconcile_meta(const espos_sk_server_t *srv, const char *token)
         any |= !s.meta[i].reconciled;
     }
     s.meta_dirty = any;
+    uint32_t d = 0;
+    if (any) {
+        d = espos_net_backoff_ms(s.meta_round, 300000, (uint32_t)rand());
+        if (s.meta_round < 30) {
+            s.meta_round++;
+        }
+        s.meta_retry_at_ms = now_ms() + d;
+    } else {
+        s.meta_round = 0;
+    }
     unlock();
+    if (any) {
+        ESP_LOGW(TAG, "meta: %s, next round in %u s",
+                 stop == ESPOS_SK_META_UNAUTHORIZED ? "token refused"
+                 : stop == ESPOS_SK_META_BACK_OFF ? "no answer or a server error"
+                                                      : "paths left unreconciled",
+                 (unsigned)(d / 1000));
+    }
+}
+
+uint32_t espos_sk_ws_meta_wait_ms(void)
+{
+    if (!s.lock) {
+        return UINT32_MAX;
+    }
+    lock();
+    uint32_t wait = UINT32_MAX;
+    if (s.st.connected && s.meta_dirty) {
+        int32_t left = (int32_t)(s.meta_retry_at_ms - now_ms());
+        wait = s.meta_round == 0 || left <= 0 ? 0 : (uint32_t)left;
+    }
+    unlock();
+    return wait;
 }
 
 /* ------------------------------------------------------------ health */
@@ -832,20 +897,16 @@ static void ws_task(void *arg)
             s.st.connected = true;
             s.st.reconnects++;
             s.st.next_retry_s = 0;
+            s.meta_round = 0;   /* the client task reconciles on a new connection at once */
             s.st.last_error[0] = '\0';
             s.connected_since_ms = now_ms();
             unlock();
             ESP_LOGI(TAG, "stream connected");
             set_stream_connected(true);
             publish_status();
-            /* meta first, so the server knows units before values arrive */
-            reconcile_meta(&srv, token);
         }
 
         /* connected: send what is due, read what comes in */
-        if (s.meta_dirty) {
-            reconcile_meta(&srv, token);
-        }
         uint32_t t = now_ms();
         if (s.health_ms && (int32_t)(t - next_health) >= 0) {
             publish_health();
