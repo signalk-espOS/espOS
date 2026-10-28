@@ -2166,12 +2166,14 @@ class SkTests(unittest.TestCase):
         self.assertTrue(ok, "meta not reconciled")
         self.assertEqual(self.mock.meta["espos.test.a"]["units"], "V")
         self.assertEqual(self.mock.meta["espos.test.a"]["timeout"], 2.5)
-        # server-side edits win: a redeclare against existing meta does not PUT again
+        # server-side edits win: a redeclare against existing meta does not PUT again.
+        # Counted for this path only: the health paths' first round may land
+        # in the same window.
         self.mock.meta["espos.test.a"] = {"units": "kV"}
-        puts0 = len(self.mock.meta_puts)
+        puts0 = self.mock.meta_puts.count("espos.test.a")
         req("POST", "/api/v1/sk/publish", {"path": "espos.test.a", "value": 2, "meta": {"units": "V"}})
         time.sleep(1.5)
-        self.assertEqual(len(self.mock.meta_puts), puts0)
+        self.assertEqual(self.mock.meta_puts.count("espos.test.a"), puts0)
         self.assertEqual(self.mock.meta["espos.test.a"]["units"], "kV")
         # health values arrive under espos.<label>.*
         js = wait_for(lambda: any(v["path"].endswith(".uptime") for d in self.mock.deltas for v in d["updates"][0]["values"]) or None, timeout=15)
