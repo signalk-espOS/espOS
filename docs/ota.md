@@ -9,9 +9,11 @@ if the new one doesn't come up properly.
 1. **Finding an update.** Either someone gives the device a URL
    (`POST /api/v1/ota {"url": …}`, or **From a URL** on the OTA page), or
    the device reads a **manifest** (`ota.manifest_url` and `ota.channel`).
-   It checks the manifest about 20 s after WiFi comes up, then every
-   `ota.check_h` hours while `ota.auto_check` is on. A newer build for the
-   device shows up as *available*. With `ota.auto_install` it installs at
+   While `ota.auto_check` is on, it checks the manifest once the network is
+   up and at least 20 s have passed since boot
+   (`CONFIG_ESPOS_OTA_BOOT_CHECK_DELAY_S`), then every `ota.check_h` hours.
+   A newer build for the device's target, channel and app shows up as
+   *available*. With `ota.auto_install` it installs at
    once; otherwise someone presses **Install**.
 2. **Download and check.** `esp_https_ota` writes the image into the other
    app slot. Before writing, it checks the header: the image must be an
@@ -25,8 +27,10 @@ if the new one doesn't come up properly.
    restarts into the new slot.
 4. **Keep it or go back.** The new image starts as `pending_verify`
    (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`). It marks itself good as soon
-   as WiFi connects, or after 60 s if no WiFi network is configured or
-   WiFi is off.
+   as the network is up, on WiFi or Ethernet. A firmware with WiFi that has
+   no network configured, or WiFi turned off, marks itself good after 60 s
+   instead (`CONFIG_ESPOS_OTA_NO_STA_GRACE_S`, which must stay below
+   `ota.confirm_tmo_s`).
    * If it crashes before that, the bootloader starts the old slot at the
      next reset.
    * If it runs but can't reach the network within `ota.confirm_tmo_s`
@@ -97,8 +101,9 @@ espsecure verify-signature --version 2 --keyfile <key>.pem <image>.bin
 Without the key file, `GET /api/v1/ota/status` names the key too.
 `running.key_fp` is the first 16 hex characters of the SHA-256 digest of the
 public key in the running image's first signature block. It is `null` when
-the image has no signature, and during a key change an image signed with two
-keys reports the first. It is the same digest `espsecure` prints, so you can
+the image has no signature, and also when signed updates are off, the scheme
+isn't RSA or ECDSA v2, or an original ESP32 is below revision 3. An image
+signed with more than one key, during a key change, reports the first. It is the same digest `espsecure` prints, so you can
 compare it with an image or a key without a device:
 
 ```sh
@@ -140,7 +145,8 @@ scheme (`sdkconfig.d/espos.defaults.esp32` sets `ESP32_REV_MIN_3`).
 
 This is *signed apps without Secure Boot*. It protects against tampering
 over the network, not against someone with the USB port. Hardware Secure
-Boot and flash encryption are release decisions ([Security](security.md)).
+Boot and flash encryption are decisions for the release overlay
+([Security](security.md)).
 
 ### Swapping the key
 
@@ -192,8 +198,8 @@ long after CI went green.
 
 There is deliberately **no committed default key**. A private key in a
 public repository is a key everyone has, and a device trusting it would take
-firmware signed by anyone. Most forks would ship that shared key without
-noticing.
+firmware signed by anyone. And if the safe path were opt-in, most forks
+would ship that shared key without noticing.
 
 ## Manifest format (`schema: 1`)
 
@@ -211,12 +217,14 @@ noticing.
 }
 ```
 
+* `schema` must be 1 when present; any other number rejects the manifest.
 * `app` is optional, at the top or per build. When present it must equal
   the device's project name.
 * Each build needs `version`, `target` and `url`. `target` is the ESP-IDF
   target name, compared exactly with the device's own (CI builds `esp32
   esp32s3 esp32c3 esp32c5 esp32c6 esp32p4`). `url` is absolute, or relative
-  to the manifest's URL.
+  to the manifest's URL. A build without all three as strings is skipped,
+  not reported.
 * `channel` defaults to `stable`. `size`, `sha256`, `notes` and `date` are
   for information only; `sha256` isn't what protects the image, the
   signature is.
@@ -229,7 +237,8 @@ noticing.
 * The content type doesn't matter, but the manifest must be 16 KiB or less.
 
 A boat-side update service only has to serve this file and the images;
-static hosting is enough, and nothing in espOS ties it to one host.
+static hosting is enough, and nothing in espOS ties it to one host. This is
+the "firmware distribution service" the original plan left for later.
 
 ## Settings (`ota` namespace)
 
@@ -255,6 +264,10 @@ That way **nothing has to be typed in per device**. A new device that finds
 its server also finds its updates, and a server that moves doesn't leave
 devices pointing at a URL that no longer works. It needs a plugin on the
 server that serves a manifest at that path.
+
+For now the automatic checks also need `ota.manifest_url` to be non-empty,
+although this source ignores its value ([#261](https://github.com/signalk-espOS/espOS/issues/261)).
+Until that is fixed, put any value there, or press **Check**.
 
 Two failures are reported as they are:
 
