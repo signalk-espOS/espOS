@@ -102,6 +102,7 @@ such as NMEA 2000, when its board has the hardware.
 | `espos_sdlog` | Logging to a microSD card that survives a power cut | [sdlog](sdlog.md) |
 | `espos_usb_storage` | A microSD card shared with a chartplotter over USB | [usb-storage](usb-storage.md) |
 | `espos_audio`, `espos_voice` | A voice satellite with wake word | [voice](voice.md) |
+| `espos_tone` | Short event tunes (RTTTL) for a buzzer: boot, relay, button chirps | [tone](tone.md) |
 
 Board-specific code, such as a display driver or pin map, stays in the
 firmware that knows the board.

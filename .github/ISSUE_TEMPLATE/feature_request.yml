@@ -44,6 +44,7 @@ body:
         - espos_usb_storage
         - espos_voice
         - espos_audio
+        - espos_tone
         - ui
         - build / cmake / scripts
         - docs

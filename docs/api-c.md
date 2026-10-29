@@ -73,6 +73,8 @@ table before calling anything from inside a callback.
 | [`espos_power_policy.h`](api-c/espos__power__policy_8h.md) | `espos_power` | when a duty-cycling device may sleep (pure C) |
 | [`espos_flow.h`](api-c/espos__flow_8h.md) | `espos_flow` | the loop task, timers and mailbox, callable from plain C |
 | [`espos_sched.h`](api-c/espos__sched_8h.md) | `espos_sched` | the wrap-safe timer wheel over an injected clock (pure C) |
+| [`espos_rtttl.h`](api-c/espos__rtttl_8h.md) | `espos_tone` | the RTTTL tune parser: notes, total length, the pitch at a time (pure C) |
+| [`espos_tone.h`](api-c/espos__tone_8h.md) | `espos_tone` | the named tone library and the one-shot player over an injected clock (pure C) |
 | [`espos_adc.h`](api-c/espos__adc_8h.md) | `espos_sensors` | calibrated one-shot ADC reads, in volts |
 | [`espos_gpio_in.h`](api-c/espos__gpio__in_8h.md) | `espos_sensors` | debounced GPIO input, level and edge |
 | [`espos_pcnt.h`](api-c/espos__pcnt_8h.md) | `espos_sensors` | pulse counting over PCNT, with a GPIO-ISR fallback where the SoC has no unit |
