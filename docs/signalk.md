@@ -231,12 +231,21 @@ closes the connection and keeps buffering.
 **Metadata.** `espos_sk_declare_meta(path, meta_json, period_ms)` records
 metadata for a path that is not in the Signal K specification; spec paths
 belong to the server ([Metadata is impossible to get wrong](#metadata-is-impossible-to-get-wrong)).
-On every connect the stream task asks
+On every connect the client task asks
 `GET /signalk/v1/api/vessels/self/<path>/meta`. If the server has none, the
 device `PUT`s its own. If the server has some, perhaps edited by the user,
 the server's wins. A `period_ms` above 0 adds `timeout` (2.5 times the
 period, in seconds), the one field only the device can know.
 `ws.meta.declared` and `ws.meta.reconciled` show how far it got.
+A reply the device cannot read (too large, cut off, not JSON) counts as
+"the server has some", never as "none", so a big user-edited meta object is
+not overwritten. A call that gets no answer or a server error ends the
+round, and so does a refused token; paths still open are tried again after a backoff, starting
+past the path that ended the round so one failing path holds back no other (1 s,
+doubling up to 5 minutes, back to the start on every new connection and
+every changed declaration). Values may reach the server a moment before
+their metadata on a first connect. These are blocking HTTP calls, so they run on the
+client task with the token machine's and not on the stream task.
 
 **Device health.** Every `sk.health_s` (10 s by default, 0 turns it off) the
 stream task publishes
@@ -752,12 +761,14 @@ its default:
 
 * **`CONFIG_ESPOS_SK_TASK_STACK`** (12288 by default, 6144 to 16384), the
   client task: discovery, the token machine and its HTTP calls (access
-  request, polling, checking), and the https probe.
+  request, polling, checking), the https probe, and the metadata calls,
+  which send an HTTP GET and PUT per path (`espos_sk_ws_meta_round()`).
 * **`CONFIG_ESPOS_SK_WS_TASK_STACK`** (10240 by default, 8192 to 16384), the
-  stream task: putting frames together, parsing deltas, the server's PUTs,
-  the notification sink, and the metadata calls, which send an HTTP GET and
-  PUT per path (`reconcile_meta()` is called from `ws_task()`, not from the
-  client task).
+  stream task: putting frames together, parsing deltas, the server's PUTs
+  and the notification sink.
+
+The measurements below were taken with the metadata calls on the stream
+task. The client task was not re-measured with them.
 
 Measured on an ESP32-C5 running the BLE gateway against a live server
 (discovery, an approved token, metadata for the published paths), with

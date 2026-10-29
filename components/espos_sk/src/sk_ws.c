@@ -58,20 +58,11 @@
 
 static const char *TAG = "espos_skws";
 
-typedef struct {
-    char path[ESPOS_SK_PATH_MAX];
-    char *meta_json;
-    uint32_t period_ms;
-    bool reconciled;
-} meta_entry_t;
-
 static struct {
     TaskHandle_t task;
     SemaphoreHandle_t lock;          /* delta engine + meta table + status */
     espos_sk_delta_t *delta;
-    meta_entry_t meta[ESPOS_SK_META_CAP];
-    size_t meta_n;
-    bool meta_dirty;                 /* something to reconcile on the live connection */
+    espos_sk_meta_table_t meta;
     volatile bool stop;
     volatile bool cfg_dirty;
     /* config */
@@ -304,85 +295,135 @@ esp_err_t espos_sk_declare_meta(const char *path, const char *meta_json, uint32_
         s.lock = xSemaphoreCreateMutex();
     }
     lock();
-    meta_entry_t *e = NULL;
-    for (size_t i = 0; i < s.meta_n; i++) {
-        if (strcmp(s.meta[i].path, path) == 0) {
-            e = &s.meta[i];
-            break;
-        }
-    }
-    if (!e) {
-        if (s.meta_n >= ESPOS_SK_META_CAP) {
-            unlock();
-            free(txt);
-            return ESP_ERR_NO_MEM;
-        }
-        e = &s.meta[s.meta_n++];
-        snprintf(e->path, sizeof(e->path), "%s", path);
-    }
-    free(e->meta_json);
-    e->meta_json = txt;
-    e->period_ms = period_ms;
-    e->reconciled = false;
-    s.meta_dirty = true;
+    esp_err_t err = espos_sk_meta_declare(&s.meta, path, txt, period_ms);
     unlock();
-    return ESP_OK;
+    return err;
 }
 
 /* Reconcile every not-yet-reconciled path: GET the server's meta, PUT ours
- * only if the server has none. Runs on the ws task with a live token. */
-static void reconcile_meta(const espos_sk_server_t *srv, const char *token)
+ * only if the server has none. Called by the client task (espos_sk.c), which
+ * makes the other blocking HTTP calls too: on the stream task a server slow
+ * to answer REST held the stream for one leg timeout per path, past its
+ * watchdog. A round ends early on no answer, a server error or a refused
+ * token (espos_sk_meta_after_*), and what is left waits for a backed-off
+ * retry. */
+void espos_sk_ws_meta_round(void)
 {
-    for (size_t i = 0; i < ESPOS_SK_META_CAP; i++) {
+    if (!s.lock) {
+        return;
+    }
+    espos_sk_server_t srv = { 0 };
+    char token[ESPOS_SK_TOKEN_MAX] = { 0 };
+    /* The stream may still count as connected for a moment after the server
+     * went: count that as a failed round, or the caller would spin on it. */
+    espos_sk_meta_step_t stop = ESPOS_SK_META_DONE;
+    if (espos_sk_get_server(&srv) != ESP_OK || espos_sk_get_token(token, sizeof(token)) != ESP_OK) {
+        stop = ESPOS_SK_META_BACK_OFF;
+    }
+    lock();
+    size_t n = s.meta.n;
+    uint32_t epoch = s.meta.epoch;
+    uint32_t conn = s.meta.conn;
+    unlock();
+    for (size_t k = 0; k < n && stop == ESPOS_SK_META_DONE; k++) {
         char path[ESPOS_SK_PATH_MAX];
-        char *meta = NULL;
         lock();
-        if (i >= s.meta_n || s.meta[i].reconciled) {
+        size_t i = espos_sk_meta_index(&s.meta, n, k);
+        const espos_sk_meta_entry_t *e = &s.meta.e[i];
+        if (e->reconciled) {
             unlock();
             continue;
         }
-        strcpy(path, s.meta[i].path);
-        meta = strdup(s.meta[i].meta_json);
+        strcpy(path, e->path);
+        char *meta = strdup(e->meta_json);
+        uint32_t gen = e->gen;
+        bool had_replaced = e->stale != NULL;
+        char *replaced = had_replaced ? strdup(e->stale) : NULL;
         unlock();
-        if (!meta) {
+        if (!meta || had_replaced != (replaced != NULL)) {
+            /* Without the replaced text the GET would take it for the
+             * server's own and keep it: try again after a backoff. */
+            free(meta);
+            free(replaced);
+            lock();
+            espos_sk_meta_leg_done(&s.meta, i, gen, ESPOS_SK_META_BACK_OFF);
+            unlock();
+            stop = ESPOS_SK_META_BACK_OFF;
             continue;
         }
-        char *existing = NULL;
-        int st = espos_sk_http_get_meta(srv, token, path, &existing);
-        bool done = false;
-        if (st == 401 || st == 403) {
-            espos_sk_report_unauthorized();
-        } else if (existing) {
-            ESP_LOGI(TAG, "meta %s: server has its own, keeping it", path);
-            done = true;
-        } else if (st == 200 || st == 404) {
-            int put = espos_sk_http_put_meta(srv, token, path, meta);
-            if (put >= 200 && put < 300) {
+        espos_sk_meta_seen_t seen;
+        int st = espos_sk_http_get_meta(&srv, token, path, replaced, &seen);
+        free(replaced);
+        espos_sk_meta_step_t step = espos_sk_meta_after_get(st, seen);
+        if (step == ESPOS_SK_META_DONE) {
+            ESP_LOGI(TAG, "meta %s: server has its own%s, keeping it", path,
+                     seen == ESPOS_SK_META_UNREADABLE ? " (too large or not JSON to read)" : "");
+        } else if (step == ESPOS_SK_META_PUT) {
+            /* Redeclared during the GET: the copy is stale, and once on the
+             * server the next round would keep it as the server's own. That
+             * round asks again and sends the current text. The lock is not
+             * held across the PUT, which can take a leg timeout. */
+            lock();
+            bool stale = s.meta.e[i].gen != gen;
+            unlock();
+            int put = 0;
+            step = ESPOS_SK_META_LATER;
+            if (!stale) {
+                put = espos_sk_http_put_meta(&srv, token, path, meta);
+                step = espos_sk_meta_after_put(put);
+            }
+            if (step == ESPOS_SK_META_DONE) {
+                lock();
+                espos_sk_meta_sent(&s.meta, i, gen, conn, meta);
+                unlock();
+                meta = NULL;
+            }
+            if (stale) {
+                ESP_LOGI(TAG, "meta %s: redeclared meanwhile, next round", path);
+            } else if (step == ESPOS_SK_META_DONE) {
                 ESP_LOGI(TAG, "meta %s: sent", path);
-                done = true;
-            } else if (put == 401 || put == 403) {
-                espos_sk_report_unauthorized();
             } else {
                 ESP_LOGW(TAG, "meta %s: PUT → %d", path, put);
             }
         } else {
             ESP_LOGW(TAG, "meta %s: GET → %d", path, st);
         }
-        free(existing);
         free(meta);
-        if (done) {
-            lock();
-            s.meta[i].reconciled = true;
-            unlock();
+        lock();
+        espos_sk_meta_leg_done(&s.meta, i, gen, step);
+        unlock();
+        if (step == ESPOS_SK_META_UNAUTHORIZED || step == ESPOS_SK_META_BACK_OFF) {
+            stop = step;
         }
     }
-    lock();
-    bool any = false;
-    for (size_t i = 0; i < s.meta_n; i++) {
-        any |= !s.meta[i].reconciled;
+    if (stop == ESPOS_SK_META_UNAUTHORIZED) {
+        espos_sk_report_unauthorized();
     }
-    s.meta_dirty = any;
+    /* A declaration or a reconnect while the round ran asks for a fresh
+     * round, not for this one's backoff. */
+    lock();
+    uint32_t d = s.meta.epoch != epoch
+                     ? 0
+                     : espos_sk_meta_round_end(&s.meta, now_ms(), espos_net_backoff_ms(s.meta.round, 300000, (uint32_t)rand()));
     unlock();
+    if (d) {
+        ESP_LOGW(TAG, "meta: %s, next round in %u s",
+                 stop == ESPOS_SK_META_UNAUTHORIZED ? "token refused"
+                 : stop == ESPOS_SK_META_BACK_OFF   ? "no answer or a server error"
+                                                    : "paths left unreconciled",
+                 (unsigned)(d / 1000));
+    }
+}
+
+uint32_t espos_sk_ws_meta_wait_ms(void)
+{
+    if (!s.lock) {
+        return UINT32_MAX;
+    }
+    lock();
+    uint32_t wait = espos_sk_meta_wait(&s.meta, s.st.connected, now_ms());
+    unlock();
+    return wait;
 }
 
 /* ------------------------------------------------------------ health */
@@ -848,20 +889,16 @@ static void ws_task(void *arg)
             s.st.connected = true;
             s.st.reconnects++;
             s.st.next_retry_s = 0;
+            espos_sk_meta_connected(&s.meta); /* the client task reconciles at once */
             s.st.last_error[0] = '\0';
             s.connected_since_ms = now_ms();
             unlock();
             ESP_LOGI(TAG, "stream connected");
             set_stream_connected(true);
             publish_status();
-            /* meta first, so the server knows units before values arrive */
-            reconcile_meta(&srv, token);
         }
 
         /* connected: send what is due, read what comes in */
-        if (s.meta_dirty) {
-            reconcile_meta(&srv, token);
-        }
         uint32_t t = now_ms();
         if (s.health_ms && (int32_t)(t - next_health) >= 0) {
             publish_health();
@@ -1123,10 +1160,10 @@ esp_err_t espos_sk_ws_get_status(espos_sk_ws_status_t *out)
         out->buffered_bytes = ds.buffered_bytes;
         out->dropped = ds.dropped;
     }
-    out->meta_declared = s.meta_n;
+    out->meta_declared = s.meta.n;
     out->meta_reconciled = 0;
-    for (size_t i = 0; i < s.meta_n; i++) {
-        out->meta_reconciled += s.meta[i].reconciled;
+    for (size_t i = 0; i < s.meta.n; i++) {
+        out->meta_reconciled += s.meta.e[i].reconciled;
     }
     unlock();
     espos_sk_inbound_stats(out);

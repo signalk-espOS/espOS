@@ -5,7 +5,9 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "esp_err.h"
+#include "sdkconfig.h" /* before ESPOS_SK_META_CAP: every file must see the same table size */
 #include "espos_sk.h"
+#include "espos_sk_delta.h"
 #include "espos_sk_http.h"
 
 #ifdef __cplusplus
@@ -130,9 +132,79 @@ esp_err_t espos_sk_tls_reset_now(void);
 esp_err_t espos_sk_ws_start(void);
 void espos_sk_ws_stop(void);
 void espos_sk_ws_config_changed(void);
-/* Meta GET/PUT (sk_http.c). *out_meta receives the JSON object text (malloc'ed) or NULL if none. */
-int espos_sk_http_get_meta(const espos_sk_server_t *srv, const char *token, const char *path, char **out_meta);
+/* What a meta GET found in a 200 reply. */
+typedef enum {
+    ESPOS_SK_META_NONE,       /* no meta object, or an empty one */
+    ESPOS_SK_META_PRESENT,    /* the server has meta for the path */
+    ESPOS_SK_META_UNREADABLE, /* a body cut off or not JSON: the server's, so never overwrite it */
+    ESPOS_SK_META_OURS,       /* the text of ours a later declaration replaced, unedited */
+} espos_sk_meta_seen_t;
+/* Meta GET/PUT (sk_http.c); each returns the HTTP status, 0 when no answer came. */
+/* ours, when not NULL, is a text the device sent and has since replaced:
+ * meta that still holds it is reported as ESPOS_SK_META_OURS. */
+int espos_sk_http_get_meta(const espos_sk_server_t *srv, const char *token, const char *path, const char *ours,
+                           espos_sk_meta_seen_t *seen);
 int espos_sk_http_put_meta(const espos_sk_server_t *srv, const char *token, const char *path, const char *meta_json);
+
+/* One meta leg's outcome for the reconciliation round (sk_meta.c, pure). */
+typedef enum {
+    ESPOS_SK_META_DONE,         /* the server has meta for the path, its own or ours */
+    ESPOS_SK_META_PUT,          /* it has none: send ours */
+    ESPOS_SK_META_LATER,        /* a 4xx about this path: next path, this one on the retry */
+    ESPOS_SK_META_UNAUTHORIZED, /* token refused: report it and end the round */
+    ESPOS_SK_META_BACK_OFF,     /* no answer or a 5xx: end the round, the next leg would fare the same */
+} espos_sk_meta_step_t;
+espos_sk_meta_step_t espos_sk_meta_after_get(int status, espos_sk_meta_seen_t seen);
+espos_sk_meta_step_t espos_sk_meta_after_put(int status);
+/* True when the server's meta still carries every field of ours unchanged. */
+bool espos_sk_meta_holds(const char *server_json, const char *ours_json);
+
+/* The declared-meta table and its reconciliation bookkeeping (sk_meta.c,
+ * pure: sk_ws.c holds one under its lock, the host tests drive it). */
+typedef struct {
+    char path[ESPOS_SK_PATH_MAX];
+    char *meta_json;
+    uint32_t period_ms;
+    uint32_t gen; /* bumped by every declaration and connect, so a round knows its answer still holds */
+    bool reconciled;
+    char *stale; /* a text of ours the server took after a later declaration replaced it */
+} espos_sk_meta_entry_t;
+
+typedef struct {
+    espos_sk_meta_entry_t e[ESPOS_SK_META_CAP];
+    size_t n;
+    bool dirty;           /* something left to reconcile */
+    uint32_t round;       /* failed rounds in a row, for the retry backoff */
+    uint32_t retry_at_ms; /* while round > 0, no round before this */
+    size_t next;          /* where the next round starts: past the path the last one stopped at */
+    uint32_t epoch;       /* bumped with any entry's gen, so a round knows its backoff still applies */
+    uint32_t conn;        /* bumped by every connect, so a round knows its server is still the one */
+} espos_sk_meta_table_t;
+
+/* Takes ownership of meta_json. ESP_OK when recorded or unchanged,
+ * ESP_ERR_NO_MEM when the table is full. */
+esp_err_t espos_sk_meta_declare(espos_sk_meta_table_t *t, const char *path, char *meta_json, uint32_t period_ms);
+/* A new connection: every path is asked again, and answers still in flight
+ * for the old one are voided. */
+void espos_sk_meta_connected(espos_sk_meta_table_t *t);
+/* 0 when a round is due, else ms until one is; UINT32_MAX for nothing to do. */
+uint32_t espos_sk_meta_wait(const espos_sk_meta_table_t *t, bool connected, uint32_t now_ms);
+/* The index a round's k-th leg works on, k < n as taken at the round's start. */
+size_t espos_sk_meta_index(const espos_sk_meta_table_t *t, size_t n, size_t k);
+/* Records one path's outcome; gen is the entry's as the leg began. */
+void espos_sk_meta_leg_done(espos_sk_meta_table_t *t, size_t i, uint32_t gen, espos_sk_meta_step_t step);
+/* Records a PUT the server took of sent, which it takes ownership of; gen
+ * and conn are the entry's and the table's as the leg began. */
+void espos_sk_meta_sent(espos_sk_meta_table_t *t, size_t i, uint32_t gen, uint32_t conn, char *sent);
+/* Ends a round: delay_ms is the backoff for t->round, used when paths are
+ * left. Returns the delay set, 0 when every path is reconciled. */
+uint32_t espos_sk_meta_round_end(espos_sk_meta_table_t *t, uint32_t now_ms, uint32_t delay_ms);
+
+/* Meta reconciliation, driven by the client task (sk_ws.c holds the table).
+ * The wait is UINT32_MAX while there is nothing to do: no stream, or every
+ * declared path reconciled. The round makes blocking HTTP calls. */
+uint32_t espos_sk_ws_meta_wait_ms(void);
+void espos_sk_ws_meta_round(void);
 /* JSON snippet for the status document. */
 char *espos_sk_ws_status_json(void);
 bool espos_sk_stream_allowed(void);

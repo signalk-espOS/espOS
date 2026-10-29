@@ -320,8 +320,8 @@ esp_err_t espos_sk_http_perform(const espos_sk_http_req_t *rq, espos_sk_http_res
 
 /* The legs' view of a request: an HTTP status (0 = transport failure) and
  * the body text in *body_out (malloc'ed, NUL-terminated; NULL on failure). */
-static int leg(const espos_sk_server_t *srv, espos_sk_http_method_t method, const char *path, const char *json_body,
-               const char *bearer, char **body_out, espos_sk_http_result_t *out)
+static int leg_ex(const espos_sk_server_t *srv, espos_sk_http_method_t method, const char *path, const char *json_body,
+                  const char *bearer, char **body_out, espos_sk_http_result_t *out, bool *truncated)
 {
     espos_sk_http_req_t rq = {
         .srv = srv,
@@ -346,7 +346,16 @@ static int leg(const espos_sk_server_t *srv, espos_sk_http_method_t method, cons
         return 0;
     }
     *body_out = r.body; /* ownership moves to the caller */
+    if (truncated) {
+        *truncated = r.truncated;
+    }
     return r.status;
+}
+
+static int leg(const espos_sk_server_t *srv, espos_sk_http_method_t method, const char *path, const char *json_body,
+               const char *bearer, char **body_out, espos_sk_http_result_t *out)
+{
+    return leg_ex(srv, method, path, json_body, bearer, body_out, out, NULL);
 }
 
 static void copy_str(char *dst, size_t size, const cJSON *j)
@@ -542,20 +551,25 @@ espos_sk_probe_t espos_sk_http_probe_https(const char *host, uint16_t port, uint
 
 /* -------------------------------------------------------------- meta */
 
-int espos_sk_http_get_meta(const espos_sk_server_t *srv, const char *token, const char *path, char **out_meta)
+int espos_sk_http_get_meta(const espos_sk_server_t *srv, const char *token, const char *path, const char *ours,
+                           espos_sk_meta_seen_t *seen)
 {
     char url[192];
-    *out_meta = NULL;
+    *seen = ESPOS_SK_META_NONE;
     if (espos_sk_http_self_path(path, "/meta", url, sizeof(url)) != ESP_OK) {
         return 0;
     }
     char *resp = NULL;
-    int status = leg(srv, ESPOS_SK_HTTP_GET, url, NULL, token, &resp, NULL);
-    if (status == 200 && resp) {
-        cJSON *j = cJSON_Parse(resp);
-        if (cJSON_IsObject(j) && j->child) {
-            *out_meta = resp; /* non-empty object: hand the text over */
-            resp = NULL;
+    bool truncated = false;
+    int status = leg_ex(srv, ESPOS_SK_HTTP_GET, url, NULL, token, &resp, NULL, &truncated);
+    /* A cut-off or unparsable reply is a server that has meta, more than the
+     * device can read -- not one that has none. An empty body has none. */
+    if (status == 200 && resp && resp[0]) {
+        cJSON *j = truncated ? NULL : cJSON_Parse(resp);
+        if (!j) {
+            *seen = ESPOS_SK_META_UNREADABLE;
+        } else if (cJSON_IsObject(j) && j->child) {
+            *seen = ours && espos_sk_meta_holds(resp, ours) ? ESPOS_SK_META_OURS : ESPOS_SK_META_PRESENT;
         }
         cJSON_Delete(j);
     }
