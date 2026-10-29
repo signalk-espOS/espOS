@@ -37,7 +37,7 @@
 /* Wired Ethernet: the component, a controller (the internal EMAC or a W5500),
  * and the switch. Started beside the WiFi station, not instead of it --
  * espos_net picks the route and prefers the cable. */
-#if ESPOS_HAVE_ETH && (CONFIG_ESPOS_ETH_CONTROLLER_EMAC || CONFIG_ESPOS_ETH_CONTROLLER_W5500) && CONFIG_ESPOS_ETH
+#if ESPOS_HAVE_ETH && CONFIG_ESPOS_ETH_HAVE_CONTROLLER && CONFIG_ESPOS_ETH
 #define START_ETH 1
 #include "espos_eth.h"
 #else

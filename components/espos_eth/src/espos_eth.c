@@ -27,7 +27,7 @@
 
 #include "espos_eth.h"
 
-#if CONFIG_ESPOS_ETH_CONTROLLER_EMAC || CONFIG_ESPOS_ETH_CONTROLLER_W5500
+#if CONFIG_ESPOS_ETH_HAVE_CONTROLLER
 
 #include "esp_eth.h"
 #include "esp_eth_netif_glue.h"
@@ -59,6 +59,7 @@ static struct {
     esp_eth_phy_t *phy;
     esp_netif_t *netif;
     esp_eth_netif_glue_handle_t glue;
+    bool spi_bus_ours; /* W5500: this transport set the SPI bus up */
 } s;
 
 static void report_down(void)
@@ -155,6 +156,15 @@ static void uninstall_partial(void)
         s.mac->del(s.mac);
         s.mac = NULL;
     }
+#if CONFIG_ESPOS_ETH_CONTROLLER_W5500
+    /* Only a bus this transport set up; an app's bus stays the app's. Freed so
+     * that an app setting the bus up after a failed start gets its own pins
+     * rather than ours. */
+    if (s.spi_bus_ours) {
+        spi_bus_free((spi_host_device_t)CONFIG_ESPOS_ETH_W5500_SPI_HOST);
+        s.spi_bus_ours = false;
+    }
+#endif
 }
 
 #if CONFIG_ESPOS_ETH_CONTROLLER_EMAC
@@ -215,11 +225,15 @@ static esp_err_t new_driver(void)
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
     };
-    /* ESP_ERR_INVALID_STATE: the bus is already up, set up by the app for
-     * another device on the same lines, or by an earlier start that failed
-     * further on. Either way the W5500 joins it as a device. */
     esp_err_t err = spi_bus_initialize(host, &bus, SPI_DMA_CH_AUTO);
-    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+    if (err == ESP_OK) {
+        s.spi_bus_ours = true;
+    } else if (err == ESP_ERR_INVALID_STATE) {
+        /* The app set the bus up for another device on the same lines. The
+         * W5500 joins it on the app's pins, so of the pins the logs below
+         * name, only CS and INT are this setting's. */
+        ESP_LOGI(TAG, "SPI%d is already set up; adding the W5500 to it", CONFIG_ESPOS_ETH_W5500_SPI_HOST + 1);
+    } else {
         ESP_LOGE(TAG, "spi_bus_initialize: %s", esp_err_to_name(err));
         return err;
     }

@@ -39,9 +39,14 @@ dependencies:
     # x-release-please-end
     override_path: "../espos_net"
   # IDF 6 moved the SPI Ethernet drivers to the registry. Exact, like every
-  # other registry dependency in espOS. Not on the linux target, where there is
-  # no esp_eth to build it against.
+  # other registry dependency in espOS, and wiznet_common too, which w5500
+  # would otherwise take at ^1.1.0. Not on the linux target, where there is no
+  # esp_eth to build them against.
   espressif/w5500:
     version: "==2.0.1"
+    rules:
+      - if: "target != linux"
+  espressif/wiznet_common:
+    version: "==1.1.0"
     rules:
       - if: "target != linux"
