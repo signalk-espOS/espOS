@@ -18,9 +18,9 @@ checked before the next one started. Dates are intentions, not promises.
 
 * **BLE provisioning** (`espos_prov`): done and verified on an ESP32-C5.
 * **Ethernet** (`espos_eth`): done for the internal EMAC with an RMII PHY,
-  such as the Waveshare ESP32-P4 PoE board. SPI Ethernet chips like the
-  W5500 are not supported yet, so the Ethernet port of the Waveshare
-  ESP32-S3 8-relay board in the registry goes unused for now.
+  such as the Waveshare ESP32-P4 PoE board, and for a W5500 on SPI, such as
+  the Waveshare ESP32-S3 8-relay board in the registry. The W5500 path still
+  waits for its first run on that board.
 * **Deep-sleep duty cycle** (`espos_power`): done.
 * **Web Serial flasher**: done. It lives in signalk-espos-manager and is
   hosted on the

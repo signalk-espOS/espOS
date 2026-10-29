@@ -5,7 +5,7 @@
 # x-release-please-start-version
 version: "0.25.2"
 # x-release-please-end
-description: "Wired Ethernet (internal EMAC + RMII PHY) as an espos_net transport; preferred over WiFi when both are up"
+description: "Wired Ethernet (internal EMAC + RMII PHY, or a W5500 on SPI) as an espos_net transport; preferred over WiFi when both are up"
 url: "https://github.com/signalk-espOS/espOS/tree/main/components/espos_eth"
 repository: "https://github.com/signalk-espOS/espOS.git"
 documentation: "https://github.com/signalk-espOS/espOS/blob/main/docs/net.md"
@@ -20,6 +20,7 @@ tags:
   - espos
   - ethernet
   - poe
+  - w5500
 files:
   exclude:
     - "build/**/*"
@@ -37,3 +38,10 @@ dependencies:
     version: "^0.25.2"
     # x-release-please-end
     override_path: "../espos_net"
+  # IDF 6 moved the SPI Ethernet drivers to the registry. Exact, like every
+  # other registry dependency in espOS. Not on the linux target, where there is
+  # no esp_eth to build it against.
+  espressif/w5500:
+    version: "==2.0.1"
+    rules:
+      - if: "target != linux"

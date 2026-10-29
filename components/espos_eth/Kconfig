@@ -1,8 +1,31 @@
 menu "espOS Ethernet"
-    depends on ETH_USE_ESP32_EMAC
+
+    choice ESPOS_ETH_CONTROLLER
+        prompt "Ethernet controller"
+        default ESPOS_ETH_CONTROLLER_EMAC if ETH_USE_ESP32_EMAC
+        default ESPOS_ETH_CONTROLLER_NONE
+        help
+            What carries the cable. The chip's internal EMAC with an RMII PHY
+            (ESP32, ESP32-P4), or a WIZnet W5500 on SPI, which works on any
+            chip and is what boards without an EMAC use, such as the Waveshare
+            ESP32-S3-ETH-8DI-8RO-C. With none, espos_eth_start() returns
+            ESP_ERR_NOT_SUPPORTED.
+
+        config ESPOS_ETH_CONTROLLER_EMAC
+            bool "Internal EMAC with an RMII PHY"
+            depends on ETH_USE_ESP32_EMAC
+
+        config ESPOS_ETH_CONTROLLER_W5500
+            bool "WIZnet W5500 on SPI"
+            depends on !IDF_TARGET_LINUX
+
+        config ESPOS_ETH_CONTROLLER_NONE
+            bool "None"
+    endchoice
 
     config ESPOS_ETH_PHY_ADDR
         int "PHY address (-1 to detect)"
+        depends on ESPOS_ETH_CONTROLLER_EMAC
         default 1 if IDF_TARGET_ESP32P4
         default -1
         range -1 31
@@ -15,6 +38,7 @@ menu "espOS Ethernet"
 
     config ESPOS_ETH_PHY_RST_GPIO
         int "PHY reset GPIO (-1 for none)"
+        depends on ESPOS_ETH_CONTROLLER_EMAC
         default 51 if IDF_TARGET_ESP32P4
         default -1
         range -1 63
@@ -24,5 +48,73 @@ menu "espOS Ethernet"
             whose PHY comes out of reset on its own. A wrong pin here does not
             fail loudly: the PHY simply never answers, which looks the same as
             no cable.
+
+    if ESPOS_ETH_CONTROLLER_W5500
+        # The defaults are the Waveshare ESP32-S3-ETH-8DI-8RO-C, the one
+        # W5500 board in the registry. Any other board sets its own.
+
+        config ESPOS_ETH_W5500_SPI_HOST
+            int "SPI host (1 = SPI2, 2 = SPI3)"
+            default 1
+            range 1 2
+            help
+                The SPI peripheral the W5500 is on. SPI2 exists on every chip;
+                SPI3 only on some (ESP32, ESP32-S3). An app that already set
+                this bus up, for another device on the same lines, keeps its
+                setup: espos_eth adds the W5500 to it.
+
+        config ESPOS_ETH_W5500_SCLK_GPIO
+            int "SCLK GPIO"
+            default 15
+            range 0 63
+
+        config ESPOS_ETH_W5500_MOSI_GPIO
+            int "MOSI GPIO"
+            default 13
+            range 0 63
+
+        config ESPOS_ETH_W5500_MISO_GPIO
+            int "MISO GPIO"
+            default 14
+            range 0 63
+
+        config ESPOS_ETH_W5500_CS_GPIO
+            int "CS GPIO"
+            default 16
+            range 0 63
+
+        config ESPOS_ETH_W5500_INT_GPIO
+            int "INT GPIO (-1 to poll)"
+            default 12
+            range -1 63
+            help
+                The W5500's active-low interrupt line. -1 for a board that does
+                not wire it: the driver then polls the chip every
+                ESPOS_ETH_W5500_POLL_MS.
+
+        config ESPOS_ETH_W5500_POLL_MS
+            int "Poll period without an INT line (ms)"
+            default 10
+            range 1 1000
+            help
+                Used only when ESPOS_ETH_W5500_INT_GPIO is -1.
+
+        config ESPOS_ETH_W5500_RST_GPIO
+            int "Reset GPIO (-1 for none)"
+            default -1
+            range -1 63
+            help
+                The W5500's active-low reset, pulsed low at start. The Waveshare
+                ESP32-S3-ETH-8DI-8RO-C does not wire it to the ESP32-S3.
+
+        config ESPOS_ETH_W5500_SPI_MHZ
+            int "SPI clock (MHz)"
+            default 20
+            range 1 80
+            help
+                The W5500 is specified to 80 MHz, but board traces rarely carry
+                that. 20 MHz moves several Mbit/s, far more than a Signal K
+                device sends, and leaves margin on a board nobody has measured.
+    endif
 
 endmenu

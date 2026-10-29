@@ -466,6 +466,8 @@ jobs:
           - { example: components/espos_n2k/examples/n2k_switch_bank, target: esp32p4 }
           - { example: components/espos_usb_storage/examples/usb_storage_follow, target: esp32p4 }
           - { example: components/espos_eth/examples/ethernet, target: esp32p4 }
+          # The W5500 path: no chip with an EMAC builds it.
+          - { example: components/espos_eth/examples/ethernet, target: esp32s3 }
     steps:
       - uses: actions/checkout@v7
         with:

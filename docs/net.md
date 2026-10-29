@@ -158,13 +158,20 @@ difference.
 ## Wired Ethernet (`espos_eth`)
 
 The second transport, and the checklist above applied: the chip's internal
-EMAC and an RMII PHY with DHCP, the netif registered as `ESPOS_NET_IF_ETH`,
+EMAC and an RMII PHY, or a WIZnet W5500 on SPI, with DHCP, the netif registered as `ESPOS_NET_IF_ETH`,
 `IP_EVENT_ETH_GOT_IP` reported up and link loss or `IP_EVENT_ETH_LOST_IP`
 reported down. It starts beside the WiFi station, not instead of it, and the
 static preference above puts the route on the cable whenever it has an
 address. Only Ethernet events from its own driver and netif count, so an app
 that installs a second Ethernet driver of its own does not move this one's
 route.
+
+Which of the two carries the cable is the choice "Ethernet controller" in
+menu "espOS Ethernet". It defaults to the EMAC on a chip that has one (ESP32,
+ESP32-P4) and to none elsewhere, so a firmware that never asked for Ethernet
+does not get it.
+
+### Internal EMAC
 
 There is little to configure. The EMAC's pins are IDF's
 `ETH_ESP32_EMAC_DEFAULT_CONFIG`, which on the ESP32-P4 is exactly the Waveshare
@@ -181,20 +188,47 @@ PHY drivers (IP101, LAN87xx, ...) to the component registry; the generic one
 reads link, speed and duplex from the standard registers, which is all a
 transport needs, and adds no dependency.
 
+### W5500 on SPI
+
+For a chip without an EMAC (ESP32-S3, C3, C6, ...) or a board that puts a
+WIZnet W5500 on its port instead, such as the Waveshare
+ESP32-S3-ETH-8DI-8RO-C. Select `CONFIG_ESPOS_ETH_CONTROLLER_W5500=y`; the
+wiring is in the same menu, and the defaults are that board's:
+
+| Kconfig | Default | |
+|---|---|---|
+| `CONFIG_ESPOS_ETH_W5500_SPI_HOST` | `1` | SPI2; `2` is SPI3 where the chip has one |
+| `CONFIG_ESPOS_ETH_W5500_SCLK_GPIO` | `15` | |
+| `CONFIG_ESPOS_ETH_W5500_MOSI_GPIO` | `13` | |
+| `CONFIG_ESPOS_ETH_W5500_MISO_GPIO` | `14` | |
+| `CONFIG_ESPOS_ETH_W5500_CS_GPIO` | `16` | |
+| `CONFIG_ESPOS_ETH_W5500_INT_GPIO` | `12` | `-1` polls every `CONFIG_ESPOS_ETH_W5500_POLL_MS` instead |
+| `CONFIG_ESPOS_ETH_W5500_RST_GPIO` | `-1` | the chip's active-low reset, if the board wires it |
+| `CONFIG_ESPOS_ETH_W5500_SPI_MHZ` | `20` | |
+
+The driver is Espressif's `espressif/w5500` from the component registry, which
+IDF 6 moved out of the core. espos_eth sets up the SPI bus itself, or joins it
+if the app already did for another device on the same lines, and installs the
+GPIO interrupt service if nobody has. The W5500 gets the MAC address the
+chip's eFuse derives for Ethernet (`ESP_MAC_ETH`), so it stays the same across
+reboots and differs from the station's. A W5500 that does not answer fails the
+install, and the log line names the host, the pins and the clock it tried.
+
 `espos_start()` starts it when the component is in the build and
 `CONFIG_ESPOS_ETH` is on, and **does not fail if it cannot**: a PHY that does
 not answer is logged and the device carries on, rather than turning
 `ESP_ERROR_CHECK(espos_start())` into a reboot loop on a device that could
 have come up on WiFi. An unplugged cable is not an error at all. A wrong PHY
 address or reset GPIO fails the same quiet way, which is why the install error
-names both settings.
+names the settings it used.
 
 mDNS follows the cable without help: the netif is IDF's default Ethernet netif
 (`ETH_DEF`), which the responder picks up when `CONFIG_MDNS_PREDEF_NETIF_ETH`
 is on, its default.
 
-On a chip without an internal EMAC (ESP32-C3, C6, S3) the component compiles to
-stubs: `espos_eth_start()` returns `ESP_ERR_NOT_SUPPORTED`.
+With no controller selected, the default on a chip without an internal EMAC,
+the component compiles to stubs: `espos_eth_start()` returns
+`ESP_ERR_NOT_SUPPORTED`.
 
 ## mDNS
 

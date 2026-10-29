@@ -59,7 +59,7 @@ void app_main(void) { ESP_ERROR_CHECK(espos_start(NULL)); /* your application */
 | 5 | `espos_net_start()` | Device id, hostname (`net.hostname`), `/net/status` and the mDNS responder (`<hostname>.local`, [net](net.md)). It comes before WiFi and Ethernet so the hostname is set on every interface. Posts `NETWORK_UP` and `NETWORK_DOWN`. |
 | 6 | `espos_time_start()` | The clock ([time](time.md)). It keeps a time carried through deep sleep and starts SNTP on the first `NETWORK_UP`. |
 | 7 | `espos_wifi_start()` | Station, setup network and `/wifi`, when WiFi is in the build and `CONFIG_ESPOS_WIFI` is on. Every chip with a radio or a radio co-processor has the component; the H-series chips don't. |
-| 8 | `espos_eth_start()` | Wired Ethernet, when the component is in and both `CONFIG_ETH_USE_ESP32_EMAC` (the chip's own EMAC) and `CONFIG_ESPOS_ETH` are on. It runs beside WiFi, and `espos_net` prefers the cable. |
+| 8 | `espos_eth_start()` | Wired Ethernet, when the component is in, menu "espOS Ethernet" names a controller (the chip's own EMAC or a W5500 on SPI) and `CONFIG_ESPOS_ETH` is on. It runs beside WiFi, and `espos_net` prefers the cable. |
 | 9 | `espos_sk_start()` | Signal K, if built. It needs `espos_net` for discovery and the stream. Just before it, the application name is set, so the access request reads `<app> <hostname>`. It also sets the clock from `navigation.datetime` while the clock is unset. |
 | 10 | `espos_ota_start()` | Updates, if built. Its API sits on the web server and it watches `espos_net` to decide when to confirm a new image. |
 | 11 | `espos_ble_start()` | The Bluetooth gateway, if built. It signs in with the Signal K token. It only counts as built when both the component and `CONFIG_BT_BLUEDROID_ENABLED` are in. |

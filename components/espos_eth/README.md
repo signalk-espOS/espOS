@@ -1,6 +1,6 @@
 # espos_eth
 
-Wired Ethernet (internal EMAC + RMII PHY) as an espos_net transport; preferred over WiFi when both are up.
+Wired Ethernet (internal EMAC + RMII PHY, or a W5500 on SPI) as an espos_net transport; preferred over WiFi when both are up.
 
 ```sh
 idf.py add-dependency "signalk-espos/espos_eth^0.7"
