@@ -415,7 +415,9 @@ class TankLevel
         if (n == 0) return;
         for (const char *p = in; p != nullptr && *p != '\0' && o + 1 < n; p++) {
             const char c = *p;
-            if ((c == '"' || c == '\\') && o + 2 < n) {
+            if (c == '"' || c == '\\') {
+                // A quote without its backslash would end the JSON string.
+                if (o + 2 >= n) break;
                 out[o++] = '\\';
                 out[o++] = c;
             } else if (static_cast<unsigned char>(c) >= 0x20) {
