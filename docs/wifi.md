@@ -329,6 +329,17 @@ reachable from the build, and then old radio chips time out on the query. `hardw
 condition report it. There, `0.0.0` means "present and answering, but silent
 about its version", which is not the same as the field being missing.
 
+## Sharing the radio with Zigbee or Thread
+
+On an ESP32-C5 or C6 running Zigbee or Thread on its own radio, Wi-Fi and
+802.15.4 take turns on the same 2.4 GHz radio. espOS turns on that sharing
+when the station starts, in every build that has the 802.15.4 driver and
+`CONFIG_ESP_COEX_SW_COEXIST_ENABLE` (on by default). There is nothing to
+call from the application. Without it, a Zigbee coordinator, which always
+listens, keeps the radio to itself: the access point drops the station for
+missing acknowledgements (reason 34) and every reconnect times out. A build
+without 802.15.4 is unchanged; Bluetooth shares the radio without this step.
+
 ## mDNS
 
 The mDNS responder moved to [`espos_net`](net.md#mdns) along with the

@@ -15,7 +15,8 @@ if(target STREQUAL "linux")
     list(APPEND srcs src/port_sim.c src/hosted_watchdog.c)
 else()
     list(APPEND srcs src/port_idf.c src/portal_dns.c src/hosted_watchdog.c)
-    list(APPEND priv_reqs esp_wifi esp_netif esp_event esp_timer lwip)
+    # esp_coex: 802.15.4 coexistence for Zigbee and Thread builds (port_idf.c).
+    list(APPEND priv_reqs esp_wifi esp_coex esp_netif esp_event esp_timer lwip)
     # The co-processor update downloads its image and checks its hash
     # (coproc_update.c); compiled to a stub without esp_hosted.
     list(APPEND priv_reqs esp_http_client mbedtls app_update)

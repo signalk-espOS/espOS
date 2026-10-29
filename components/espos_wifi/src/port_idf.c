@@ -15,6 +15,7 @@
 #include "wifi_last_ap.h"
 
 #include "esp_attr.h"
+#include "esp_coexist.h"
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_random.h"
@@ -567,6 +568,17 @@ static esp_err_t d_init(void)
         ESP_LOGE(TAG, "esp_wifi_start: %s", esp_err_to_name(err));
         return err;
     }
+#if CONFIG_ESP_COEX_SW_COEXIST_ENABLE && CONFIG_SOC_IEEE802154_SUPPORTED && CONFIG_IEEE802154_ENABLED
+    /* A Zigbee or Thread build shares the chip's one 2.4 GHz radio with
+     * 802.15.4, and the software arbiter schedules the two only once it is
+     * told to; Bluetooth gets that by itself, 802.15.4 does not. Without it a
+     * coordinator, whose receiver is always on, starves the station: the AP
+     * drops it for missing ACKs and every rejoin times out. */
+    err = esp_coex_wifi_i154_enable();
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "802.15.4 coexistence not enabled: %s", esp_err_to_name(err));
+    }
+#endif
     s_inited = true;
     return ESP_OK;
 }
