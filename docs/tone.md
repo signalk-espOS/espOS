@@ -32,6 +32,10 @@ if (espos_tone_player_step(&s_player, now_ms(), &hz)) {
 }
 ```
 
+A firmware adds `espos_tone` to the `REQUIRES` of its own component (main's
+`CMakeLists.txt`, or whichever component drives the buzzer). It is a core
+component, so it does not go in `espos_project_prologue(... COMPONENTS ...)`.
+
 `now_ms()` is any free-running millisecond clock, such as
 `esp_timer_get_time() / 1000` cut to `uint32_t`. The player is wrap-safe, so
 the clock may roll over in the middle of a tune.
@@ -95,7 +99,8 @@ picks its tune by name in a setting of its own:
 
 `espos_tone_library_parse()` turns the table into an array of
 `espos_tone_t`. It skips a row whose name is missing, empty or longer than
-`ESPOS_TONE_NAME_MAX` (24) characters, or whose tune has no playable notes.
+`ESPOS_TONE_NAME_MAX` (24) characters, or whose tune has no playable notes
+(including a tune so fast that every note rounds to 0 ms).
 Malformed JSON gives zero tones rather than an error, so a broken table costs
 the chirps and nothing else. `espos_tone_library_find()` looks a tone up by
 name (case-sensitive, first match). An empty name finds nothing, which is

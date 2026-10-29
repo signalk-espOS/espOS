@@ -36,6 +36,17 @@ TEST_CASE("tone library: valid rows parse, invalid rows are skipped", "[tone]")
     TEST_ASSERT_EQUAL(1, tones[1].n_notes);
 }
 
+TEST_CASE("tone library: a row whose notes all round to 0 ms is skipped", "[tone]")
+{
+    /* 240000 / 9999 / 9999 is well under half a millisecond: the tune parses,
+     * but the player would start and never sound. */
+    const char *json = "[{\"name\":\"silent\",\"rtttl\":\"x:d=9999,o=5,b=9999:c,e\"},"
+                       "{\"name\":\"boot\",\"rtttl\":\"x::c\"}]";
+    espos_tone_t tones[2];
+    TEST_ASSERT_EQUAL(1, espos_tone_library_parse(json, tones, 2));
+    TEST_ASSERT_EQUAL_STRING("boot", tones[0].name);
+}
+
 TEST_CASE("tone library: a name of exactly ESPOS_TONE_NAME_MAX fits, one more is skipped", "[tone]")
 {
     char json[256];

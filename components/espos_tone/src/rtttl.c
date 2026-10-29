@@ -105,11 +105,13 @@ size_t espos_rtttl_parse(const char *rtttl, espos_rtttl_note_t *out, size_t max)
                 break;
             }
             char key = (char)tolower((unsigned char)*q);
+            // The '=' must belong to this key: stop at the next ',' too, or a
+            // key written without one ("o5,b=120") takes the next key's value.
             const char *eq = q;
-            while (eq < defs_end && *eq != '=') {
+            while (eq < defs_end && *eq != '=' && *eq != ',') {
                 eq++;
             }
-            if (eq < defs_end && eq + 1 <= defs_end) {
+            if (eq < defs_end && *eq == '=') {
                 // defs_end is the ':' or the terminating NUL, so the digits
                 // stop there by themselves.
                 const char *v = eq + 1;
@@ -125,7 +127,7 @@ size_t espos_rtttl_parse(const char *rtttl, espos_rtttl_note_t *out, size_t max)
                 }
                 q = v;
             } else {
-                q = defs_end;
+                q = eq;  // no value: leave the defaults alone, go to the next key
             }
             while (q < defs_end && *q != ',') {
                 q++;

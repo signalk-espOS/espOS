@@ -97,6 +97,24 @@ TEST_CASE("rtttl: a malformed header falls back per key, not wholesale", "[rtttl
     TEST_ASSERT_EQUAL(500, notes[0].duration_ms);
 }
 
+TEST_CASE("rtttl: a default written without '=' does not take the next key's value", "[rtttl]")
+{
+    espos_rtttl_note_t notes[MAX];
+    /* "o5" has no '='; the search for one used to run on into "b=120" and
+     * read it as the octave (clamped to 8: 4186 Hz), leaving the tempo at 63. */
+    TEST_ASSERT_EQUAL(1, espos_rtttl_parse("x:o5,b=120:c", notes, MAX));
+    TEST_ASSERT_EQUAL(523, notes[0].freq_hz);     /* octave stays 5 */
+    TEST_ASSERT_EQUAL(500, notes[0].duration_ms); /* b=120 still applies */
+    /* Same with a bare "d": it used to take o=6 as the duration. */
+    TEST_ASSERT_EQUAL(1, espos_rtttl_parse("x:d,o=6,b=120:c", notes, MAX));
+    TEST_ASSERT_EQUAL(1047, notes[0].freq_hz);    /* o=6 applies */
+    TEST_ASSERT_EQUAL(500, notes[0].duration_ms); /* d stays 4 */
+    /* A bare key last in the section. */
+    TEST_ASSERT_EQUAL(1, espos_rtttl_parse("x:b=120,o:c", notes, MAX));
+    TEST_ASSERT_EQUAL(523, notes[0].freq_hz);
+    TEST_ASSERT_EQUAL(500, notes[0].duration_ms);
+}
+
 TEST_CASE("rtttl: a zero tempo or zero default duration plays nothing", "[rtttl]")
 {
     espos_rtttl_note_t notes[MAX];

@@ -58,8 +58,8 @@ typedef struct {
  * Parses `json`, a JSON array of {"name","rtttl"} objects, into `out`.
  *
  * A row is skipped if its name is missing, empty or longer than
- * ESPOS_TONE_NAME_MAX, or its RTTTL has no playable notes. Malformed JSON, or
- * anything that is not an array, parses as zero tones.
+ * ESPOS_TONE_NAME_MAX, or its RTTTL has no playable notes or plays for 0 ms.
+ * Malformed JSON, or anything that is not an array, parses as zero tones.
  *
  * @return the number of tones written (at most `max`).
  */

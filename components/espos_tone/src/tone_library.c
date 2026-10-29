@@ -26,7 +26,10 @@ size_t espos_tone_library_parse(const char *json, espos_tone_t *out, size_t max)
         const cJSON *row;
         cJSON_ArrayForEach(row, root)
         {
-            if (n >= max || !cJSON_IsObject(row)) {
+            if (n >= max) {
+                break;
+            }
+            if (!cJSON_IsObject(row)) {
                 continue;
             }
             const cJSON *name = cJSON_GetObjectItemCaseSensitive(row, "name");
@@ -37,7 +40,9 @@ size_t espos_tone_library_parse(const char *json, espos_tone_t *out, size_t max)
             }
             espos_tone_t tone = { 0 };
             tone.n_notes = espos_rtttl_parse(rtttl->valuestring, tone.notes, ESPOS_RTTTL_MAX_NOTES);
-            if (tone.n_notes == 0) {
+            // No notes, or only notes that round to 0 ms (a tempo and length
+            // so high nothing lasts a millisecond): a row that would never sound.
+            if (tone.n_notes == 0 || espos_rtttl_duration_ms(tone.notes, tone.n_notes) == 0) {
                 continue;
             }
             snprintf(tone.name, sizeof(tone.name), "%s", name->valuestring);
