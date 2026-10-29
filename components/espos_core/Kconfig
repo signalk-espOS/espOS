@@ -35,16 +35,17 @@ menu "espOS core"
     config ESPOS_ETH
         bool "Start wired Ethernet (espos_eth) in espos_start()"
         default y
-        depends on ETH_USE_ESP32_EMAC
+        depends on ESPOS_ETH_CONTROLLER_EMAC || ESPOS_ETH_CONTROLLER_W5500
         help
             espos_start() brings espos_eth up right after the network seam,
             beside the WiFi station rather than instead of it: espos_net
             routes over the cable whenever it has a link, and over the
-            station otherwise. Only matters in a firmware that builds
-            espos_eth, on a chip with an internal EMAC.
+            station otherwise. Offered once a firmware builds espos_eth and
+            menu "espOS Ethernet" names a controller: the internal EMAC, or a
+            W5500 on SPI.
 
             A failure here does not stop espos_start(). A PHY that does not
-            answer -- a board without one, a wrong reset GPIO -- is logged
+            answer -- a board without one, a wrong reset GPIO or SPI pin -- is logged
             and the device carries on, because a firmware that could have
             come up on WiFi should not reboot-loop over a missing cable
             interface.

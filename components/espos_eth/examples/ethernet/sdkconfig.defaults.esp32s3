@@ -1,0 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dirk Wahrheit
+# SPDX-License-Identifier: Apache-2.0
+#
+# The ESP32-S3 has no EMAC; the Waveshare ESP32-S3-ETH-8DI-8RO-C puts a W5500
+# on SPI instead. The pins in menu "espOS Ethernet" default to that board.
+CONFIG_ESPOS_ETH_CONTROLLER_W5500=y

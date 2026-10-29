@@ -14,6 +14,10 @@
  * (if_key "ETH_DEF"), which the mdns component follows by itself when
  * CONFIG_MDNS_PREDEF_NETIF_ETH is on -- its default -- so <hostname>.local
  * answers on the cable as it does on the station.
+ *
+ * Which controller carries the cable is menu "espOS Ethernet": the internal
+ * EMAC, or a W5500 on SPI. Only new_driver() differs between them; the netif,
+ * the events and the reporting are the same code.
  */
 #include "sdkconfig.h"
 
@@ -23,16 +27,24 @@
 
 #include "espos_eth.h"
 
-#if CONFIG_ETH_USE_ESP32_EMAC
+#if CONFIG_ESPOS_ETH_CONTROLLER_EMAC || CONFIG_ESPOS_ETH_CONTROLLER_W5500
 
 #include "esp_eth.h"
-#include "esp_eth_mac_esp.h"
 #include "esp_eth_netif_glue.h"
 #include "esp_eth_phy.h"
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "espos_net.h"
+#if CONFIG_ESPOS_ETH_CONTROLLER_EMAC
+#include "esp_eth_mac_esp.h"
+#else
+#include "driver/gpio.h"
+#include "driver/spi_master.h"
+#include "esp_eth_mac_w5500.h"
+#include "esp_eth_phy_w5500.h"
+#include "esp_mac.h"
+#endif
 
 static const char *TAG = "espos_eth";
 
@@ -145,17 +157,16 @@ static void uninstall_partial(void)
     }
 }
 
-static esp_err_t install(void)
-{
-    esp_err_t err = esp_netif_init();
-    if (err != ESP_OK) {
-        return err;
-    }
-    err = esp_event_loop_create_default();
-    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
-        return err;
-    }
+#if CONFIG_ESPOS_ETH_CONTROLLER_EMAC
 
+/* The usual cause of a failed install on real hardware: the PHY did not
+ * answer on MDIO -- wrong address, wrong reset GPIO, or no PHY on this board.
+ * The error code alone says none of that, so the log names the settings. */
+#define WIRING_FMT  "PHY address %d, reset GPIO %d"
+#define WIRING_ARGS CONFIG_ESPOS_ETH_PHY_ADDR, CONFIG_ESPOS_ETH_PHY_RST_GPIO
+
+static esp_err_t new_driver(void)
+{
     /* The chip's EMAC defaults are the board wiring on the ESP32-P4 (the
      * Waveshare PoE board: MDC 31, MDIO 52, RMII clock in on GPIO 50). What
      * varies per board is the PHY's address and reset line. */
@@ -168,24 +179,133 @@ static esp_err_t install(void)
     s.mac = esp_eth_mac_new_esp32(&emac_cfg, &mac_cfg);
     if (!s.mac) {
         ESP_LOGE(TAG, "could not create the EMAC");
-        uninstall_partial();
         return ESP_ERR_NO_MEM;
     }
     s.phy = esp_eth_phy_new_generic(&phy_cfg);
     if (!s.phy) {
         ESP_LOGE(TAG, "could not create the PHY driver");
-        uninstall_partial();
         return ESP_ERR_NO_MEM;
+    }
+    return ESP_OK;
+}
+
+/* The EMAC takes its address from eFuse by itself. */
+static esp_err_t set_mac_address(void)
+{
+    return ESP_OK;
+}
+
+#else /* CONFIG_ESPOS_ETH_CONTROLLER_W5500 */
+
+/* A W5500 that does not answer is wired differently from what menu "espOS
+ * Ethernet" says, or clocked too fast for the board; name what was used. */
+#define WIRING_FMT "W5500 on SPI%d: SCLK %d, MOSI %d, MISO %d, CS %d, INT %d, %d MHz"
+#define WIRING_ARGS                                                                                          \
+    CONFIG_ESPOS_ETH_W5500_SPI_HOST + 1, CONFIG_ESPOS_ETH_W5500_SCLK_GPIO, CONFIG_ESPOS_ETH_W5500_MOSI_GPIO, \
+        CONFIG_ESPOS_ETH_W5500_MISO_GPIO, CONFIG_ESPOS_ETH_W5500_CS_GPIO, CONFIG_ESPOS_ETH_W5500_INT_GPIO,   \
+        CONFIG_ESPOS_ETH_W5500_SPI_MHZ
+
+static esp_err_t new_driver(void)
+{
+    const spi_host_device_t host = (spi_host_device_t)CONFIG_ESPOS_ETH_W5500_SPI_HOST;
+    spi_bus_config_t bus = {
+        .sclk_io_num = CONFIG_ESPOS_ETH_W5500_SCLK_GPIO,
+        .mosi_io_num = CONFIG_ESPOS_ETH_W5500_MOSI_GPIO,
+        .miso_io_num = CONFIG_ESPOS_ETH_W5500_MISO_GPIO,
+        .quadwp_io_num = -1,
+        .quadhd_io_num = -1,
+    };
+    /* ESP_ERR_INVALID_STATE: the bus is already up, set up by the app for
+     * another device on the same lines, or by an earlier start that failed
+     * further on. Either way the W5500 joins it as a device. */
+    esp_err_t err = spi_bus_initialize(host, &bus, SPI_DMA_CH_AUTO);
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        ESP_LOGE(TAG, "spi_bus_initialize: %s", esp_err_to_name(err));
+        return err;
+    }
+    /* The driver attaches its interrupt through the shared GPIO ISR service,
+     * which somebody has to install; an app may already have. */
+    if (CONFIG_ESPOS_ETH_W5500_INT_GPIO >= 0) {
+        err = gpio_install_isr_service(0);
+        if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+            ESP_LOGE(TAG, "gpio_install_isr_service: %s", esp_err_to_name(err));
+            return err;
+        }
+    }
+
+    spi_device_interface_config_t dev = {
+        .mode = 0,
+        .clock_speed_hz = CONFIG_ESPOS_ETH_W5500_SPI_MHZ * 1000 * 1000,
+        .queue_size = 20,
+        .spics_io_num = CONFIG_ESPOS_ETH_W5500_CS_GPIO,
+    };
+    eth_w5500_config_t w5500_cfg = ETH_W5500_DEFAULT_CONFIG(host, &dev);
+    w5500_cfg.base.int_gpio_num = CONFIG_ESPOS_ETH_W5500_INT_GPIO;
+    /* The driver takes exactly one of the two: an interrupt line, or a poll
+     * period. */
+    w5500_cfg.base.poll_period_ms = CONFIG_ESPOS_ETH_W5500_INT_GPIO < 0 ? CONFIG_ESPOS_ETH_W5500_POLL_MS : 0;
+    eth_mac_config_t mac_cfg = ETH_MAC_DEFAULT_CONFIG();
+    eth_phy_config_t phy_cfg = ETH_PHY_DEFAULT_CONFIG();
+    phy_cfg.reset_gpio_num = CONFIG_ESPOS_ETH_W5500_RST_GPIO;
+
+    s.mac = esp_eth_mac_new_w5500(&w5500_cfg, &mac_cfg);
+    if (!s.mac) {
+        ESP_LOGE(TAG, "could not create the W5500 MAC");
+        return ESP_FAIL;
+    }
+    s.phy = esp_eth_phy_new_w5500(&phy_cfg);
+    if (!s.phy) {
+        ESP_LOGE(TAG, "could not create the W5500 PHY driver");
+        return ESP_ERR_NO_MEM;
+    }
+    return ESP_OK;
+}
+
+/* A W5500 has no address of its own that anyone can rely on, so it gets the
+ * one the chip's eFuse derives for Ethernet: stable across reboots, and
+ * distinct from the station's. Before esp_eth_start(), as the driver wants. */
+static esp_err_t set_mac_address(void)
+{
+    uint8_t mac[6];
+    esp_err_t err = esp_read_mac(mac, ESP_MAC_ETH);
+    if (err == ESP_OK) {
+        err = esp_eth_ioctl(s.eth, ETH_CMD_S_MAC_ADDR, mac);
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "setting the W5500's MAC address: %s", esp_err_to_name(err));
+    }
+    return err;
+}
+
+#endif
+
+static esp_err_t install(void)
+{
+    esp_err_t err = esp_netif_init();
+    if (err != ESP_OK) {
+        return err;
+    }
+    err = esp_event_loop_create_default();
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        return err;
+    }
+
+    err = new_driver();
+    if (err != ESP_OK) {
+        uninstall_partial();
+        return err;
     }
     esp_eth_config_t cfg = ETH_DEFAULT_CONFIG(s.mac, s.phy);
     err = esp_eth_driver_install(&cfg, &s.eth);
     if (err != ESP_OK) {
-        /* The usual cause on real hardware: the PHY did not answer on MDIO --
-         * wrong address, wrong reset GPIO, or no PHY on this board. Name the
-         * two settings, because the error code alone says none of that. */
-        ESP_LOGE(TAG, "esp_eth_driver_install: %s (PHY address %d, reset GPIO %d -- check menu \"espOS Ethernet\")",
-                 esp_err_to_name(err), CONFIG_ESPOS_ETH_PHY_ADDR, CONFIG_ESPOS_ETH_PHY_RST_GPIO);
+        ESP_LOGE(TAG, "esp_eth_driver_install: %s (" WIRING_FMT " -- check menu \"espOS Ethernet\")",
+                 esp_err_to_name(err), WIRING_ARGS);
         s.eth = NULL;
+        uninstall_partial();
+        return err;
+    }
+    err = set_mac_address();
+    if (err != ESP_OK) {
         uninstall_partial();
         return err;
     }
@@ -254,8 +374,7 @@ esp_err_t espos_eth_start(void)
     atomic_store(&s.started, true);
     /* Not "connected": a cable may not be plugged in, and that is not an
      * error. The link and the address are logged when they arrive. */
-    ESP_LOGI(TAG, "started (PHY address %d, reset GPIO %d); waiting for a link", CONFIG_ESPOS_ETH_PHY_ADDR,
-             CONFIG_ESPOS_ETH_PHY_RST_GPIO);
+    ESP_LOGI(TAG, "started (" WIRING_FMT "); waiting for a link", WIRING_ARGS);
     return ESP_OK;
 }
 
@@ -281,7 +400,7 @@ bool espos_eth_link_up(void)
     return atomic_load(&s.started) && atomic_load(&s.link);
 }
 
-#else /* no internal EMAC on this chip, or CONFIG_ETH_USE_ESP32_EMAC is off */
+#else /* menu "espOS Ethernet" names no controller (the default on a chip without an EMAC) */
 
 esp_err_t espos_eth_start(void)
 {
