@@ -345,28 +345,22 @@ void espos_sk_ws_meta_round(void)
             ESP_LOGI(TAG, "meta %s: server has its own%s, keeping it", path,
                      seen == ESPOS_SK_META_UNREADABLE ? " (too large or not JSON to read)" : "");
         } else if (step == ESPOS_SK_META_PUT) {
-            /* The server had none, so what it holds after the PUT is ours. A
-             * redeclaration while the legs ran is sent as well: the next
-             * round would keep the old one as the server's own. gen stays
-             * as it was, so that round still asks and finds the new one. */
+            /* Redeclared during the GET: the copy is stale, and once on the
+             * server the next round would keep it as the server's own. That
+             * round asks again and sends the current text. The lock is not
+             * held across the PUT, which can take a leg timeout. */
+            lock();
+            bool stale = s.meta.e[i].gen != gen;
+            unlock();
             int put = 0;
-            for (int tries = 0; tries < 4; tries++) {
+            step = ESPOS_SK_META_LATER;
+            if (!stale) {
                 put = espos_sk_http_put_meta(&srv, token, path, meta);
                 step = espos_sk_meta_after_put(put);
-                if (step != ESPOS_SK_META_DONE) {
-                    break;
-                }
-                lock();
-                const char *cur = s.meta.e[i].meta_json;
-                char *fresh = cur && strcmp(cur, meta) != 0 ? strdup(cur) : NULL;
-                unlock();
-                if (!fresh) {
-                    break;
-                }
-                free(meta);
-                meta = fresh;
             }
-            if (step == ESPOS_SK_META_DONE) {
+            if (stale) {
+                ESP_LOGI(TAG, "meta %s: redeclared meanwhile, next round", path);
+            } else if (step == ESPOS_SK_META_DONE) {
                 ESP_LOGI(TAG, "meta %s: sent", path);
             } else {
                 ESP_LOGW(TAG, "meta %s: PUT → %d", path, put);
