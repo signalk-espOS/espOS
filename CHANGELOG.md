@@ -15,6 +15,24 @@ pull request. The `[Unreleased]` block below was written by hand before the
 switch; its entries belong to the next feature release and are folded into
 that section when it is cut.
 
+## 0.25.0 (2026-10-29)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Fixed
+* fix(sk): report uptime past 49.7 days by @dirkwa in https://github.com/signalk-espOS/espOS/pull/270
+* fix(ota): check automatically with the signalk source by @dirkwa in https://github.com/signalk-espOS/espOS/pull/266
+* fix(sk): reconcile metadata off the stream task by @dirkwa in https://github.com/signalk-espOS/espOS/pull/269
+* fix(devices): never cut a JSON escape in half by @dirkwa in https://github.com/signalk-espOS/espOS/pull/273
+### Other
+* chore(deps): espressif/esp_tinyusb 2.4.0 -> 3.0.0 by @github-actions[bot] in https://github.com/signalk-espOS/espOS/pull/251
+* chore(deps): espressif/mdns 1.14.0 -> 1.14.1 by @github-actions[bot] in https://github.com/signalk-espOS/espOS/pull/252
+* feat(devices): add voltage tank curves and metadata defaults by @night199uk in https://github.com/signalk-espOS/espOS/pull/254
+
+
+**Full Changelog**: https://github.com/signalk-espOS/espOS/compare/v0.24.0...v0.25.0
+
 ## 0.24.0 (2026-10-22)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
