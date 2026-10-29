@@ -35,7 +35,7 @@ menu "espOS core"
     config ESPOS_ETH
         bool "Start wired Ethernet (espos_eth) in espos_start()"
         default y
-        depends on ESPOS_ETH_CONTROLLER_EMAC || ESPOS_ETH_CONTROLLER_W5500
+        depends on ESPOS_ETH_HAVE_CONTROLLER
         help
             espos_start() brings espos_eth up right after the network seam,
             beside the WiFi station rather than instead of it: espos_net

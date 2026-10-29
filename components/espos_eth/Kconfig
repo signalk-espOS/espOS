@@ -23,6 +23,12 @@ menu "espOS Ethernet"
             bool "None"
     endchoice
 
+    # The one test for "this build has Ethernet", so a third controller is
+    # added in one place.
+    config ESPOS_ETH_HAVE_CONTROLLER
+        bool
+        default y if !ESPOS_ETH_CONTROLLER_NONE
+
     config ESPOS_ETH_PHY_ADDR
         int "PHY address (-1 to detect)"
         depends on ESPOS_ETH_CONTROLLER_EMAC
@@ -56,7 +62,8 @@ menu "espOS Ethernet"
         config ESPOS_ETH_W5500_SPI_HOST
             int "SPI host (1 = SPI2, 2 = SPI3)"
             default 1
-            range 1 2
+            range 1 2 if SOC_SPI_PERIPH_NUM > 2
+            range 1 1
             help
                 The SPI peripheral the W5500 is on. SPI2 exists on every chip;
                 SPI3 only on some (ESP32, ESP32-S3). An app that already set
