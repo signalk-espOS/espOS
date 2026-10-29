@@ -265,15 +265,11 @@ its server also finds its updates, and a server that moves doesn't leave
 devices pointing at a URL that no longer works. It needs a plugin on the
 server that serves a manifest at that path.
 
-For now the automatic checks also need `ota.manifest_url` to be non-empty,
-although this source ignores its value ([#261](https://github.com/signalk-espOS/espOS/issues/261)).
-The OTA page's **Check for updates** button is greyed out without it too.
-Until that is fixed, put any value there, or call `POST /api/v1/ota/check`.
-
 Two failures are reported as they are:
 
-* **No server selected yet.** Normal at boot, before discovery has run. The
-  next scheduled check finds one.
+* **No server selected yet.** Normal at boot, before discovery has run.
+  While `ota.auto_check` is on, the check runs again as soon as a server is
+  selected.
 * **This firmware has no Signal K client.** The setting asks for something
   the build can't do. It does *not* fall back to `manifest_url`, because
   quietly checking somewhere other than where you asked is worse than saying

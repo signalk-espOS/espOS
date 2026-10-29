@@ -1776,6 +1776,45 @@ class OtaRollbackTimeoutTests(unittest.TestCase):
         self.assertIn("rolling back", "".join(self.h.log).lower())
 
 
+class OtaSignalkSourceTests(unittest.TestCase):
+    """ota.manifest_src = signalk with an empty manifest_url checks by itself,
+    and a boot check that found no server runs again once one is selected
+    rather than a check interval later (#261)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.mock = MockSignalK()
+        cls.mock.security = False
+        # Nothing discovered: the server only arrives as a manual host, after
+        # the boot check has already failed for want of one.
+        cls.h = Harness(fresh=True, extra_env={"ESPOS_SIM_WIFI": "connect"})
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.h.stop()
+        cls.mock.stop()
+
+    def ota(self):
+        return req("GET", "/api/v1/ota/status")[3]
+
+    def test_01_automatic_check_waits_for_the_server(self):
+        st, _, _, js = req("PUT", "/api/v1/config", {"ota": {"manifest_src": "signalk", "manifest_url": ""},
+                                                     "wifi": {"ssid0": "Boat", "psk0": "secret12"}})
+        self.assertEqual(st, 200, js)
+        # No POST /ota/check anywhere in this test.
+        js = wait_for(lambda: (lambda o: o if "no SignalK server" in (o.get("last_error") or "") else None)(self.ota()),
+                      timeout=60, step=1)
+        self.assertIsNotNone(js, self.ota())
+        path = "/plugins/signalk-espos-updates/manifest.json"
+        st, _, _, js = req("PUT", "/api/v1/config", {"sk": {"server_host": "127.0.0.1", "server_port": self.mock.port}})
+        self.assertEqual(st, 200, js)
+        hit = wait_for(lambda: any(e[0] == "GET" and e[1] == path for e in self.mock.log), timeout=30, step=0.5)
+        self.assertTrue(hit, self.ota())
+        js = wait_for(lambda: (lambda o: o if o["manifest"]["url"].endswith(path) else None)(self.ota()), timeout=5)
+        self.assertIsNotNone(js, self.ota())
+        self.assertEqual(js["manifest"]["url"], f"http://127.0.0.1:{self.mock.port}{path}")
+
+
 class SkInboundTests(unittest.TestCase):
     """M7: subscriptions, meta delivery, PUT requests, raw frames, resubscribe on reconnect."""
 

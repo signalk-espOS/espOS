@@ -77,7 +77,7 @@ export function OtaPage() {
             </>
           ) : (
             <div class="row">
-              <button disabled={busy || !manifest.manifest_url} onClick={() => act(() => post("/ota/check"), "Checking…")}>Check for updates</button>
+              <button disabled={busy || (!manifest.manifest_url && cfg?.["manifest_src"] !== "signalk")} onClick={() => act(() => post("/ota/check"), "Checking…")}>Check for updates</button>
               {ota?.manifest.last_check_s !== null && ota?.manifest.last_check_s !== undefined && <span class="muted small">last check {fmtDuration(ota.manifest.last_check_s)} ago{ota.manifest.next_check_s !== null ? `, next in ${fmtDuration(ota.manifest.next_check_s)}` : ""}</span>}
             </div>
           )}

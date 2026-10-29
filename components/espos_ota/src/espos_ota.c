@@ -83,6 +83,11 @@ static struct {
     bool auto_check, auto_install, allow_insecure;
     int32_t check_h, confirm_tmo_s;
     bool cfg_dirty;
+    bool server_selected; /* set on the event task, consumed by the OTA task after load_config() */
+    /* OTA task only: the server root the last signalk check resolved, "" when
+     * it found none, so the task can spot a selection whose event was lost. */
+    bool checked_signalk;
+    char checked_base[168];
 } s;
 
 static void lock(void) { xSemaphoreTake(s.lock, portMAX_DELAY); }
@@ -128,6 +133,21 @@ static void on_config(const char *ns, const char *key, void *arg)
     if (strcmp(ns, ESPOS_CFG_NS_OTA) == 0) {
         s.cfg_dirty = true;
     }
+}
+
+/* With the signalk source a new server is a new manifest URL. Discovery
+ * often finishes after the boot check, and waiting a full check_h for the
+ * next try would skip a day, so the OTA task moves the next scheduled check
+ * up to now. Only recorded here: the config snapshot may still be stale. */
+static void on_server_selected(void *arg, esp_event_base_t base, int32_t id, void *data)
+{
+    (void)arg;
+    (void)base;
+    (void)id;
+    (void)data;
+    /* Never the OTA mutex here: load_config() holds it across config reads,
+     * and this runs on the event loop task. */
+    __atomic_store_n(&s.server_selected, true, __ATOMIC_RELEASE);
 }
 
 static void publish(void)
@@ -228,6 +248,10 @@ static void do_check(void)
 
     if (strcmp(src, "signalk") == 0) {
         esp_err_t uerr = espos_ota_server_url_hook(path, url, sizeof(url));
+        s.checked_signalk = true;
+        if (espos_ota_server_url_hook("/", s.checked_base, sizeof(s.checked_base)) != ESP_OK) {
+            s.checked_base[0] = '\0';
+        }
         if (uerr == ESP_ERR_NOT_SUPPORTED) {
             /* Configured to ask a server this firmware cannot talk to. Said
              * plainly rather than falling back to manifest_url, which would
@@ -235,11 +259,18 @@ static void do_check(void)
             set_state(ESPOS_OTA_FAILED, "manifest source is signalk, but this firmware has no SignalK client");
             return;
         }
-        if (uerr != ESP_OK) {
+        if (uerr == ESP_ERR_NOT_FOUND) {
             /* No server selected yet -- ordinary at boot, before discovery
-             * has run. Not an error state worth alarming about; the next
-             * scheduled check will find one. */
+             * has run. Not an error state worth alarming about; the check
+             * runs again once a server is selected (on_server_selected). */
             set_state(ESPOS_OTA_FAILED, "no SignalK server selected yet");
+            return;
+        }
+        if (uerr != ESP_OK) {
+            char msg[80];
+            snprintf(msg, sizeof(msg), "cannot build the manifest URL from the server address (%s)",
+                     esp_err_to_name(uerr));
+            set_state(ESPOS_OTA_FAILED, msg);
             return;
         }
     }
@@ -500,8 +531,31 @@ static void ota_task(void *arg)
         /* periodic manifest checks: after boot once the network is up, then every check_h */
         bool up = espos_net_is_up();
         uint32_t now = espos_ota_port_uptime_s();
+        /* espos_event_post drops the server-selected event when the queue
+         * stays full, and the same server is never announced twice, so the
+         * task also compares the selection with the one it last checked. */
+        if (s.checked_signalk) {
+            char probe[sizeof(s.checked_base)];
+            if (espos_ota_server_url_hook("/", probe, sizeof(probe)) != ESP_OK) {
+                probe[0] = '\0';
+            }
+            if (strcmp(probe, s.checked_base) != 0) {
+                snprintf(s.checked_base, sizeof(s.checked_base), "%s", probe);
+                if (probe[0]) {
+                    __atomic_store_n(&s.server_selected, true, __ATOMIC_RELEASE);
+                }
+            }
+        }
         lock();
-        bool auto_check = s.auto_check && s.manifest_url[0];
+        bool signalk_src = strcmp(s.manifest_src, "signalk") == 0;
+        if (__atomic_exchange_n(&s.server_selected, false, __ATOMIC_ACQ_REL)) {
+            if (signalk_src && s.next_check_at) {
+                s.next_check_at = now;
+            }
+        }
+        /* With the signalk source the server supplies the URL, so an empty
+         * manifest_url is the normal setup there, not "manual only". */
+        bool auto_check = s.auto_check && (s.manifest_url[0] || signalk_src);
         bool due = auto_check && up && ((!boot_check_done && now >= boot_check_at) || (boot_check_done && s.next_check_at && now >= s.next_check_at));
         bool busy = s.state == ESPOS_OTA_DOWNLOADING || s.state == ESPOS_OTA_VERIFYING || s.state == ESPOS_OTA_READY;
         unlock();
@@ -537,6 +591,9 @@ esp_err_t espos_ota_start(void)
             return ESP_ERR_NO_MEM;
         }
         espos_config_subscribe(on_config, NULL);
+        if (espos_event_subscribe(ESPOS_EVENT_SK_SERVER_SELECTED, on_server_selected, NULL) != ESP_OK) {
+            ESP_LOGW(TAG, "no server-selected events: with the signalk source a new server waits for check_h");
+        }
         esp_err_t err = espos_ota_register_api();
         if (err != ESP_OK) {
             return err;
