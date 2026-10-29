@@ -9,7 +9,7 @@ set(srcs src/token_sm.c src/sk_store.c src/sk_http.c src/sk_http_api.c src/sk_de
 # then drop the requirement while the #if'd sources compile on the second,
 # failing on a missing esp_crt_bundle.h. Same trap as espos_ble's `bt`.
 # Unused objects cost nothing: the linker drops them.
-set(priv_reqs espressif__cjson esp_http_client nvs_flash tcp_transport esp_system esp-tls mbedtls espos_event)
+set(priv_reqs espressif__cjson esp_http_client esp_timer nvs_flash tcp_transport esp_system esp-tls mbedtls espos_event)
 if(target STREQUAL "linux")
     list(APPEND srcs src/discovery_sim.c)
 else()
