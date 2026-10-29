@@ -335,10 +335,18 @@ void espos_sk_ws_meta_round(void)
         strcpy(path, e->path);
         char *meta = strdup(e->meta_json);
         uint32_t gen = e->gen;
-        char *replaced = e->stale ? strdup(e->stale) : NULL;
+        bool had_replaced = e->stale != NULL;
+        char *replaced = had_replaced ? strdup(e->stale) : NULL;
         unlock();
-        if (!meta) {
+        if (!meta || had_replaced != (replaced != NULL)) {
+            /* Without the replaced text the GET would take it for the
+             * server's own and keep it: try again after a backoff. */
+            free(meta);
             free(replaced);
+            lock();
+            espos_sk_meta_leg_done(&s.meta, i, gen, ESPOS_SK_META_BACK_OFF);
+            unlock();
+            stop = ESPOS_SK_META_BACK_OFF;
             continue;
         }
         espos_sk_meta_seen_t seen;
