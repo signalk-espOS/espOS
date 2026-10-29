@@ -346,10 +346,14 @@ runs as `min`, and the log says so at start (`power save 'none' runs as
 only hears what arrives while Wi-Fi leaves the radio alone (IDF's
 coexistence guide). A station that never sleeps left so little of that time
 that a Zigbee device trying to join a coordinator was never heard; with
-`min` it joined within minutes. `min` and `max` are used as set. The price
-is latency: the station wakes for the access point's beacons, so a ping can
-take a few hundred milliseconds. `min` is also IDF's own default and what
-its Zigbee gateway example sets.
+`min` it joined within minutes. `min` and `max` are used as set. Modem
+sleep needs a station that is connected and running on its own (IDF's Wi-Fi
+power-save guide): while the setup portal is up, the radio runs station and
+access point together and the station does not sleep, whatever the setting,
+so a device may not get through until the board has joined its network. The
+price is latency: the station wakes for the access point's beacons, so a
+ping can take a few hundred milliseconds. `min` is also IDF's own default
+and what its Zigbee gateway example sets.
 
 ## mDNS
 
