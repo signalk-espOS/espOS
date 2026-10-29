@@ -84,7 +84,10 @@ static struct {
     int32_t check_h, confirm_tmo_s;
     bool cfg_dirty;
     bool server_selected; /* set on the event task, consumed by the OTA task after load_config() */
-    bool awaiting_server; /* OTA task only: the last signalk check found no server */
+    /* OTA task only: the server root the last signalk check resolved, "" when
+     * it found none, so the task can spot a selection whose event was lost. */
+    bool checked_signalk;
+    char checked_base[168];
 } s;
 
 static void lock(void) { xSemaphoreTake(s.lock, portMAX_DELAY); }
@@ -245,7 +248,10 @@ static void do_check(void)
 
     if (strcmp(src, "signalk") == 0) {
         esp_err_t uerr = espos_ota_server_url_hook(path, url, sizeof(url));
-        s.awaiting_server = uerr == ESP_ERR_NOT_FOUND;
+        s.checked_signalk = true;
+        if (espos_ota_server_url_hook("/", s.checked_base, sizeof(s.checked_base)) != ESP_OK) {
+            s.checked_base[0] = '\0';
+        }
         if (uerr == ESP_ERR_NOT_SUPPORTED) {
             /* Configured to ask a server this firmware cannot talk to. Said
              * plainly rather than falling back to manifest_url, which would
@@ -526,13 +532,18 @@ static void ota_task(void *arg)
         bool up = espos_net_is_up();
         uint32_t now = espos_ota_port_uptime_s();
         /* espos_event_post drops the server-selected event when the queue
-         * stays full, and the same server is never announced twice, so a
-         * check that found no server also polls the selection itself. */
-        if (s.awaiting_server) {
-            char probe[168];
-            if (espos_ota_server_url_hook("/", probe, sizeof(probe)) == ESP_OK) {
-                s.awaiting_server = false;
-                __atomic_store_n(&s.server_selected, true, __ATOMIC_RELEASE);
+         * stays full, and the same server is never announced twice, so the
+         * task also compares the selection with the one it last checked. */
+        if (s.checked_signalk) {
+            char probe[sizeof(s.checked_base)];
+            if (espos_ota_server_url_hook("/", probe, sizeof(probe)) != ESP_OK) {
+                probe[0] = '\0';
+            }
+            if (strcmp(probe, s.checked_base) != 0) {
+                snprintf(s.checked_base, sizeof(s.checked_base), "%s", probe);
+                if (probe[0]) {
+                    __atomic_store_n(&s.server_selected, true, __ATOMIC_RELEASE);
+                }
             }
         }
         lock();
