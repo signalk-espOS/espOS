@@ -16,10 +16,13 @@ permissions:
   contents: read
 
 # One deploy at a time, and never cancel a running one: a half-finished
-# deploy is what leaves the site serving a mix of two builds.
+# deploy is what leaves the site serving a mix of two builds. Pull requests
+# deploy nothing, so they get a group per branch instead: sharing `pages`
+# queued them behind main's deploys, and a newer push to main cancelled the
+# pending PR build outright.
 concurrency:
-  group: pages
-  cancel-in-progress: false
+  group: ${{ github.event_name == 'push' && 'pages' || format('docs-{0}', github.ref) }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
 
 jobs:
   build:

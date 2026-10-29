@@ -73,6 +73,12 @@ Projects are discovered, not listed: a new `test/host/<name>/` with a
 CI has no boards. Whatever is not covered by a host test is tested only by
 the person with the hardware — say in the PR which board that was.
 
+A pull request that changes only Markdown, `docs/` or `mkdocs.yml` skips the
+firmware builds, host tests and fuzzers. One that changes code builds each
+example on one main target; main builds them on all of theirs. To get main's full
+matrix on a branch before merging, run the CI workflow on it by hand
+(Actions, CI, Run workflow).
+
 ## Commits and pull requests
 
 * **Conventional Commits**: `type(scope): subject`, imperative, lower case,

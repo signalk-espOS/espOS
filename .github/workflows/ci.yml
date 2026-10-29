@@ -5,32 +5,75 @@ on:
     branches: [main]
     tags: ["v*"]
   pull_request:
+  # The full matrix on any branch, for a change worth proving on every target
+  # before it merges: pull requests build each example on one target only.
+  workflow_dispatch:
 
-# CI fans out to thirty jobs, and several fire at once around a release: the
-# merge to main, and the pull request release-please reopens for the next
-# version immediately after. Without a group they all queue against the
-# repository's concurrent-job ceiling and the publish job, last in its chain,
-# waits behind them.
+# CI fans out to sixty-odd jobs against the repository's concurrent-job
+# ceiling, so a run nobody needs any more holds up the ones that matter.
 #
 # One run per ref, superseded ones cancelled: a new push to a branch makes the
-# run already in flight for it pointless. main and tags are keyed per-commit
-# (github.sha) instead, so a release's own run is never cancelled by the push
-# that follows it -- those runs gate the release and must finish.
+# run already in flight for it pointless. That includes main: no release waits
+# for this workflow (release-please.yml and publish.yml check what they need
+# themselves), and several merges in a row would otherwise each run the whole
+# matrix -- four merges inside a minute once kept a pull request queued for an
+# hour. The newest commit's run covers the ones it cancelled.
 #
-# Tags are keyed apart from main even though a release tags the commit it
-# merged: the tag run is the only one that runs the version job (it is
-# `if: startsWith(github.ref, 'refs/tags/v')`), so letting the two share a
-# group would let the push cancel the run that carries that check.
+# Tags are keyed per commit: the tag run is the only one that runs the version
+# job (it is `if: startsWith(github.ref, 'refs/tags/v')`), so nothing may
+# cancel it. A run started by hand gets a group of its own, so a merge does
+# not cancel the full matrix someone asked for.
 concurrency:
   group: >-
     ci-${{ github.workflow }}-${{
       startsWith(github.ref, 'refs/tags/') && format('tag-{0}', github.sha)
-      || github.ref == 'refs/heads/main' && format('main-{0}', github.sha)
+      || github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.run_id)
       || github.ref
     }}
   cancel-in-progress: true
 
 jobs:
+  # Documentation-only changes skip the jobs that build or run firmware code:
+  # the doc PRs are most of the traffic, and each one queued sixty-odd builds
+  # behind the repository's concurrent-job ceiling. scripts/ci_changes.sh says
+  # what counts, and falls back to building whenever it cannot tell.
+  changes:
+    name: does the change touch code
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # actions: read lists main's last green run below.
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # A push compares against main's last green run, not the push's own
+      # "before": runs on main cancel each other, so the code a cancelled run
+      # never built has to count against the run that cancelled it.
+      - id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          case "$EVENT:$GITHUB_REF" in
+            pull_request:*)
+              out=$(scripts/ci_changes.sh "origin/$BASE_REF") ;;
+            push:refs/heads/main)
+              green=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=1" \
+                        --jq '.workflow_runs[0].head_sha // empty' || true)
+              echo "last green run on main: ${green:-none}"
+              out=$(scripts/ci_changes.sh "$green") ;;
+            *)
+              out=code=true ;;
+          esac
+          echo "$out" | tee -a "$GITHUB_OUTPUT"
+
   # A tag whose version.txt says something else makes every device built from
   # it report a version that matches no release. Cheap to check, impossible to
   # notice by eye once it has happened.
@@ -177,6 +220,8 @@ jobs:
 
   fuzz:
     name: fuzz the network parsers
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -185,9 +230,11 @@ jobs:
       # corpus; the coverage-guided run is what finds anything new, and both
       # bugs this job exists because of were found that way.
       - run: sudo apt-get update && sudo apt-get install -y clang
+      # Shorter on pull requests: four harnesses at 120 s made this the
+      # longest job but one. main still runs the full two minutes each.
       - name: fuzz
         env:
-          FUZZ_SECONDS: 120
+          FUZZ_SECONDS: ${{ github.event_name == 'pull_request' && 30 || 120 }}
         run: ./test/fuzz/run.sh
       # A crash is written next to the corpus that produced it. Keeping it is
       # the difference between "the fuzz job went red" and a reproducer.
@@ -315,6 +362,8 @@ jobs:
 
   firmware:
     name: build ${{ matrix.target }}
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
@@ -366,10 +415,14 @@ jobs:
           if-no-files-found: error
 
   # Every example is a complete project on the framework; CI is what keeps
-  # them building as espOS moves. minimal builds on every target because it
-  # is also the template a newcomer clones.
+  # them building as espOS moves. A pull request builds each example once, on
+  # its main target; examples-more-targets below adds the other targets on
+  # main. The firmware job already builds espOS itself on every target, so
+  # what a pull request skips is only an example's own code on a second chip.
   examples:
     name: example ${{ matrix.example }} on ${{ matrix.target }}
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
@@ -388,6 +441,13 @@ jobs:
           - components/espos_sk/examples/listener_relay
           - components/espos_sk/examples/json_and_meta
           - components/espos_sk/examples/tls_server
+          - components/espos_flow/examples/sensor_graph
+          - components/espos_sk_flow/examples/smart_switch
+          - components/espos_sk_flow/examples/dusk_relay
+          - components/espos_nmea0183/examples/nmea0183_gps
+          - components/espos_power/examples/duty_cycle
+          - components/espos_prov/examples/ble_provisioning
+          - components/espos_sdlog/examples/sd_logger
         include:
           # The one example without the prologue: espOS named as a registry
           # dependency, plain IDF root CMakeLists, its own sdkconfig and
@@ -396,8 +456,41 @@ jobs:
           # broken even though every other example still passes.
           - { example: components/espos_core/examples/from_registry, target: esp32c6 }
           # ...and on esp32, which needs its own sdkconfig.defaults.esp32 for the
-          # Secure Boot V2 RSA scheme. That is the case a second target proves.
+          # Secure Boot V2 RSA scheme. That is the case a second target proves,
+          # and no other job builds it, so it runs on pull requests too.
           - { example: components/espos_core/examples/from_registry, target: esp32 }
+          # Hardware the C6 does not have: BLE through the P4's hosted radio,
+          # TWAI, USB device mode and the EMAC.
+          - { example: components/espos_ble/examples/ble_gateway, target: esp32p4 }
+          - { example: components/espos_n2k/examples/n2k_candump, target: esp32p4 }
+          - { example: components/espos_n2k/examples/n2k_switch_bank, target: esp32p4 }
+          - { example: components/espos_usb_storage/examples/usb_storage_follow, target: esp32p4 }
+          - { example: components/espos_eth/examples/ethernet, target: esp32p4 }
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: read pinned IDF version
+        id: idf
+        run: echo "version=$(cat .idf-version)" >> "$GITHUB_OUTPUT"
+      - uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: ${{ steps.idf.outputs.version }}
+          target: ${{ matrix.target }}
+          command: scripts/build_example.sh ${{ matrix.example }} ${{ matrix.target }}
+
+  # The same examples on their other targets, on main only. minimal builds on
+  # every target because it is also the template a newcomer clones.
+  examples-more-targets:
+    name: example ${{ matrix.example }} on ${{ matrix.target }}
+    needs: changes
+    if: github.event_name != 'pull_request' && needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
           - { example: components/espos_core/examples/minimal, target: esp32 }
           - { example: components/espos_core/examples/minimal, target: esp32s3 }
           - { example: components/espos_core/examples/minimal, target: esp32c3 }
@@ -411,24 +504,12 @@ jobs:
           - { example: components/espos_sk/examples/listener_relay, target: esp32p4 }
           - { example: components/espos_sk/examples/json_and_meta, target: esp32p4 }
           - { example: components/espos_sk/examples/tls_server, target: esp32p4 }
-          - { example: components/espos_flow/examples/sensor_graph, target: esp32c6 }
           - { example: components/espos_flow/examples/sensor_graph, target: esp32p4 }
-          - { example: components/espos_sk_flow/examples/smart_switch, target: esp32c6 }
           - { example: components/espos_sk_flow/examples/smart_switch, target: esp32p4 }
-          - { example: components/espos_sk_flow/examples/dusk_relay, target: esp32c6 }
-          - { example: components/espos_ble/examples/ble_gateway, target: esp32p4 }
-          - { example: components/espos_n2k/examples/n2k_candump, target: esp32p4 }
-          - { example: components/espos_n2k/examples/n2k_switch_bank, target: esp32p4 }
           - { example: components/espos_n2k/examples/n2k_switch_bank, target: esp32s3 }
-          - { example: components/espos_usb_storage/examples/usb_storage_follow, target: esp32p4 }
           - { example: components/espos_usb_storage/examples/usb_storage_follow, target: esp32s3 }
-          - { example: components/espos_eth/examples/ethernet, target: esp32p4 }
-          - { example: components/espos_nmea0183/examples/nmea0183_gps, target: esp32c6 }
           - { example: components/espos_nmea0183/examples/nmea0183_gps, target: esp32p4 }
-          - { example: components/espos_power/examples/duty_cycle, target: esp32c6 }
           - { example: components/espos_power/examples/duty_cycle, target: esp32p4 }
-          - { example: components/espos_prov/examples/ble_provisioning, target: esp32c6 }
-          - { example: components/espos_sdlog/examples/sd_logger, target: esp32c6 }
           - { example: components/espos_sdlog/examples/sd_logger, target: esp32p4 }
     steps:
       - uses: actions/checkout@v7
@@ -448,6 +529,8 @@ jobs:
   # with espos_wifi excluded is the proof.
   headless:
     name: headless build esp32h2 (no espos_wifi)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -471,6 +554,8 @@ jobs:
   # apply underneath it.
   ble-without-wifi:
     name: ble_gateway on esp32p4 with WiFi off
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -494,6 +579,8 @@ jobs:
   # build-firmware.yml hands variants to the prologue this way.
   variant-defaults:
     name: board variant keeps espOS's defaults
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -522,6 +609,8 @@ jobs:
 
   host-tests:
     name: host tests (linux target)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
