@@ -20,6 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "cJSON.h"
 #include "espos_sk_priv.h"
 
 espos_sk_meta_step_t espos_sk_meta_after_get(int status, espos_sk_meta_seen_t seen)
@@ -30,13 +31,28 @@ espos_sk_meta_step_t espos_sk_meta_after_get(int status, espos_sk_meta_seen_t se
     if (status == 401 || status == 403) {
         return ESPOS_SK_META_UNAUTHORIZED;
     }
-    if (status == 404 || (status == 200 && seen == ESPOS_SK_META_NONE)) {
+    if (status == 404 || (status == 200 && (seen == ESPOS_SK_META_NONE || seen == ESPOS_SK_META_OURS))) {
         return ESPOS_SK_META_PUT;
     }
     if (status == 200) {
         return ESPOS_SK_META_DONE; /* present, or unreadable: the server's either way */
     }
     return ESPOS_SK_META_LATER;
+}
+
+bool espos_sk_meta_holds(const char *server_json, const char *ours_json)
+{
+    /* Field by field, not the text: the server answers with its own
+     * formatting and may add fields of its own. */
+    cJSON *srv = cJSON_Parse(server_json);
+    cJSON *ours = cJSON_Parse(ours_json);
+    bool holds = cJSON_IsObject(srv) && cJSON_IsObject(ours);
+    for (const cJSON *f = holds ? ours->child : NULL; f && holds; f = f->next) {
+        holds = cJSON_Compare(f, cJSON_GetObjectItemCaseSensitive(srv, f->string), true);
+    }
+    cJSON_Delete(srv);
+    cJSON_Delete(ours);
+    return holds;
 }
 
 espos_sk_meta_step_t espos_sk_meta_after_put(int status)
@@ -92,7 +108,8 @@ void espos_sk_meta_connected(espos_sk_meta_table_t *t)
     /* The server may be another one, or have lost what it was sent. */
     for (size_t i = 0; i < t->n; i++) {
         t->e[i].reconciled = false;
-        t->e[i].resend = false;
+        free(t->e[i].stale);
+        t->e[i].stale = NULL;
         t->e[i].gen++;
     }
     t->conn++;
@@ -125,19 +142,28 @@ void espos_sk_meta_leg_done(espos_sk_meta_table_t *t, size_t i, uint32_t gen, es
          * ran: the server was asked about something that no longer holds. */
         if (t->e[i].gen == gen) {
             t->e[i].reconciled = true;
+            free(t->e[i].stale);
+            t->e[i].stale = NULL;
         }
     } else if (step == ESPOS_SK_META_UNAUTHORIZED || step == ESPOS_SK_META_BACK_OFF) {
         t->next = i + 1;
     }
 }
 
-void espos_sk_meta_sent(espos_sk_meta_table_t *t, size_t i, uint32_t gen, uint32_t conn)
+void espos_sk_meta_sent(espos_sk_meta_table_t *t, size_t i, uint32_t gen, uint32_t conn, char *sent)
 {
     /* Redeclared while the PUT ran: the server now has the old text, which
      * the next round's GET would take for the server's own and keep. That
-     * round sends the current text instead of asking. After a reconnect the
-     * server may be another one, so it asks as usual. */
-    t->e[i].resend = t->e[i].gen != gen && t->conn == conn;
+     * round overwrites it, unless the server's meta no longer holds it: an
+     * edit made there meanwhile wins as any other does. After a reconnect the
+     * server may be another one, and this one never had it. */
+    free(t->e[i].stale);
+    t->e[i].stale = NULL;
+    if (t->e[i].gen != gen && t->conn == conn) {
+        t->e[i].stale = sent;
+    } else {
+        free(sent);
+    }
 }
 
 uint32_t espos_sk_meta_round_end(espos_sk_meta_table_t *t, uint32_t now_ms, uint32_t delay_ms)

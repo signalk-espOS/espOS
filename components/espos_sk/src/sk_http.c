@@ -551,7 +551,7 @@ espos_sk_probe_t espos_sk_http_probe_https(const char *host, uint16_t port, uint
 
 /* -------------------------------------------------------------- meta */
 
-int espos_sk_http_get_meta(const espos_sk_server_t *srv, const char *token, const char *path,
+int espos_sk_http_get_meta(const espos_sk_server_t *srv, const char *token, const char *path, const char *ours,
                            espos_sk_meta_seen_t *seen)
 {
     char url[192];
@@ -569,7 +569,7 @@ int espos_sk_http_get_meta(const espos_sk_server_t *srv, const char *token, cons
         if (!j) {
             *seen = ESPOS_SK_META_UNREADABLE;
         } else if (cJSON_IsObject(j) && j->child) {
-            *seen = ESPOS_SK_META_PRESENT;
+            *seen = ours && espos_sk_meta_holds(resp, ours) ? ESPOS_SK_META_OURS : ESPOS_SK_META_PRESENT;
         }
         cJSON_Delete(j);
     }

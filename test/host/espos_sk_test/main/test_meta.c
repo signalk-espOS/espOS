@@ -63,6 +63,7 @@ static void table_reset(void)
 {
     for (size_t i = 0; i < t.n; i++) {
         free(t.e[i].meta_json);
+        free(t.e[i].stale);
     }
     memset(&t, 0, sizeof(t));
 }
@@ -138,24 +139,36 @@ TEST_CASE("meta table: an answer for a text redeclared meanwhile is not taken", 
     table_reset();
 }
 
-TEST_CASE("meta table: a text redeclared during its PUT is sent again without asking", "[sk_meta]")
+TEST_CASE("meta table: a text redeclared during its PUT is overwritten unless edited", "[sk_meta]")
 {
     table_reset();
     declare("a.b", "{\"units\":\"V\"}");
     uint32_t gen = t.e[0].gen, conn = t.conn; /* the PUT starts */
-    espos_sk_meta_sent(&t, 0, gen, conn);
-    TEST_ASSERT_FALSE(t.e[0].resend);
+    espos_sk_meta_sent(&t, 0, gen, conn, strdup("{\"units\":\"V\"}"));
+    TEST_ASSERT_NULL(t.e[0].stale);
     declare("a.b", "{\"units\":\"A\"}");
-    espos_sk_meta_sent(&t, 0, gen, conn);
-    TEST_ASSERT_TRUE(t.e[0].resend);
-    espos_sk_meta_sent(&t, 0, t.e[0].gen, conn);
-    TEST_ASSERT_FALSE(t.e[0].resend);
-    /* After a reconnect the server may be another one: ask it first. */
+    espos_sk_meta_sent(&t, 0, gen, conn, strdup("{\"units\":\"V\"}"));
+    TEST_ASSERT_EQUAL_STRING("{\"units\":\"V\"}", t.e[0].stale);
+    TEST_ASSERT_EQUAL(ESPOS_SK_META_PUT, espos_sk_meta_after_get(200, ESPOS_SK_META_OURS));
+    espos_sk_meta_sent(&t, 0, t.e[0].gen, conn, strdup("{\"units\":\"A\"}"));
+    TEST_ASSERT_NULL(t.e[0].stale);
+    /* After a reconnect the server may be another one: it never had it. */
     gen = t.e[0].gen;
+    declare("a.b", "{\"units\":\"W\"}");
     espos_sk_meta_connected(&t);
-    espos_sk_meta_sent(&t, 0, gen, conn);
-    TEST_ASSERT_FALSE(t.e[0].resend);
+    espos_sk_meta_sent(&t, 0, gen, conn, strdup("{\"units\":\"A\"}"));
+    TEST_ASSERT_NULL(t.e[0].stale);
     table_reset();
+}
+
+TEST_CASE("meta table: the server's meta holds ours field by field", "[sk_meta]")
+{
+    const char *ours = "{\"units\":\"V\",\"timeout\":2.5}";
+    TEST_ASSERT_TRUE(espos_sk_meta_holds("{ \"timeout\": 2.5, \"units\": \"V\" }", ours));
+    TEST_ASSERT_TRUE(espos_sk_meta_holds("{\"units\":\"V\",\"timeout\":2.5,\"displayName\":\"x\"}", ours));
+    TEST_ASSERT_FALSE(espos_sk_meta_holds("{\"units\":\"kV\",\"timeout\":2.5}", ours));
+    TEST_ASSERT_FALSE(espos_sk_meta_holds("{\"units\":\"V\"}", ours));
+    TEST_ASSERT_FALSE(espos_sk_meta_holds("not json", ours));
 }
 
 TEST_CASE("meta table: a reconnect asks every path again and voids answers in flight", "[sk_meta]")
