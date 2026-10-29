@@ -36,7 +36,9 @@ if ! files=$(git diff --no-renames --name-only "$base" "$head") || [ -z "$files"
     exit 0
 fi
 
-if printf '%s\n' "$files" | grep -qvE '^docs/|^mkdocs\.yml$|\.md$'; then
+# Not grep -q: it stops at the first match, printf then dies of SIGPIPE, and
+# under pipefail that failure would read as "documentation only".
+if printf '%s\n' "$files" | grep -vE '^docs/|^mkdocs\.yml$|\.md$' >/dev/null; then
     echo "code=true"
 else
     echo "code=false"

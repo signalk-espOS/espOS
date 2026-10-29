@@ -41,15 +41,17 @@ jobs:
     name: does the change touch code
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # actions: read lists main's last green run below.
     permissions:
       contents: read
       actions: read
     outputs:
       code: ${{ steps.diff.outputs.code }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
       # A push compares against main's last green run, not the push's own
       # "before": runs on main cancel each other, so the code a cancelled run
       # never built has to count against the run that cancelled it.
