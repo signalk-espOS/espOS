@@ -39,7 +39,8 @@ and why the checks below are all over the network.
 
 ## Checking it
 
-With the board on PoE and a DHCP server on the network:
+With the board on the network (the PoE board on PoE, the ESP32-S3 board on
+its own supply or USB-C) and a DHCP server there:
 
 1. **Find it.** `avahi-browse -rt _espos._tcp` (or your router's lease table).
 2. **Confirm the route is the cable:**
