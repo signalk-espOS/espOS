@@ -26,6 +26,7 @@
 #include "espos_config.h"
 #include "espos_net.h"
 #include "espos_wifi_priv.h"
+#include "wifi_ps.h"
 
 static const char *TAG = "espos_wifi";
 
@@ -568,7 +569,7 @@ static esp_err_t d_init(void)
         ESP_LOGE(TAG, "esp_wifi_start: %s", esp_err_to_name(err));
         return err;
     }
-#if CONFIG_ESP_COEX_SW_COEXIST_ENABLE && CONFIG_SOC_IEEE802154_SUPPORTED && CONFIG_IEEE802154_ENABLED
+#if ESPOS_WIFI_I154_COEX
     /* A Zigbee or Thread build shares the chip's one 2.4 GHz radio with
      * 802.15.4, and the software arbiter schedules the two only once it is
      * told to; Bluetooth gets that by itself, 802.15.4 does not. Without it a

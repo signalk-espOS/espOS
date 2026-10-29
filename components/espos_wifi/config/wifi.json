@@ -56,6 +56,6 @@
     {"name": "portal_psk", "type": "string", "default": "", "maxLength": 64, "secret": true, "pattern": "^(.{8,63})?$",
      "title": "Access point password", "description": "Empty = open network. 8..63 characters for WPA2."},
     {"name": "ps_mode", "type": "string", "default": "none", "enum": ["none", "min", "max"], "title": "Power save",
-     "description": "WiFi modem power save. 'none' keeps latency lowest.", "restart_required": true}
+     "description": "WiFi modem power save. 'none' keeps latency lowest. A build with 802.15.4 coexistence (Zigbee, Thread) runs 'none' as 'min'.", "restart_required": true}
   ]
 }
