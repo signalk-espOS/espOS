@@ -162,6 +162,7 @@ typedef struct {
     uint32_t period_ms;
     uint32_t gen; /* bumped by every declaration and connect, so a round knows its answer still holds */
     bool reconciled;
+    bool resend; /* the server holds a text of ours a later declaration replaced: PUT without asking */
 } espos_sk_meta_entry_t;
 
 typedef struct {
@@ -172,6 +173,7 @@ typedef struct {
     uint32_t retry_at_ms; /* while round > 0, no round before this */
     size_t next;          /* where the next round starts: past the path the last one stopped at */
     uint32_t epoch;       /* bumped with any entry's gen, so a round knows its backoff still applies */
+    uint32_t conn;        /* bumped by every connect, so a round knows its server is still the one */
 } espos_sk_meta_table_t;
 
 /* Takes ownership of meta_json. ESP_OK when recorded or unchanged,
@@ -186,6 +188,9 @@ uint32_t espos_sk_meta_wait(const espos_sk_meta_table_t *t, bool connected, uint
 size_t espos_sk_meta_index(const espos_sk_meta_table_t *t, size_t n, size_t k);
 /* Records one path's outcome; gen is the entry's as the leg began. */
 void espos_sk_meta_leg_done(espos_sk_meta_table_t *t, size_t i, uint32_t gen, espos_sk_meta_step_t step);
+/* Records a PUT the server took; gen and conn are the entry's and the
+ * table's as the leg began. */
+void espos_sk_meta_sent(espos_sk_meta_table_t *t, size_t i, uint32_t gen, uint32_t conn);
 /* Ends a round: delay_ms is the backoff for t->round, used when paths are
  * left. Returns the delay set, 0 when every path is reconciled. */
 uint32_t espos_sk_meta_round_end(espos_sk_meta_table_t *t, uint32_t now_ms, uint32_t delay_ms);

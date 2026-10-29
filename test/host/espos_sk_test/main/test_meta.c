@@ -138,6 +138,26 @@ TEST_CASE("meta table: an answer for a text redeclared meanwhile is not taken", 
     table_reset();
 }
 
+TEST_CASE("meta table: a text redeclared during its PUT is sent again without asking", "[sk_meta]")
+{
+    table_reset();
+    declare("a.b", "{\"units\":\"V\"}");
+    uint32_t gen = t.e[0].gen, conn = t.conn; /* the PUT starts */
+    espos_sk_meta_sent(&t, 0, gen, conn);
+    TEST_ASSERT_FALSE(t.e[0].resend);
+    declare("a.b", "{\"units\":\"A\"}");
+    espos_sk_meta_sent(&t, 0, gen, conn);
+    TEST_ASSERT_TRUE(t.e[0].resend);
+    espos_sk_meta_sent(&t, 0, t.e[0].gen, conn);
+    TEST_ASSERT_FALSE(t.e[0].resend);
+    /* After a reconnect the server may be another one: ask it first. */
+    gen = t.e[0].gen;
+    espos_sk_meta_connected(&t);
+    espos_sk_meta_sent(&t, 0, gen, conn);
+    TEST_ASSERT_FALSE(t.e[0].resend);
+    table_reset();
+}
+
 TEST_CASE("meta table: a reconnect asks every path again and voids answers in flight", "[sk_meta]")
 {
     table_reset();

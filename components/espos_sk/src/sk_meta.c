@@ -92,8 +92,10 @@ void espos_sk_meta_connected(espos_sk_meta_table_t *t)
     /* The server may be another one, or have lost what it was sent. */
     for (size_t i = 0; i < t->n; i++) {
         t->e[i].reconciled = false;
+        t->e[i].resend = false;
         t->e[i].gen++;
     }
+    t->conn++;
     t->epoch++;
     t->dirty = t->n > 0;
     t->round = 0;
@@ -127,6 +129,15 @@ void espos_sk_meta_leg_done(espos_sk_meta_table_t *t, size_t i, uint32_t gen, es
     } else if (step == ESPOS_SK_META_UNAUTHORIZED || step == ESPOS_SK_META_BACK_OFF) {
         t->next = i + 1;
     }
+}
+
+void espos_sk_meta_sent(espos_sk_meta_table_t *t, size_t i, uint32_t gen, uint32_t conn)
+{
+    /* Redeclared while the PUT ran: the server now has the old text, which
+     * the next round's GET would take for the server's own and keep. That
+     * round sends the current text instead of asking. After a reconnect the
+     * server may be another one, so it asks as usual. */
+    t->e[i].resend = t->e[i].gen != gen && t->conn == conn;
 }
 
 uint32_t espos_sk_meta_round_end(espos_sk_meta_table_t *t, uint32_t now_ms, uint32_t delay_ms)

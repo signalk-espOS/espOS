@@ -321,6 +321,7 @@ void espos_sk_ws_meta_round(void)
     lock();
     size_t n = s.meta.n;
     uint32_t epoch = s.meta.epoch;
+    uint32_t conn = s.meta.conn;
     unlock();
     for (size_t k = 0; k < n && stop == ESPOS_SK_META_DONE; k++) {
         char path[ESPOS_SK_PATH_MAX];
@@ -334,13 +335,18 @@ void espos_sk_ws_meta_round(void)
         strcpy(path, e->path);
         char *meta = strdup(e->meta_json);
         uint32_t gen = e->gen;
+        bool resend = e->resend;
         unlock();
         if (!meta) {
             continue;
         }
-        espos_sk_meta_seen_t seen;
-        int st = espos_sk_http_get_meta(&srv, token, path, &seen);
-        espos_sk_meta_step_t step = espos_sk_meta_after_get(st, seen);
+        espos_sk_meta_seen_t seen = ESPOS_SK_META_NONE;
+        int st = 200;
+        espos_sk_meta_step_t step = ESPOS_SK_META_PUT;
+        if (!resend) {
+            st = espos_sk_http_get_meta(&srv, token, path, &seen);
+            step = espos_sk_meta_after_get(st, seen);
+        }
         if (step == ESPOS_SK_META_DONE) {
             ESP_LOGI(TAG, "meta %s: server has its own%s, keeping it", path,
                      seen == ESPOS_SK_META_UNREADABLE ? " (too large or not JSON to read)" : "");
@@ -357,6 +363,11 @@ void espos_sk_ws_meta_round(void)
             if (!stale) {
                 put = espos_sk_http_put_meta(&srv, token, path, meta);
                 step = espos_sk_meta_after_put(put);
+            }
+            if (step == ESPOS_SK_META_DONE) {
+                lock();
+                espos_sk_meta_sent(&s.meta, i, gen, conn);
+                unlock();
             }
             if (stale) {
                 ESP_LOGI(TAG, "meta %s: redeclared meanwhile, next round", path);
