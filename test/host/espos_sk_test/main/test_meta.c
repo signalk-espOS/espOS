@@ -111,6 +111,21 @@ TEST_CASE("meta table: an unchanged declaration keeps the path and the backoff",
     table_reset();
 }
 
+TEST_CASE("meta table: a changed declaration or a reconnect voids the round's backoff", "[sk_meta]")
+{
+    table_reset();
+    declare("a.b", "{\"units\":\"V\"}");
+    uint32_t epoch = t.epoch; /* a round starts */
+    declare("a.b", "{\"units\":\"V\"}");
+    TEST_ASSERT_EQUAL(epoch, t.epoch);
+    declare("a.b", "{\"units\":\"A\"}");
+    TEST_ASSERT_NOT_EQUAL(epoch, t.epoch);
+    epoch = t.epoch;
+    espos_sk_meta_connected(&t);
+    TEST_ASSERT_NOT_EQUAL(epoch, t.epoch);
+    table_reset();
+}
+
 TEST_CASE("meta table: an answer for a text redeclared meanwhile is not taken", "[sk_meta]")
 {
     table_reset();

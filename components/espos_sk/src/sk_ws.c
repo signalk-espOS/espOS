@@ -320,6 +320,7 @@ void espos_sk_ws_meta_round(void)
     }
     lock();
     size_t n = s.meta.n;
+    uint32_t epoch = s.meta.epoch;
     unlock();
     for (size_t k = 0; k < n && stop == ESPOS_SK_META_DONE; k++) {
         char path[ESPOS_SK_PATH_MAX];
@@ -344,8 +345,27 @@ void espos_sk_ws_meta_round(void)
             ESP_LOGI(TAG, "meta %s: server has its own%s, keeping it", path,
                      seen == ESPOS_SK_META_UNREADABLE ? " (too large or not JSON to read)" : "");
         } else if (step == ESPOS_SK_META_PUT) {
-            int put = espos_sk_http_put_meta(&srv, token, path, meta);
-            step = espos_sk_meta_after_put(put);
+            /* The server had none, so what it holds after the PUT is ours. A
+             * redeclaration while the legs ran is sent as well: the next
+             * round would keep the old one as the server's own. gen stays
+             * as it was, so that round still asks and finds the new one. */
+            int put = 0;
+            for (int tries = 0; tries < 4; tries++) {
+                put = espos_sk_http_put_meta(&srv, token, path, meta);
+                step = espos_sk_meta_after_put(put);
+                if (step != ESPOS_SK_META_DONE) {
+                    break;
+                }
+                lock();
+                const char *cur = s.meta.e[i].meta_json;
+                char *fresh = cur && strcmp(cur, meta) != 0 ? strdup(cur) : NULL;
+                unlock();
+                if (!fresh) {
+                    break;
+                }
+                free(meta);
+                meta = fresh;
+            }
             if (step == ESPOS_SK_META_DONE) {
                 ESP_LOGI(TAG, "meta %s: sent", path);
             } else {
@@ -365,8 +385,12 @@ void espos_sk_ws_meta_round(void)
     if (stop == ESPOS_SK_META_UNAUTHORIZED) {
         espos_sk_report_unauthorized();
     }
+    /* A declaration or a reconnect while the round ran asks for a fresh
+     * round, not for this one's backoff. */
     lock();
-    uint32_t d = espos_sk_meta_round_end(&s.meta, now_ms(), espos_net_backoff_ms(s.meta.round, 300000, (uint32_t)rand()));
+    uint32_t d = s.meta.epoch != epoch
+                     ? 0
+                     : espos_sk_meta_round_end(&s.meta, now_ms(), espos_net_backoff_ms(s.meta.round, 300000, (uint32_t)rand()));
     unlock();
     if (d) {
         ESP_LOGW(TAG, "meta: %s, next round in %u s",

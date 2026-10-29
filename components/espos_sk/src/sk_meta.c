@@ -81,6 +81,7 @@ esp_err_t espos_sk_meta_declare(espos_sk_meta_table_t *t, const char *path, char
     e->period_ms = period_ms;
     e->gen++;
     e->reconciled = false;
+    t->epoch++;
     t->dirty = true;
     t->round = 0; /* a new declaration does not wait out an old backoff */
     return ESP_OK;
@@ -93,6 +94,7 @@ void espos_sk_meta_connected(espos_sk_meta_table_t *t)
         t->e[i].reconciled = false;
         t->e[i].gen++;
     }
+    t->epoch++;
     t->dirty = t->n > 0;
     t->round = 0;
 }

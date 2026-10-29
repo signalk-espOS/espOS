@@ -171,6 +171,7 @@ typedef struct {
     uint32_t round;       /* failed rounds in a row, for the retry backoff */
     uint32_t retry_at_ms; /* while round > 0, no round before this */
     size_t next;          /* where the next round starts: past the path the last one stopped at */
+    uint32_t epoch;       /* bumped with any entry's gen, so a round knows its backoff still applies */
 } espos_sk_meta_table_t;
 
 /* Takes ownership of meta_json. ESP_OK when recorded or unchanged,
