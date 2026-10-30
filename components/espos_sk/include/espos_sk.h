@@ -57,8 +57,11 @@ esp_err_t espos_sk_discover_now(void);
 esp_err_t espos_sk_request_now(void);            /* re-request access (from denied/error) */
 esp_err_t espos_sk_set_token(const char *token); /* manual token paste */
 esp_err_t espos_sk_forget_token(void);           /* drop token + pending, request again */
-/** Report that some SK call was rejected with 401/403 (M4 uses this). */
-void espos_sk_report_unauthorized(void);
+/** Report that some SK call was rejected with 401/403. Fails with
+ *  ESP_ERR_TIMEOUT when the SK task's queue stays full, so a caller that
+ *  reports only once can try again, and with ESP_ERR_INVALID_STATE before
+ *  espos_sk_start(), when a retry helps only once the SK task runs. */
+esp_err_t espos_sk_report_unauthorized(void);
 /**
  * Report that the server's TLS certificate was refused: the token machine
  * enters `cert_error`, keeps the token (the credential is fine, the transport

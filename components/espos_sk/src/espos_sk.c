@@ -1186,7 +1186,7 @@ static esp_err_t post_cmd(cmd_type_t type, char *str)
 esp_err_t espos_sk_discover_now(void) { return post_cmd(CMD_DISCOVER, NULL); }
 esp_err_t espos_sk_request_now(void) { return post_cmd(CMD_REQUEST, NULL); }
 esp_err_t espos_sk_forget_token(void) { return post_cmd(CMD_FORGET, NULL); }
-void espos_sk_report_unauthorized(void) { (void)post_cmd(CMD_UNAUTHORIZED, NULL); }
+esp_err_t espos_sk_report_unauthorized(void) { return post_cmd(CMD_UNAUTHORIZED, NULL); }
 
 void espos_sk_report_cert_error(const char *reason)
 {

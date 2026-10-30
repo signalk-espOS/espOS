@@ -117,8 +117,11 @@ const char *espos_board(void);
  * A binding generated from the headers records the value it was built
  * against and compares it with espos_abi_version() at run time.
  */
-#define ESPOS_ABI_VERSION 8
+#define ESPOS_ABI_VERSION 9
 /* History, so that a binding pinned to an older value can tell what moved:
+ *   9  espos_sk_report_unauthorized() returns esp_err_t instead of void, so
+ *      that a caller reporting once can tell a report lost to a full queue
+ *      -- espOS #284.
  *   8  espos_sk_delta_cfg_t gained no_drop (appended, sizeof) and
  *      espos_sk_delta_flush() returns esp_err_t instead of void, for ring
  *      backpressure -- espOS #238.

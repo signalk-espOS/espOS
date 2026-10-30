@@ -59,7 +59,13 @@ firmware talks to the server over TLS (`sk.scheme`, on by default when the
 server advertises it),
 `https`/`wss` — verified against the bundled Mozilla roots like the delta
 stream, so a self-signed server certificate is refused. The control socket is
-torn down and re-dialled when the server's host, port **or scheme** changes.
+torn down and re-dialled when the server's host, port **or scheme** changes,
+and again after it ends, whether the connection dropped or the server closed
+it with a close frame: 1 s later, then backing off to about 60 s while attempts
+keep failing. Each attempt reads the token again, and a 401/403 on the
+upgrade or a 4401 close is reported to the token machine like a rejected
+POST, once per token. esp_websocket_client's own reconnect is off because it
+resends the token the client was built with.
 
 ## GATT writes: `with_response`
 
