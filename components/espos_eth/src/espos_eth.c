@@ -59,7 +59,8 @@ static struct {
     esp_eth_phy_t *phy;
     esp_netif_t *netif;
     esp_eth_netif_glue_handle_t glue;
-    bool spi_bus_ours; /* W5500: this transport set the SPI bus up */
+    bool spi_bus_ours;     /* W5500: this transport set the SPI bus up */
+    bool gpio_isr_ours;    /* W5500: this transport installed the GPIO ISR service */
 } s;
 
 static void report_down(void)
@@ -157,12 +158,16 @@ static void uninstall_partial(void)
         s.mac = NULL;
     }
 #if CONFIG_ESPOS_ETH_CONTROLLER_W5500
-    /* Only a bus this transport set up; an app's bus stays the app's. Freed so
-     * that an app setting the bus up after a failed start gets its own pins
-     * rather than ours. */
+    /* Only a bus and an ISR service this transport set up; an app's stay the
+     * app's. Freed so that an app setting either up after a failed start gets
+     * its own configuration rather than ours. */
     if (s.spi_bus_ours) {
         spi_bus_free((spi_host_device_t)CONFIG_ESPOS_ETH_W5500_SPI_HOST);
         s.spi_bus_ours = false;
+    }
+    if (s.gpio_isr_ours) {
+        gpio_uninstall_isr_service();
+        s.gpio_isr_ours = false;
     }
 #endif
 }
@@ -245,6 +250,7 @@ static esp_err_t new_driver(void)
             ESP_LOGE(TAG, "gpio_install_isr_service: %s", esp_err_to_name(err));
             return err;
         }
+        s.gpio_isr_ours = (err == ESP_OK);
     }
 
     spi_device_interface_config_t dev = {
