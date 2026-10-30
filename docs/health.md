@@ -229,7 +229,9 @@ or the co-processor watchdog, doesn't lift it; a power cycle does. The count
 also starts again while another transport carries the network (a restart
 would cut the working link) and while someone is on the setup access point
 (they are about to fix the cause). Changing the networks or their passwords
-starts it again too and allows one more restart.
+starts it again too and allows one more restart, and so does someone joining
+the setup access point. Ethernet coming up does not: the access point that
+stayed off is still off.
 
 ### Marking your own fatal condition
 

@@ -260,8 +260,11 @@ static void queue_net_report_locked(void)
 static void queue_stall_report_locked(void)
 {
     const espos_wifi_sm_status_t *st = &s.sm.st;
-    if (st->state == ESPOS_WIFI_ST_CONNECTED) {
-        s.stall.suppressed = false; /* the outage the last restart was for is over */
+    /* The outage the last restart was for is over once WiFi is back, and no
+     * longer unattended once someone has joined the portal. Another transport
+     * coming up lifts neither: the AP that stayed off is still off. */
+    if (st->state == ESPOS_WIFI_ST_CONNECTED || st->portal_clients > 0) {
+        s.stall.suppressed = false;
     }
     espos_wifi_stall_in_t in = {
         .sta_enabled = s.sm.started && s.sm.cfg.sta_enabled, /* a stopped station is not trying */
