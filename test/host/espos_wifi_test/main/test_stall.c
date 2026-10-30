@@ -13,7 +13,7 @@
 
 static espos_wifi_stall_in_t trying(void)
 {
-    return (espos_wifi_stall_in_t){
+    return (espos_wifi_stall_in_t) {
         .sta_enabled = true,
         .has_networks = true,
     };
