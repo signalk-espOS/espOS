@@ -185,6 +185,8 @@ static esp_err_t d_set_ps(const char *mode)
     return ESP_OK;
 }
 
+static uint32_t s_stall_latch;
+
 static const espos_wifi_driver_t k_driver = {
     .init = d_init,
     .deinit = d_deinit,
@@ -193,6 +195,7 @@ static const espos_wifi_driver_t k_driver = {
     .scan_start = d_scan_start,
     .set_ps = d_set_ps,
     .portal_ip = "192.168.4.1",
+    .stall_latch = &s_stall_latch,
 };
 
 const espos_wifi_driver_t *espos_wifi_driver(void)

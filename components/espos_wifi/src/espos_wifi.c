@@ -21,12 +21,14 @@
 #include "espos_cfg_keys.h"
 #include "espos_config.h"
 #include "espos_event.h"
+#include "espos_health.h"
 #include "espos_httpd.h"
 #include "espos_httpd_sse.h"
 #include "espos_net.h"
 #include "espos_wifi.h"
 #include "espos_wifi_priv.h"
 #include "wifi_ps.h"
+#include "wifi_stall.h"
 
 static const char *TAG = "espos_wifi";
 
@@ -69,6 +71,17 @@ static struct {
         espos_wifi_ip_t ip;
         int8_t rssi;
     } net_report;
+    /* wifiStalled (wifi_stall.c), judged under the lock on every status change
+     * and reported by the drainer, for the same reason as net_report: a health
+     * sink may do real work, and none of it may run under ours. */
+    struct {
+        espos_wifi_stall_t tracker;
+        uint32_t ms;     /* wifi.stall_s, 0 = off */
+        bool suppressed; /* an earlier boot restarted for wifiStalled and nothing has connected since */
+        bool alarm;      /* what was last queued */
+        bool pending;
+        TimerHandle_t timer;
+    } stall;
     SemaphoreHandle_t drain_lock;
     bool sm_ready;
     bool api_registered;
@@ -242,6 +255,37 @@ static void queue_net_report_locked(void)
     s.net_report.rssi = s.sm.st.link.rssi;
 }
 
+/* Lock held. Runs on every status change and from the stall timer, so a
+ * setting changed while the alarm is up takes effect within one tick. */
+static void queue_stall_report_locked(void)
+{
+    const espos_wifi_sm_status_t *st = &s.sm.st;
+    /* The outage the last restart was for is over once WiFi is back, and no
+     * longer unattended once someone has joined the portal. Another transport
+     * coming up lifts neither: the AP that stayed off is still off. */
+    if (st->state == ESPOS_WIFI_ST_CONNECTED || st->portal_clients > 0) {
+        s.stall.suppressed = false;
+    }
+    espos_wifi_stall_in_t in = {
+        .sta_enabled = s.sm.started && s.sm.cfg.sta_enabled, /* a stopped station is not trying */
+        .has_networks = s.sm.cfg.net_count > 0,
+        .associated = st->state == ESPOS_WIFI_ST_OBTAINING_IP || st->state == ESPOS_WIFI_ST_CONNECTED,
+        .other_net_up = s.sm.other_net_up,
+        .portal_clients = st->portal_clients,
+        .suppressed = s.stall.suppressed,
+    };
+    bool alarm = espos_wifi_stall_update(&s.stall.tracker, &in, s.drv->sm_port->now_ms(NULL), s.stall.ms);
+    if (alarm != s.stall.alarm) {
+        s.stall.alarm = alarm;
+        s.stall.pending = true;
+    }
+    /* Latched while raised, so the restart it causes lands in a held-off boot;
+     * latched while held off, so any other reset in between keeps it held. */
+    if (s.drv->stall_latch) {
+        *s.drv->stall_latch = (alarm || s.stall.suppressed) ? ESPOS_WIFI_STALL_LATCHED : 0;
+    }
+}
+
 /* status_changed from the SM (lock held): snapshot now, publish after unlock. */
 static void on_status_changed(void *ctx)
 {
@@ -252,6 +296,38 @@ static void on_status_changed(void *ctx)
         s.pending_status_json = json;
     }
     queue_net_report_locked();
+    queue_stall_report_locked();
+}
+
+/* The status changes alone would do while the station retries, but not for a
+ * setting that changes nothing the machine reports, and a backoff of up to
+ * 600 s would make the threshold that much late. */
+#define STALL_TICK_MS 10000u
+
+static void drain(void);
+
+static void stall_timer_cb(TimerHandle_t t)
+{
+    (void)t;
+    if (!s.lock || !s.sm_ready) {
+        return;
+    }
+    lock();
+    queue_stall_report_locked();
+    unlock();
+    drain();
+}
+
+/* wifi.stall_s; a non-zero value below the floor is raised to it. */
+static uint32_t load_stall_ms(void)
+{
+    int32_t v = 1800;
+    espos_config_get_i32(ESPOS_CFG_NS_WIFI, ESPOS_CFG_WIFI_STALL_S, &v);
+    if (v <= 0) {
+        return 0;
+    }
+    uint32_t ms = (uint32_t)v * 1000u;
+    return ms < ESPOS_WIFI_STALL_MIN_MS ? ESPOS_WIFI_STALL_MIN_MS : ms;
 }
 
 /* Run queued driver actions in FIFO order, outside the SM lock. A single
@@ -269,7 +345,7 @@ static void drain(void)
         xSemaphoreGive(s.drain_lock);
         /* something may have been queued between our last look and the give */
         lock();
-        bool more = s.action_count > 0 || s.pending_status_json != NULL || s.net_report.pending;
+        bool more = s.action_count > 0 || s.pending_status_json != NULL || s.net_report.pending || s.stall.pending;
         unlock();
         if (!more) {
             return;
@@ -292,6 +368,25 @@ static void drain_all_locked(void)
             s.net_report.pending = false;
             unlock();
             espos_net_report(ESPOS_NET_IF_WIFI_STA, up, ip.ip, ip.netmask, ip.gateway, rssi);
+            continue;
+        }
+        if (s.stall.pending) {
+            bool alarm = s.stall.alarm;
+            uint32_t mins = s.stall.ms / 60000u;
+            s.stall.pending = false;
+            unlock();
+            if (alarm) {
+                /* The threshold, not the running time: a message that changes
+                 * is a new delta to every sink on every attempt. */
+                char m[ESPOS_HEALTH_MSG_MAX];
+                snprintf(m, sizeof(m), "no WiFi connection for over %u min", (unsigned)mins);
+                ESP_LOGW(TAG, "%s; restarting unless it connects", m);
+                (void)espos_health_report_ex(ESPOS_WIFI_STALL_KEY, ESPOS_HEALTH_ALARM, m,
+                                             ESPOS_HEALTH_F_REBOOT_ON_ALARM);
+            } else {
+                (void)espos_health_report_ex(ESPOS_WIFI_STALL_KEY, ESPOS_HEALTH_NORMAL, "",
+                                             ESPOS_HEALTH_F_REBOOT_ON_ALARM);
+            }
             continue;
         }
         if (s.action_count == 0) {
@@ -375,6 +470,19 @@ static void cfg_debounce_cb(TimerHandle_t t)
     unlock();
     espos_wifi_cfg_t c;
     load_cfg(&c);
+    uint32_t stall_ms = load_stall_ms();
+    lock();
+    s.stall.ms = stall_ms;
+    /* Only what the station connects with: a power-save or portal tweak does
+     * not make the old networks any likelier to work. New networks deserve a
+     * full allowance, including the one restart. */
+    if (c.sta_enabled != s.sm.cfg.sta_enabled || c.net_count != s.sm.cfg.net_count ||
+        memcmp(c.nets, s.sm.cfg.nets, sizeof(c.nets)) != 0) {
+        espos_wifi_stall_reset(&s.stall.tracker);
+        s.stall.suppressed = false;
+    }
+    queue_stall_report_locked();
+    unlock();
     espos_wifi_dispatch(ESPOS_WIFI_EV_CONFIG, &c);
     lock();
     bool portal_changed = strcmp(old_ssid, s.portal_ssid) != 0 || strcmp(old_psk, s.portal_psk) != 0;
@@ -793,10 +901,31 @@ esp_err_t espos_wifi_start(void)
     port.portal_start = q_portal_start;
     port.portal_stop = q_portal_stop;
     port.status_changed = on_status_changed;
+    /* One restart per outage. A boot that follows a wifiStalled restart does
+     * not restart for it again until it has connected once: if the restart did
+     * not bring the AP back, the AP is gone, and a loop would only cost the
+     * device its state every stall_s for as long as it stays gone. The latch
+     * is kept current from then on, so this reads the same after a stop and
+     * start as it did at boot. */
+    bool held_off = s.drv->stall_latch && *s.drv->stall_latch == ESPOS_WIFI_STALL_LATCHED;
+    if (held_off) {
+        ESP_LOGW(TAG, "restarted for " ESPOS_WIFI_STALL_KEY " before; not again until WiFi connects");
+    }
+    uint32_t stall_ms = load_stall_ms();
+    if (!s.stall.timer) {
+        s.stall.timer = xTimerCreate("wifi_stall", pdMS_TO_TICKS(STALL_TICK_MS), pdTRUE, NULL, stall_timer_cb);
+        if (!s.stall.timer) {
+            return ESP_ERR_NO_MEM;
+        }
+    }
     lock();
     espos_wifi_sm_init(&s.sm, &port, NULL, &cfg);
+    espos_wifi_stall_reset(&s.stall.tracker);
+    s.stall.ms = stall_ms;
+    s.stall.suppressed = held_off;
     s.sm_ready = true;
     unlock();
+    xTimerStart(s.stall.timer, 0);
 
     if (!s.api_registered) {
         /* URI handlers and the SSE hook survive stop(); register once. */
@@ -871,6 +1000,7 @@ esp_err_t espos_wifi_stop(void)
     (void)espos_event_unsubscribe(ESPOS_EVENT_NETWORK_UP, on_network_event);
     (void)espos_event_unsubscribe(ESPOS_EVENT_NETWORK_DOWN, on_network_event);
     xTimerStop(s.cfg_debounce, 0);
+    xTimerStop(s.stall.timer, 0);
     espos_wifi_dispatch(ESPOS_WIFI_EV_STOP, NULL);
     s.started = false;
     esp_err_t err = s.drv->deinit ? s.drv->deinit() : ESP_OK;

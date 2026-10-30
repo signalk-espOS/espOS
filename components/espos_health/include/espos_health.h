@@ -26,8 +26,9 @@
  * The policy half (docs/health.md) is the device watchdog: a 10 s tick that
  * raises the built-in conditions (lowMemory, taskStalled), counts strikes for
  * conditions flagged ESPOS_HEALTH_F_REBOOT_ON_ALARM and restarts after N of
- * them, leaving a record the next boot can read. Loss of WiFi is never a
- * reason to restart; see espos_core's netDown.
+ * them, leaving a record the next boot can read. Losing WiFi is not a reason
+ * to restart (espos_core's netDown); never getting it back is, once per
+ * outage (espos_wifi's wifiStalled).
  *
  * Thread-safe. Sinks run on the reporting task with no lock held, so a sink
  * may report conditions of its own; it must not block for long.
