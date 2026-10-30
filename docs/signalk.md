@@ -6,6 +6,14 @@ the device's values as deltas, and receives values and PUT requests back.
 It also has one HTTP client for anything else an application wants to ask
 the server (`espos_sk_http.h`), and it speaks TLS when the server does.
 
+Requests to the server, the delta stream and OTA downloads from it carry the
+User-Agent `espOS/<espOS version> <app>/<app version>`
+(`espos_net_user_agent()`), so
+the server can tell an espOS device from other ESP-IDF firmware. IDF's own
+default, `ESP32 Websocket Client`, is also what SensESP sends, and a server
+that works around SensESP's bugs would otherwise apply that workaround to
+espOS too.
+
 The page follows that order. If you only want to publish a value, read
 [Sending values](#delta-stream-m4). If something doesn't connect, the
 [token state machine](#token-state-machine) and

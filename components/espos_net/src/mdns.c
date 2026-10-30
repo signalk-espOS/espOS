@@ -36,21 +36,9 @@
 #include "espos_config.h"
 #include "espos_event.h"
 #include "espos_net.h"
+#include "net_identity.h"
 
 static const char *TAG = "espos_mdns";
-
-/* Set by CMakeLists.txt from what IDF knows about the application and from
- * espOS's version.txt (manifest version in a registry copy); the fallbacks
- * only exist so a build that lost the definitions still says something. */
-#ifndef ESPOS_MDNS_PROJECT_NAME
-#define ESPOS_MDNS_PROJECT_NAME "?"
-#endif
-#ifndef ESPOS_MDNS_PROJECT_VER
-#define ESPOS_MDNS_PROJECT_VER "?"
-#endif
-#ifndef ESPOS_MDNS_ESPOS_VERSION
-#define ESPOS_MDNS_ESPOS_VERSION "0.0.0-unknown"
-#endif
 
 /* One application service. TXT items are packed "key\0value\0key\0value\0",
  * n_txt pairs, so the entry is a single copy with no pointers to fix up. */

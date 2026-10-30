@@ -758,7 +758,19 @@ static void ws_task(void *arg)
 #else
                 tcp = esp_transport_tcp_init();
 #endif
-                ws = esp_transport_ws_init(tcp);
+                ws = tcp ? esp_transport_ws_init(tcp) : NULL;
+                /* A failed set leaves IDF's default User-Agent in place, so
+                 * it fails the attempt rather than dialling without ours. */
+                if (!ws || esp_transport_ws_set_user_agent(ws, espos_net_user_agent()) != ESP_OK) {
+                    if (ws) esp_transport_destroy(ws);
+                    if (tcp) esp_transport_destroy(tcp);
+                    ws = NULL;
+                    tcp = NULL;
+                    set_error("out of memory for the WebSocket transport");
+                    s.retry_at_ms = now_ms() + 1000;
+                    publish_status();
+                    continue;
+                }
             }
             esp_transport_ws_set_path(ws, "/signalk/v1/stream?subscribe=none&sendMeta=all");
             if (token[0]) {

@@ -32,7 +32,8 @@ idf_component_register(
 
 espos_config_add_descriptor(config/net.json)
 
-# TXT records of _espos._tcp (src/mdns.c): the application's name and version
+# TXT records of _espos._tcp (src/mdns.c) and the User-Agent
+# (espos_net_user_agent() in src/espos_net.c): the application's name and version
 # the way esp_app_format reads them, and espOS's own version — version.txt two
 # levels up in the tree, the manifest's version in a copy installed from the
 # component registry. The same lookup espos_core makes for its banner,
