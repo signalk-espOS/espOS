@@ -12,6 +12,11 @@ CONFIG_FREERTOS_TIMER_TASK_STACK_DEPTH=4096
 # includes esp_core_dump.h, which IDF only provides when this is on.
 CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
 
+# tcp_transport builds the whole WebSocket upgrade request, bearer token
+# included, in this buffer. IDF's 1024 cannot hold a long token with the other
+# headers, and a request that does not fit is never sent.
+CONFIG_WS_BUFFER_SIZE=2048
+
 # espos_ota marks an image valid only after it has run. Without rollback a bad
 # update is permanent and the device needs a USB flash.
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y

@@ -46,6 +46,14 @@
 #include "espos_sk_tls.h"
 #endif
 
+/* tcp_transport builds the whole upgrade request, bearer token of up to
+ * ESPOS_SK_TOKEN_MAX included, in this buffer and refuses to dial when it does
+ * not fit. espos_core's lint says the same for a full espOS build; this covers
+ * a project that takes espos_sk from the registry without it. */
+#if !CONFIG_IDF_TARGET_LINUX && defined(CONFIG_WS_BUFFER_SIZE) && CONFIG_WS_BUFFER_SIZE < 2048
+#error "espos_sk: CONFIG_WS_BUFFER_SIZE is below 2048, too small for the WebSocket upgrade with a long token. Set CONFIG_WS_BUFFER_SIZE=2048 with idf.py menuconfig, or in sdkconfig.defaults and then delete sdkconfig so it is regenerated."
+#endif
+
 /* Steady-state RX buffer. Grows to CONFIG_ESPOS_SK_RX_FRAME_MAX for a big
  * frame, then shrinks straight back so a one-off burst is not a permanent
  * internal-RAM cost. */

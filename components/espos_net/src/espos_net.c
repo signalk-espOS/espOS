@@ -24,7 +24,6 @@
 #include "espos_mdns.h"
 #include "espos_net.h"
 #include "espos_net_sm.h"
-#include "net_identity.h"
 #include "net_port.h"
 
 static const char *TAG = "espos_net";
@@ -93,11 +92,6 @@ static uint32_t sm_now(void *ctx)
 static const espos_net_sm_port_t k_sm_port = { .now_ms = sm_now };
 
 /* ------------------------------------------------------------- identity */
-
-const char *espos_net_user_agent(void)
-{
-    return "espOS/" ESPOS_MDNS_ESPOS_VERSION " " ESPOS_MDNS_PROJECT_NAME "/" ESPOS_MDNS_PROJECT_VER;
-}
 
 const char *espos_net_short_id(void)
 {

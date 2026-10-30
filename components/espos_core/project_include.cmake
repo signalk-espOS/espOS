@@ -12,7 +12,7 @@
 # checked below from sdkconfig.d/espos.defaults and never trips this. It is
 # for the project that installs espOS's components from the registry and
 # writes its own CMakeLists.txt: without the shared defaults its sdkconfig is
-# IDF's, and the four settings below are the ones whose absence does not show
+# IDF's, and the settings below are the ones whose absence does not show
 # at build time but as a device that wedges or overflows a stack in the
 # field. Each failure names the exact line to add.
 #
@@ -55,6 +55,16 @@ foreach(_espos_stack CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE CONFIG_FREERTOS_TIM
             "${_espos_stack}=4096")
     endif()
 endforeach()
+
+# tcp_transport builds the whole WebSocket upgrade request in this buffer and
+# refuses to dial when it does not fit; a bearer token of up to
+# ESPOS_SK_TOKEN_MAX (1024) plus the other headers does not fit IDF's 1024
+# (espos.defaults).
+if(DEFINED CONFIG_WS_BUFFER_SIZE AND CONFIG_WS_BUFFER_SIZE LESS 2048)
+    _espos_lint_report(
+        "CONFIG_WS_BUFFER_SIZE=${CONFIG_WS_BUFFER_SIZE}: the WebSocket upgrade request (bearer token up to 1024 bytes, User-Agent and the other headers) is built in this buffer, and a request that does not fit is never sent, so a device with a long token can never open the SignalK stream."
+        "CONFIG_WS_BUFFER_SIZE=2048")
+endif()
 
 if(CONFIG_IDF_TARGET STREQUAL "esp32p4")
     # From espos.defaults.esp32p4: without PSRAM, esp_hosted's startup
