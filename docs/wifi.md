@@ -56,6 +56,10 @@ Codes from 1001 up are espOS's own, not WiFi codes. The full table is in
 `wifi_reason.c`. An unknown code reads `unknown reason` with the number next
 to it.
 
+A station that keeps trying for `wifi.stall_s` (30 minutes) without associating
+once restarts the device, once per outage, as the `wifiStalled` condition
+([Health](health.md#why-wifistalled-restarts-once)).
+
 ## Networks and priority
 
 There are four slots, `ssid0..3`, `psk0..3` and `bssid0..3`, tried in that

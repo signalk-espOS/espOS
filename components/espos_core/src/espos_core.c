@@ -146,7 +146,8 @@ static struct {
  * would repeat every strike window — a consumer once shipped exactly that
  * and got a panel rebooting every ~90 s. The link that only LOOKS connected
  * (a wedged co-processor transport) is caught by espos_sk's skLinkStalled,
- * which watches real traffic and is the case a restart does fix. */
+ * which watches real traffic and is the case a restart does fix; a station
+ * that never gets back in at all is espos_wifi's wifiStalled. */
 static void on_network(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     (void)arg;

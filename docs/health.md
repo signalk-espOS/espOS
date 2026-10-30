@@ -127,6 +127,7 @@ depends on the components in its build.
 | `memoryTrough` | the policy | `WARN` | never | The low-water mark of internal RAM since boot is below 10 KB (`CONFIG_ESPOS_HEALTH_INTERNAL_TROUGH_WARN_KB`). Stays until the next boot. |
 | `taskStalled` | the policy | `ALARM` | **yes** | A task watched with `espos_health_watch_task()` hasn't called `espos_health_kick()` within its timeout. |
 | `netDown` | `espos_core` | `WARN` | no | The network went down. Cleared when it comes back. |
+| `wifiStalled` | `espos_wifi` | `ALARM` | **yes** | WiFi has been trying for `wifi.stall_s` (1800 s, at least 300; 0 turns it off) without associating once, nothing else carries the network and nobody is on the setup access point. At most once per outage: after such a restart the device doesn't restart for it again until WiFi has connected. |
 | `skLinkStalled` | `espos_sk` | `ALARM` | **yes** | WiFi says it is connected and the Signal K stream worked earlier in this boot, but it has now been down for `sk.stall_s` (300 s, at least 60). |
 | `skCertificate` | `espos_sk` | `ALARM` | no | The Signal K server's TLS certificate was refused ([Signal K](signalk.md)). Cleared when a connection succeeds. A restart wouldn't bring a new certificate. |
 | `tlsMemory` | `espos_sk` | `WARN` | no | There wasn't a large enough free block for a TLS handshake, so the device didn't try. Cleared when the next attempt finds one. |
@@ -208,6 +209,27 @@ drops within seconds, so "connected, but no stream for minutes" is the
 reliable sign, and a restart is the fix. The 300 s limit is generous so that
 restarting the Signal K server doesn't restart every device on the boat. If
 your server is often down for longer than that, raise `sk.stall_s`.
+
+### Why `wifiStalled` restarts, once
+
+A station that never gets back in is the other half of the same story. An
+ESP32-P4 panel retried a known-good access point every 11 s for 45 hours and
+connected 10 s after a reset ([espOS #136](https://github.com/signalk-espOS/espOS/issues/136)).
+`netDown` only warns, and `skLinkStalled` needs WiFi to say it is connected,
+which this station never did. So `wifiStalled` restarts after `wifi.stall_s`
+of unbroken trying. Only association counts as getting in: a station that
+associates and then gets no address has a working radio and a broken DHCP
+server, and a restart doesn't mend that.
+
+It must not turn an access point that is simply off into a reboot loop: a
+marina switching its router off, a boat left on battery. So it restarts once,
+and holds off until WiFi has connected again. The hold is kept in RTC memory
+rather than in the reset record, so a different restart in between, an update
+or the co-processor watchdog, doesn't lift it; a power cycle does. The count
+also starts again while another transport carries the network (a restart
+would cut the working link) and while someone is on the setup access point
+(they are about to fix the cause). Changing the networks or their passwords
+starts it again too and allows one more restart.
 
 ### Marking your own fatal condition
 

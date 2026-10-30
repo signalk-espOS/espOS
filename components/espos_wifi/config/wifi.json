@@ -44,6 +44,9 @@
      "title": "DHCP timeout", "description": "Associated but no IP after this long counts as a failed attempt."},
     {"name": "connect_tmo_s", "type": "int", "default": 20, "min": 5, "max": 120, "unit": "s",
      "title": "Connect timeout", "description": "Safety net if the driver never reports a result."},
+    {"name": "stall_s", "type": "int", "default": 1800, "min": 0, "max": 86400, "unit": "s",
+     "title": "Restart after no connection",
+     "description": "Restart the device once when WiFi has been trying this long without connecting, nothing else carries the network and nobody is on the setup access point. Once per outage: not again until it has connected. 0 = never; at least 300."},
 
     {"name": "portal_enabled", "type": "bool", "default": true, "title": "Provisioning access point",
      "description": "Bring up the setup access point when no network is configured or nothing connects for a while."},

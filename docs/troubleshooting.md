@@ -220,6 +220,12 @@ Three places answer most questions before you get here:
     often down for longer, raise `sk.stall_s` or turn the watchdog off
     ([Health](health.md#the-watchdog-policy)).
 
+**The device restarted after half an hour without WiFi**
+:   That is the `wifiStalled` check: `wifi.stall_s` (1800 s) of trying without
+    associating once. It restarts once per outage, so a device whose access
+    point stays off does not loop. Set `wifi.stall_s` to 0 to turn it off
+    ([Health](health.md#why-wifistalled-restarts-once)).
+
 ## OTA
 
 **`image rejected: bad signature or corrupt`**

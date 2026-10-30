@@ -23,6 +23,10 @@ typedef struct {
     esp_err_t (*scan_start)(void);               /* results via espos_wifi_scan_done() */
     esp_err_t (*set_ps)(const char *mode);       /* "none" | "min" | "max" */
     const char *portal_ip;                       /* e.g. "192.168.4.1" */
+    /* A word that survives every reset but a power-on (RTC_NOINIT on a
+     * device): ESPOS_WIFI_STALL_LATCHED while wifiStalled is raised or held off,
+     * anything else otherwise. NULL = none. */
+    uint32_t *stall_latch;
 } espos_wifi_driver_t;
 
 const espos_wifi_driver_t *espos_wifi_driver(void);   /* the linked port */

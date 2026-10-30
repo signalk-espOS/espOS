@@ -80,6 +80,14 @@ static char s_ssid[33];     /* of the current association, for the GOT_IP line *
  * erase budget. */
 static RTC_NOINIT_ATTR espos_wifi_last_ap_t s_last_ap;
 
+/* wifiStalled's "once per outage" (espos_wifi.c). RTC_NOINIT for the same
+ * reason as s_last_ap, and because the health reset record is not enough: it
+ * is gone after the next reset of any kind, so a co-processor watchdog restart
+ * or an OTA during the held-off boot would re-arm the restart and start the
+ * loop it exists to prevent. Garbage after a power-on reads as "not latched"
+ * unless it happens to equal the magic, and a power-on is a fresh start anyway. */
+static RTC_NOINIT_ATTR uint32_t s_stall_latch;
+
 /* How many attempts may use the cached BSSID/channel before falling back to a
  * full scan. Small on purpose: the point is to remove the scan from the retries
  * that follow a handshake miss against an AP that is definitely there, not to
@@ -633,6 +641,7 @@ static const espos_wifi_driver_t k_driver = {
     .scan_start = d_scan_start,
     .set_ps = d_set_ps,
     .portal_ip = PORTAL_IP,
+    .stall_latch = &s_stall_latch,
 };
 
 const espos_wifi_driver_t *espos_wifi_driver(void)
