@@ -1,0 +1,67 @@
+/*
+ * SPDX-FileCopyrightText: 2026 humppafreak
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * espos_tone — the named tone library: a JSON table to tones by name.
+ * See espos_tone.h.
+ */
+#include "espos_tone.h"
+
+#include <stdio.h>
+#include <string.h>
+
+#include "cJSON.h"
+
+size_t espos_tone_library_parse(const char *json, espos_tone_t *out, size_t max)
+{
+    if (!json) {
+        return 0;
+    }
+    cJSON *root = cJSON_Parse(json);
+    if (!root) {
+        return 0;
+    }
+    size_t n = 0;
+    if (cJSON_IsArray(root)) {
+        const cJSON *row;
+        cJSON_ArrayForEach(row, root)
+        {
+            if (n >= max) {
+                break;
+            }
+            if (!cJSON_IsObject(row)) {
+                continue;
+            }
+            const cJSON *name = cJSON_GetObjectItemCaseSensitive(row, "name");
+            const cJSON *rtttl = cJSON_GetObjectItemCaseSensitive(row, "rtttl");
+            if (!cJSON_IsString(name) || !cJSON_IsString(rtttl) || name->valuestring[0] == '\0' ||
+                strlen(name->valuestring) > ESPOS_TONE_NAME_MAX) {
+                continue;
+            }
+            espos_tone_t tone = { 0 };
+            tone.n_notes = espos_rtttl_parse(rtttl->valuestring, tone.notes, ESPOS_RTTTL_MAX_NOTES);
+            // No notes, or only notes that round to 0 ms (a tempo and length
+            // so high nothing lasts a millisecond): a row that would never sound.
+            if (tone.n_notes == 0 || espos_rtttl_duration_ms(tone.notes, tone.n_notes) == 0) {
+                continue;
+            }
+            snprintf(tone.name, sizeof(tone.name), "%s", name->valuestring);
+            out[n++] = tone;
+        }
+    }
+    cJSON_Delete(root);
+    return n;
+}
+
+int espos_tone_library_find(const espos_tone_t *tones, size_t n, const char *name)
+{
+    if (!name || name[0] == '\0') {
+        return -1;
+    }
+    for (size_t i = 0; i < n; i++) {
+        if (strcmp(tones[i].name, name) == 0) {
+            return (int)i;
+        }
+    }
+    return -1;
+}

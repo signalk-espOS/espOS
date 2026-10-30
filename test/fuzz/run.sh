@@ -32,7 +32,7 @@ out="$here/build"
 mkdir -p "$out"
 
 # cJSON: reuse the copy a host-test project already fetched if there is one,
-# otherwise fetch the pinned version. Two of the three parsers need it.
+# otherwise fetch the pinned version. Three of the five harnesses need it.
 cjson=$(find "$root/test/host" -path '*espressif__cjson/cJSON/cJSON.c' 2>/dev/null | head -1)
 if [ -z "$cjson" ]; then
     # No host test has been built, so fetch the pinned cJSON on its own. The
@@ -77,6 +77,7 @@ common=(
     -I"$root/components/espos_n2k/include"
     -I"$root/components/espos_config/include"
     -I"$root/components/espos_config/src"
+    -I"$root/components/espos_tone/include"
     -I"$here/shim"
 )
 
@@ -119,11 +120,12 @@ declare -A SOURCES=(
     # No cJSON: b64.c includes only espos_config_priv.h, which reaches no
     # further than esp_err.h. The JSON layer above it is not IDF-free.
     [b64]="$here/fuzz_b64.c $root/components/espos_config/src/b64.c"
+    [rtttl]="$here/fuzz_rtttl.c $root/components/espos_tone/src/rtttl.c $root/components/espos_tone/src/tone_library.c $cjson"
 )
 
 targets=("$@")
 if [ ${#targets[@]} -eq 0 ]; then
-    targets=(sk_frame ota_manifest candump b64)
+    targets=(sk_frame ota_manifest candump b64 rtttl)
 fi
 
 fail=0

@@ -1,0 +1,220 @@
+/*
+ * SPDX-FileCopyrightText: 2026 humppafreak
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * espos_rtttl — the RTTTL parser. See espos_rtttl.h.
+ */
+#include "espos_rtttl.h"
+
+#include <ctype.h>
+#include <stdlib.h>
+#include <string.h>
+
+// Standard equal-temperament frequencies (Hz) for octave 4, c..b, A4 = 440.
+static const double OCTAVE4_HZ[12] = {
+    261.63, 277.18, 293.66, 311.13, 329.63, 349.23, 369.99, 392.00, 415.30, 440.00, 466.16, 493.88
+};
+
+static int semitone_of(char letter)
+{
+    switch (tolower((unsigned char)letter)) {
+    case 'c': return 0;
+    case 'd': return 2;
+    case 'e': return 4;
+    case 'f': return 5;
+    case 'g': return 7;
+    case 'a': return 9;
+    case 'b': return 11;
+    default: return -1;
+    }
+}
+
+// Highest octave played; a higher one plays at this octave. c8 is ~4.2 kHz,
+// already above what the buzzer reproduces well, and every octave doubles
+// the frequency: an unbounded one overflows uint16_t and takes as many loop
+// passes below as its value. o=2147483647 took 1.5 s on a PC; on the chip,
+// with doubles in software, far past the 30 s task watchdog.
+#define OCTAVE_MAX 8
+
+// Numbers larger than this are read as this. Every value RTTTL uses is far
+// smaller; the cap keeps a long digit string from overflowing an int.
+#define NUMBER_MAX 9999
+
+static uint16_t note_freq_hz(int semitone, bool sharp, int octave)
+{
+    int idx = semitone + (sharp ? 1 : 0);
+    int oct = octave < OCTAVE_MAX ? octave : OCTAVE_MAX;
+    while (idx >= 12) {
+        idx -= 12;
+        oct++;
+    }
+    double hz = OCTAVE4_HZ[idx];
+    int delta = oct - 4;
+    while (delta > 0) {
+        hz *= 2.0;
+        delta--;
+    }
+    while (delta < 0) {
+        hz /= 2.0;
+        delta++;
+    }
+    return (uint16_t)(hz + 0.5);
+}
+
+// Reads decimal digits at *p into *out; returns whether any were read.
+static bool read_digits(const char **p, int *out)
+{
+    const char *start = *p;
+    int v = 0;
+    while (isdigit((unsigned char)**p)) {
+        if (v <= NUMBER_MAX) {
+            v = v * 10 + (**p - '0');
+        }
+        (*p)++;
+    }
+    if (v > NUMBER_MAX) {
+        v = NUMBER_MAX;
+    }
+    if (*p == start) {
+        return false;
+    }
+    *out = v;
+    return true;
+}
+
+size_t espos_rtttl_parse(const char *rtttl, espos_rtttl_note_t *out, size_t max)
+{
+    if (!rtttl) {
+        return 0;
+    }
+    // Skip the name, if any (text before the first ':').
+    const char *p = rtttl;
+    const char *first_colon = strchr(p, ':');
+    int def_duration = 4, def_octave = 5, bpm = 63;
+    if (first_colon) {
+        p = first_colon + 1;
+        const char *second_colon = strchr(p, ':');
+        const char *defs_end = second_colon ? second_colon : p + strlen(p);
+        // Defaults section: comma-separated d=/o=/b= tokens.
+        const char *q = p;
+        while (q < defs_end) {
+            while (q < defs_end && (*q == ' ' || *q == ',')) {
+                q++;
+            }
+            if (q >= defs_end) {
+                break;
+            }
+            char key = (char)tolower((unsigned char)*q);
+            // The '=' must belong to this key: stop at the next ',' too, or a
+            // key written without one ("o5,b=120") takes the next key's value.
+            const char *eq = q;
+            while (eq < defs_end && *eq != '=' && *eq != ',') {
+                eq++;
+            }
+            if (eq < defs_end && *eq == '=') {
+                // defs_end is the ':' or the terminating NUL, so the digits
+                // stop there by themselves.
+                const char *v = eq + 1;
+                int val = 0;
+                if (read_digits(&v, &val)) {
+                    if (key == 'd') {
+                        def_duration = val;
+                    } else if (key == 'o') {
+                        def_octave = val;
+                    } else if (key == 'b') {
+                        bpm = val;
+                    }
+                }
+                q = v;
+            } else {
+                q = eq;  // no value: leave the defaults alone, go to the next key
+            }
+            while (q < defs_end && *q != ',') {
+                q++;
+            }
+        }
+        p = second_colon ? second_colon + 1 : defs_end;
+    }
+    if (bpm <= 0 || def_duration <= 0) {
+        return 0;
+    }
+    const double whole_note_ms = 240000.0 / bpm;
+
+    size_t n = 0;
+    while (*p && n < max) {
+        while (*p == ' ' || *p == ',') {
+            p++;
+        }
+        if (!*p) {
+            break;
+        }
+        int duration = def_duration;
+        read_digits(&p, &duration);
+        char letter = *p;
+        if (letter == '\0') {
+            break;
+        }
+        const bool is_pause = tolower((unsigned char)letter) == 'p';
+        const int semitone = is_pause ? 0 : semitone_of(letter);
+        if (!is_pause && semitone < 0) {
+            // Unrecognised token: skip to the next comma so a garbled note
+            // doesn't desync the rest of the tune.
+            while (*p && *p != ',') {
+                p++;
+            }
+            continue;
+        }
+        p++;
+        bool sharp = false;
+        if (*p == '#') {
+            sharp = true;
+            p++;
+        }
+        bool dotted = false;
+        if (*p == '.') {
+            dotted = true;
+            p++;
+        }
+        int octave = def_octave;
+        read_digits(&p, &octave);
+        if (*p == '.') {
+            dotted = true;
+            p++;
+        }
+        if (duration <= 0) {
+            duration = def_duration > 0 ? def_duration : 4;
+        }
+        double ms = whole_note_ms / duration;
+        if (dotted) {
+            ms *= 1.5;
+        }
+        out[n].freq_hz = is_pause ? 0 : note_freq_hz(semitone, sharp, octave);
+        out[n].duration_ms = ms < UINT16_MAX ? (uint16_t)(ms + 0.5) : UINT16_MAX;
+        n++;
+    }
+    return n;
+}
+
+uint32_t espos_rtttl_duration_ms(const espos_rtttl_note_t *notes, size_t n)
+{
+    uint32_t total = 0;
+    for (size_t i = 0; i < n; i++) {
+        total += notes[i].duration_ms;
+    }
+    return total;
+}
+
+bool espos_rtttl_tone_at(const espos_rtttl_note_t *notes, size_t n, uint32_t t_ms, uint16_t *freq_hz)
+{
+    for (size_t i = 0; i < n; i++) {
+        if (t_ms < notes[i].duration_ms) {
+            if (notes[i].freq_hz == 0) {
+                return false;  // a rest
+            }
+            *freq_hz = notes[i].freq_hz;
+            return true;
+        }
+        t_ms -= notes[i].duration_ms;
+    }
+    return false;  // past the end
+}

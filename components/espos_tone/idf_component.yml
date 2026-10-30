@@ -1,0 +1,46 @@
+# SPDX-FileCopyrightText: 2026 humppafreak
+# SPDX-License-Identifier: Apache-2.0
+## espos_tone component manifest: registry metadata for signalk-espos/espos_tone.
+## The version is espOS's (version.txt) and moves with it, see docs/releasing.md.
+# x-release-please-start-version
+version: "0.25.2"
+# x-release-please-end
+description: "RTTTL event tones: parser, named tone library and a hardware-free player"
+url: "https://github.com/signalk-espOS/espOS/tree/main/components/espos_tone"
+repository: "https://github.com/signalk-espOS/espOS.git"
+documentation: "https://github.com/signalk-espOS/espOS/blob/main/docs/tone.md"
+issues: "https://github.com/signalk-espOS/espOS/issues"
+license: "Apache-2.0"
+maintainers:
+  - "Dirk Wahrheit <dirkwahrheit@gmail.com>"
+tags:
+  - signalk
+  - marine
+  - esp-idf
+  - espos
+  - buzzer
+  - rtttl
+  - tone
+files:
+  exclude:
+    - "build/**/*"
+    - "build-*/**/*"
+    - "sdkconfig*"
+    - "managed_components/**/*"
+    - "dependencies.lock"
+    - "examples/*/build/**/*"
+    - "examples/*/build-*/**/*"
+    - "examples/*/managed_components/**/*"
+    - "examples/*/dependencies.lock"
+    # The GENERATED sdkconfig only. Not "sdkconfig*": that glob also matched
+    # the tracked sdkconfig.defaults[.<target>] files, which for an example
+    # without the prologue ARE the example -- a downloaded from_registry was
+    # missing the nine settings espos_core then refused to build without.
+    - "examples/*/sdkconfig"
+    - "examples/*/sdkconfig.old"
+    - "examples/*/*.pem"
+dependencies:
+  idf: ">=6.0.0,<6.1.0"
+  # The tone library is a JSON table (an espOS table-format config value).
+  # Same pin as espos_config, so a consumer gets no second cJSON.
+  espressif/cjson: "==1.7.19~2"

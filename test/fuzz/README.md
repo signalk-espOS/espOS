@@ -10,7 +10,7 @@ Needs `clang` for the real thing. With only `gcc` the harnesses still build
 and replay the corpus under ASan and UBSan, which is a useful regression check
 after a parser change but discovers nothing new.
 
-## Why these four
+## Why these five
 
 espOS is C, and the [language decision](../../docs/decisions.md) that settled
 on C rather than Rust is only defensible if the code a hostile input reaches is
@@ -24,8 +24,9 @@ reaches:
 | `ota_manifest` | `espos_ota_manifest_pick()`, `espos_ota_resolve_url()` | the JSON that decides which firmware to install next |
 | `candump` | `candump_decode()`, `candump_resync_offset()` | any TCP peer that connects to the NMEA 2000 gateway |
 | `b64` | `espos_b64_decode()`, `espos_b64_encode()` | a BLOB key in the body of `PUT /api/v1/config` |
+| `rtttl` | `espos_rtttl_parse()`, `espos_tone_library_parse()` | a tone-library table setting, typed by whoever can change the config |
 
-All four are pure C or C++ with no ESP-IDF dependency beyond `esp_err.h` —
+All five are pure C or C++ with no ESP-IDF dependency beyond `esp_err.h` —
 which is *why* they were written that way — so the harnesses build them
 directly with the host compiler. There is no IDF project here, no component
 manager and no `sdkconfig`.
@@ -62,6 +63,12 @@ failures that matter on a boat are quieter than a crash:
   and strict the other shows up here), and repeats the decode into a buffer one
   byte short of what the input needs — the case that catches an off-by-one on
   the bounds check.
+- **`rtttl`** parses into a heap block of exactly `ESPOS_RTTTL_MAX_NOTES`,
+  checks every pitch is within the octave clamp (c9 at most), walks
+  `espos_rtttl_tone_at()` note by note against the parsed list, and parses
+  again with one note less room to see the cap is honoured. The same bytes
+  then go through the library parser, which may only return rows with a name
+  and at least one note.
 
 ## Two bugs this found
 
