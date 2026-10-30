@@ -26,6 +26,7 @@
 #include "espos_net.h"
 #include "espos_wifi.h"
 #include "espos_wifi_priv.h"
+#include "wifi_ps.h"
 
 static const char *TAG = "espos_wifi";
 
@@ -776,7 +777,11 @@ esp_err_t espos_wifi_start(void)
     if (s.drv->set_ps) {
         char ps[8] = "none";
         espos_config_get_str(ESPOS_CFG_NS_WIFI, ESPOS_CFG_WIFI_PS_MODE, ps, sizeof(ps), NULL);
-        s.drv->set_ps(ps);
+        const char *effective = espos_wifi_ps_effective(ps, ESPOS_WIFI_I154_COEX);
+        if (strcmp(effective, ps) != 0) {
+            ESP_LOGI(TAG, "power save '%s' runs as '%s': 802.15.4 shares the radio", ps, effective);
+        }
+        s.drv->set_ps(effective);
     }
 
     /* The SM sees deferred wrappers: driver calls run after the lock is
