@@ -22,6 +22,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include "espos_net.h"
 #include "ota_port.h"
 
 static const char *TAG = "espos_ota";
@@ -102,6 +103,7 @@ static void http_cfg(esp_http_client_config_t *c, const char *url, bool allow_in
     c->keep_alive_enable = true;
     c->buffer_size = 2048;
     c->buffer_size_tx = 1024;
+    c->user_agent = espos_net_user_agent();
     if (allow_insecure) {
         c->skip_cert_common_name_check = true;
         c->crt_bundle_attach = NULL;

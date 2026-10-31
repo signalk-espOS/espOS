@@ -776,6 +776,7 @@ static void ws_connect(void)
     esp_websocket_client_config_t cfg = {
         .uri = url,
         .headers = headers[0] ? headers : NULL,
+        .user_agent = espos_net_user_agent(),
         .task_stack = 6144,
         /* Roomy enough that a large gatt_subscribe arrives in one frame; the
          * implementation this replaces used 1 KB and could not reassemble. */

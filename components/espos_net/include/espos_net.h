@@ -101,6 +101,15 @@ esp_err_t espos_net_subscribe(espos_net_cb_t cb, void *arg);
 esp_err_t espos_net_unsubscribe(espos_net_cb_t cb, void *arg);
 
 /**
+ * The User-Agent espOS sends to the SignalK server: "espOS/\<espOS version\>
+ * \<app\>/\<app version\>". Each client sets it (the delta stream, espos_sk_http,
+ * the BLE gateway's control socket, OTA); a client that leaves it unset sends
+ * IDF's default, "ESP32 Websocket Client" or "ESP32 HTTP Client/1.0", which a
+ * server cannot tell from SensESP or any other IDF firmware.
+ */
+const char *espos_net_user_agent(void);
+
+/**
  * Device-unique short id, "1a2b": the last two bytes of the base MAC read from
  * eFuse, so it is the same whether the device speaks WiFi, Ethernet or Thread,
  * and the same on the ESP32-P4 whose radio is a co-processor. Default names

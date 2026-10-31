@@ -38,6 +38,14 @@ CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
 CONFIG_HTTPD_MAX_URI_LEN=512
 CONFIG_HTTPD_ERR_RESP_NO_DELAY=y
 
+# ---- WebSocket upgrade. tcp_transport builds the whole upgrade request in one
+# CONFIG_WS_BUFFER_SIZE buffer and refuses to dial when it does not fit. The
+# request carries the bearer token (up to ESPOS_SK_TOKEN_MAX, 1024 bytes) next
+# to the User-Agent and the other headers, about 250 bytes, so IDF's 1024
+# would strand a device whose token is long. Costs 1 KB more per socket (the
+# delta stream, the BLE gateway's control socket).
+CONFIG_WS_BUFFER_SIZE=2048
+
 # ---- Core dump to flash (surfaced by the UI in M5). IDF 6 is ELF+SHA256 only.
 CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
 

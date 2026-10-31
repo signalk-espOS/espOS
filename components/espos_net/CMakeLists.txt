@@ -6,7 +6,7 @@
 # Ethernet) report into it; SignalK, OTA and mDNS depend on it instead of on
 # a radio, so a firmware without WiFi still has all three.
 idf_build_get_property(target IDF_TARGET)
-set(srcs src/net_sm.c src/espos_net.c src/api_net.c src/mdns.c)
+set(srcs src/net_sm.c src/espos_net.c src/net_identity.c src/api_net.c src/mdns.c)
 set(reqs espos_config espos_httpd)
 set(priv_reqs espressif__cjson espos_event)
 if(target STREQUAL "linux")
@@ -32,9 +32,10 @@ idf_component_register(
 
 espos_config_add_descriptor(config/net.json)
 
-# TXT records of _espos._tcp (src/mdns.c): the application's name and version
-# the way esp_app_format reads them, and espOS's own version — version.txt two
-# levels up in the tree, the manifest's version in a copy installed from the
+# TXT records of _espos._tcp (src/mdns.c) and the User-Agent
+# (espos_net_user_agent() in src/net_identity.c): the application's name and
+# version the way esp_app_format reads them, and espOS's own version —
+# version.txt two levels up in the tree, the manifest's version in a copy installed from the
 # component registry. The same lookup espos_core makes for its banner,
 # repeated here rather than shared: espos_net must not depend on espos_core,
 # and a cmake/ helper would not travel with a registry copy of this component.

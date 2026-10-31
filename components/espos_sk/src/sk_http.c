@@ -34,6 +34,7 @@
 #include "esp_http_client.h"
 #include "esp_log.h"
 
+#include "espos_net.h"
 #include "espos_sk_http.h"
 #include "espos_sk_priv.h"
 #if CONFIG_ESPOS_SK_TLS
@@ -210,6 +211,7 @@ esp_err_t espos_sk_http_perform(const espos_sk_http_req_t *rq, espos_sk_http_res
         .event_handler = on_event,
         .user_data = &b,
         .disable_auto_redirect = true,
+        .user_agent = espos_net_user_agent(),
         .keep_alive_enable = false,
         .buffer_size_tx = 1536, /* room for "Authorization: Bearer <jwt up to 1 KiB>" */
 #if CONFIG_ESPOS_SK_TLS
