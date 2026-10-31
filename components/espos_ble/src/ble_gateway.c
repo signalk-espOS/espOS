@@ -37,6 +37,7 @@
 #endif
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_random.h"
 #include "esp_timer.h"
 #include "esp_websocket_client.h"
 #include "espos_ble.h"
@@ -62,6 +63,15 @@ static void on_update_event(void *arg, esp_event_base_t base, int32_t id, void *
 
 #define ADV_PATH "/signalk/v2/api/ble/gateway/advertisements"
 #define WS_PATH  "/signalk/v2/api/ble/gateway/ws"
+/* Cap of the control socket's re-dial backoff, about 60 s with jitter;
+ * the first wait is 1 s. */
+#define WS_RECONNECT_CAP_MS 60000
+/* A socket that stayed up this long counts as a working server, and its end
+ * restarts the backoff; a server that closes right after the upgrade keeps
+ * backing off. */
+#define WS_STABLE_US (30 * 1000000LL)
+/* Close code signalk-server sends for a token it does not accept. */
+#define WS_CLOSE_UNAUTHORIZED 4401
 
 /* Advertisements per POST. Bounded so one flush cannot build an unbounded
  * JSON document out of a busy marina. */
@@ -95,6 +105,18 @@ static struct {
     SemaphoreHandle_t sess_lock;
     esp_websocket_client_handle_t ws;
     bool ws_connected;
+    /* Set on the websocket task when the socket ended, by a drop or by a
+     * close frame from the server; that task is on its way out. The gateway
+     * task re-dials, so every attempt sends the current token: the client's
+     * own reconnect would resend the header it was built with. */
+    atomic_bool ws_ended;
+    atomic_bool ws_sent_token;
+    /* One report per token: a server that keeps refusing a token the token
+     * machine has already re-checked must not make it re-check on every
+     * attempt. */
+    atomic_bool ws_unauth_reported;
+    /* This socket got as far as CONNECTED, so its end restarts the backoff. */
+    volatile bool ws_connected_once;
     TaskHandle_t task;
     session_t sessions[MAX_SESSIONS];
 
@@ -273,15 +295,26 @@ static void post_pending(void)
 /* Control WebSocket                                                  */
 /* ---------------------------------------------------------------- */
 
+/* Guards g.ws between the tasks that send on it (Bluetooth stack, websocket)
+ * and the gateway task that replaces it. Static, so it exists before the
+ * first send and needs no teardown. */
+static StaticSemaphore_t s_ws_lock_buf;
+static SemaphoreHandle_t s_ws_lock;
+
 static void ws_send_json(cJSON *doc)
 {
-    if (!g.ws_connected || !g.ws) return;
+    if (!g.ws_connected) return;
     char *txt = cJSON_PrintUnformatted(doc);
     if (!txt) return;
     /* Short, because run_subscribes()/run_init_writes() report through here
      * while holding the session lock, on the Bluetooth stack task. A long
      * timeout there stalls the radio; a dropped status frame does not. */
-    esp_websocket_client_send_text(g.ws, txt, strlen(txt), pdMS_TO_TICKS(100));
+    if (xSemaphoreTake(s_ws_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
+        if (g.ws && g.ws_connected) {
+            esp_websocket_client_send_text(g.ws, txt, strlen(txt), pdMS_TO_TICKS(100));
+        }
+        xSemaphoreGive(s_ws_lock);
+    }
     free(txt);
 }
 
@@ -600,6 +633,10 @@ static void handle_ws_text(const char *data, size_t len)
     cJSON_Delete(doc);
 }
 
+/* Set by the client's task before it raises ws_ended, read by the gateway
+ * task after it sees ws_ended. */
+static int64_t s_ws_up_at;
+
 static void ws_event(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     (void)arg;
@@ -608,12 +645,24 @@ static void ws_event(void *arg, esp_event_base_t base, int32_t id, void *data)
     switch (id) {
     case WEBSOCKET_EVENT_CONNECTED:
         g.ws_connected = true;
+        g.ws_connected_once = true;
+        s_ws_up_at = esp_timer_get_time();
         ESP_LOGI(TAG, "control WS connected");
         send_hello();
         break;
     case WEBSOCKET_EVENT_DISCONNECTED:
+    case WEBSOCKET_EVENT_CLOSED: {
         g.ws_connected = false;
+        int status = ev->error_handle.esp_ws_handshake_status_code;
+        bool refused = status == 401 || status == 403 || ev->close_status_code == WS_CLOSE_UNAUTHORIZED;
+        if (refused && atomic_load(&g.ws_sent_token) && !atomic_exchange(&g.ws_unauth_reported, true)) {
+            ESP_LOGW(TAG, "control WS rejected the token - espos_sk is re-checking it");
+            /* Lost to a full queue: the next refusal reports it instead. */
+            if (espos_sk_report_unauthorized() != ESP_OK) atomic_store(&g.ws_unauth_reported, false);
+        }
+        atomic_store(&g.ws_ended, true);
         break;
+    }
     case WEBSOCKET_EVENT_DATA:
         /* op_code 1 is a text frame; ignore pings/pongs/binary. */
         if (ev->op_code == 0x01 && ev->data_len > 0) {
@@ -631,6 +680,41 @@ static void ws_event(void *arg, esp_event_base_t base, int32_t id, void *data)
 static char s_ws_host[ESPOS_SK_HOST_MAX];
 static uint16_t s_ws_port;
 static bool s_ws_tls;
+/* Gateway task only: no dial before s_ws_retry_at, backing off over
+ * s_ws_round failed attempts, so a server that keeps refusing the socket is
+ * neither dialled on every pass of the loop nor every 5 s for hours. */
+static int64_t s_ws_retry_at;
+static uint32_t s_ws_round;
+static uint32_t s_ws_token_hash;
+
+static void ws_destroy(void)
+{
+    xSemaphoreTake(s_ws_lock, portMAX_DELAY);
+    esp_websocket_client_handle_t h = g.ws;
+    g.ws = NULL;
+    g.ws_connected = false;
+    xSemaphoreGive(s_ws_lock);
+    /* Outside the lock: destroy() waits for the client's task, which may be
+     * sending. It stops a client that is still running; stop() on one whose
+     * task has ended would only log that it was not started. */
+    if (h) esp_websocket_client_destroy(h);
+    /* Again: a handshake finishing before destroy() joined the task set it. */
+    g.ws_connected = false;
+}
+
+static void ws_schedule_retry(void)
+{
+    s_ws_retry_at = esp_timer_get_time() +
+                    (int64_t)espos_net_backoff_ms(s_ws_round, WS_RECONNECT_CAP_MS, esp_random()) * 1000;
+    if (s_ws_round < 16) s_ws_round++;
+}
+
+static uint32_t token_hash(const char *t)
+{
+    uint32_t h = 5381;
+    while (*t) h = h * 33u + (uint8_t)*t++;
+    return h;
+}
 
 static void ws_connect(void)
 {
@@ -638,19 +722,41 @@ static void ws_connect(void)
     espos_sk_server_t srv;
     if (espos_sk_get_server(&srv) != ESP_OK || !srv.host[0]) return;
 
-    if (g.ws) {
-        /* Already connected to this server: nothing to do. Pointed at a
-         * different one (the user re-pinned it, discovery moved, or sk.tls
-         * flipped): tear the old socket down so the code below re-dials. */
-        if (strcmp(s_ws_host, srv.host) == 0 && s_ws_port == srv.port && s_ws_tls == srv.tls) return;
-        ESP_LOGI(TAG, "control WS server changed %s://%s:%u -> %s://%s:%u",
-                 s_ws_tls ? "wss" : "ws", s_ws_host, s_ws_port,
-                 srv.tls ? "wss" : "ws", srv.host, srv.port);
-        esp_websocket_client_stop(g.ws);
-        esp_websocket_client_destroy(g.ws);
-        g.ws = NULL;
-        g.ws_connected = false;
+    /* s_ws_host/port/tls name the server of the last dial, which owns the
+     * backoff: a new server is dialled at once, socket or not. */
+    bool same = strcmp(s_ws_host, srv.host) == 0 && s_ws_port == srv.port && s_ws_tls == srv.tls;
+    if (!same) {
+        if (s_ws_host[0]) {
+            ESP_LOGI(TAG, "control WS server changed %s://%s:%u -> %s://%s:%u",
+                     s_ws_tls ? "wss" : "ws", s_ws_host, s_ws_port,
+                     srv.tls ? "wss" : "ws", srv.host, srv.port);
+        }
+        s_ws_retry_at = 0;
+        s_ws_round = 0;
     }
+    if (g.ws) {
+        /* Still up on this server: nothing to do. Ended, or pointed at a
+         * different server (the user re-pinned it, discovery moved, or
+         * sk.tls flipped): tear the old socket down so the code below
+         * re-dials. */
+        if (same && !atomic_load(&g.ws_ended)) return;
+        if (same) {
+            if (g.ws_connected_once && esp_timer_get_time() - s_ws_up_at > WS_STABLE_US)
+                s_ws_round = 0;
+            else if (s_ws_round)
+                s_ws_round--; /* undo the dial-time increment */
+            ws_schedule_retry();
+            ESP_LOGI(TAG, "control WS ended - re-dialling in %lld ms",
+                     (long long)((s_ws_retry_at - esp_timer_get_time()) / 1000));
+        }
+        ws_destroy();
+    }
+    if (esp_timer_get_time() < s_ws_retry_at) return;
+    /* Until this attempt is known to work, a failure on the way waits too. */
+    ws_schedule_retry();
+    snprintf(s_ws_host, sizeof(s_ws_host), "%s", srv.host);
+    s_ws_port = srv.port;
+    s_ws_tls = srv.tls;
 
     char url[ESPOS_SK_URL_MAX];
     if (espos_sk_ws_url(WS_PATH, url, sizeof(url)) != ESP_OK) return;
@@ -674,7 +780,7 @@ static void ws_connect(void)
         /* Roomy enough that a large gatt_subscribe arrives in one frame; the
          * implementation this replaces used 1 KB and could not reassemble. */
         .buffer_size = CONFIG_ESPOS_BLE_WS_BUFFER,
-        .reconnect_timeout_ms = 5000,
+        .disable_auto_reconnect = true,
         .network_timeout_ms = 10000,
 #if CONFIG_ESPOS_SK_TLS
         /* wss trusts exactly what the delta stream trusts: the shared hook
@@ -684,13 +790,24 @@ static void ws_connect(void)
         .skip_cert_common_name_check = srv.tls && espos_sk_tls_trust_mode() != ESPOS_SK_TLS_TRUST_BUNDLE,
 #endif
     };
-    g.ws = esp_websocket_client_init(&cfg);
-    if (!g.ws) return;
-    esp_websocket_register_events(g.ws, WEBSOCKET_EVENT_ANY, ws_event, NULL);
-    esp_websocket_client_start(g.ws);
-    snprintf(s_ws_host, sizeof(s_ws_host), "%s", srv.host);
-    s_ws_port = srv.port;
-    s_ws_tls = srv.tls;
+    uint32_t th = token_hash(token);
+    if (th != s_ws_token_hash) {
+        s_ws_token_hash = th;
+        atomic_store(&g.ws_unauth_reported, false);
+    }
+    atomic_store(&g.ws_ended, false);
+    atomic_store(&g.ws_sent_token, token[0] != '\0');
+    g.ws_connected_once = false;
+    esp_websocket_client_handle_t h = esp_websocket_client_init(&cfg);
+    if (!h) return;
+    esp_websocket_register_events(h, WEBSOCKET_EVENT_ANY, ws_event, NULL);
+    xSemaphoreTake(s_ws_lock, portMAX_DELAY);
+    g.ws = h;
+    xSemaphoreGive(s_ws_lock);
+    if (esp_websocket_client_start(h) != ESP_OK) {
+        ESP_LOGW(TAG, "control WS client did not start");
+        ws_destroy();
+    }
 }
 
 /* ---------------------------------------------------------------- */
@@ -850,10 +967,7 @@ static void gateway_task(void *arg)
              * stale handle. It is re-dialled from scratch above once the SK
              * link is back, so a server change is picked up. */
             ESP_LOGI(TAG, "SignalK link down - closing the control WS");
-            esp_websocket_client_stop(g.ws);
-            esp_websocket_client_destroy(g.ws);
-            g.ws = NULL;
-            g.ws_connected = false;
+            ws_destroy();
         }
 
         /* Init-write watchdog: a peripheral that never answers must not pin a
@@ -1047,6 +1161,7 @@ esp_err_t espos_ble_start(void)
              ring_external ? "external" : "internal");
     espos_ble_advq_init(&g.q, g.storage, (size_t)cap);
 
+    if (!s_ws_lock) s_ws_lock = xSemaphoreCreateMutexStatic(&s_ws_lock_buf);
     g.lock = xSemaphoreCreateMutex();
     g.sess_lock = xSemaphoreCreateMutex();
     if (!g.lock || !g.sess_lock) {
@@ -1404,10 +1519,7 @@ esp_err_t espos_ble_stop(void)
     g.task = NULL;
 
     if (g.ws) {
-        esp_websocket_client_stop(g.ws);
-        esp_websocket_client_destroy(g.ws);
-        g.ws = NULL;
-        g.ws_connected = false;
+        ws_destroy();
     }
 
     /* Close any live session and release its allocations - a stop/start cycle
