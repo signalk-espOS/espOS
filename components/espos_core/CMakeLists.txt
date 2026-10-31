@@ -76,8 +76,8 @@ if(_have_prov AND NOT target STREQUAL "linux")
     target_compile_definitions(${COMPONENT_LIB} PRIVATE ESPOS_HAVE_PROV=1)
 endif()
 
-# Ethernet, same shape. The source additionally needs CONFIG_ETH_USE_ESP32_EMAC
-# (a chip without an internal EMAC links only espos_eth's stubs) and the
+# Ethernet, same shape. The source additionally needs a controller from menu
+# "espOS Ethernet" (without one espos_eth links only stubs) and the
 # CONFIG_ESPOS_ETH switch.
 espos_has_component(_have_eth espos_eth)
 if(_have_eth AND NOT target STREQUAL "linux")

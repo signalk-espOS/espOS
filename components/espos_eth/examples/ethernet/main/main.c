@@ -8,7 +8,8 @@
  * the board's wiring and one PoE cable is both power and network. espos_eth
  * brings the internal EMAC and the PHY up, DHCP hands out an address, and
  * espos_net routes everything -- SignalK, OTA, the web UI, mDNS -- over the
- * cable.
+ * cable. On an ESP32-S3 it is built for the Waveshare ESP32-S3-ETH-8DI-8RO-C
+ * and its W5500 on SPI instead (sdkconfig.defaults.esp32s3).
  *
  * WiFi is off in this example's sdkconfig.defaults, and that is what makes it
  * an Ethernet device rather than a WiFi device that happens to have a port.
