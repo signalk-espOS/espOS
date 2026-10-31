@@ -15,6 +15,23 @@ pull request. The `[Unreleased]` block below was written by hand before the
 switch; its entries belong to the next feature release and are folded into
 that section when it is cut.
 
+## 0.26.0 (2026-10-31)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Added
+* feat(tone): add espos_tone, RTTTL event tones with a hardware-free player by @humppafreak in https://github.com/signalk-espOS/espOS/pull/276
+* feat(sk): send an espOS User-Agent to the server by @dirkwa in https://github.com/signalk-espOS/espOS/pull/283
+### Fixed
+* fix(wifi): restart once when the station never connects by @dirkwa in https://github.com/signalk-espOS/espOS/pull/282
+* fix(ble): re-dial the control socket after a server close by @dirkwa in https://github.com/signalk-espOS/espOS/pull/284
+
+## New Contributors
+* @humppafreak made their first contribution in https://github.com/signalk-espOS/espOS/pull/276
+
+**Full Changelog**: https://github.com/signalk-espOS/espOS/compare/v0.25.2...v0.26.0
+
 ## 0.25.2 (2026-10-29)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
