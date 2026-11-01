@@ -60,7 +60,7 @@ export function BlePage() {
               <Row k="Advertisements">{ble.adv_received} received <span class="muted">· {ble.scan_hits} seen by the radio</span></Row>
               {starved > 0 && <Msg kind="warn" text={`${starved} advertisements never reached the gateway — the intake callback is being starved.`} />}
               <Row k="Buffer">{ble.adv_pending} pending{ble.adv_dropped > 0 && <> · <span class="bad">{ble.adv_dropped} dropped</span></>}</Row>
-              {ble.adv_dropped > 0 && <Msg kind="warn" text="Advertisements are being shed: they arrive faster than they reach the server. Check the link to the server and the failures; a bigger buffer only bridges a short outage." />}
+              {ble.adv_dropped > 0 && <Msg kind="warn" text="Advertisements were dropped since the gateway started: they arrived faster than they reached the server. If the count keeps rising, check the link to the server and the failures; a bigger buffer only bridges a short outage." />}
             </>
           ) : <p class="muted">No status yet.</p>}
         </section>
