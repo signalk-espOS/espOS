@@ -933,8 +933,10 @@ what a device *is* remains a server-side concern.
   starved.
 * `adv_pending` is the ring buffer's depth and `adv_dropped` the running total
   shed once it is full (oldest first). Sustained growth in `adv_dropped` means
-  the POST interval or the buffer is too small for the local radio traffic —
-  it is a real count, not an estimate.
+  advertisements arrive faster than they reach the server: the link is down,
+  POSTs fail, or the server is slow. While POSTs succeed, a full batch is
+  posted as soon as it is waiting, so a shorter interval does not help. It is
+  a real count, not an estimate.
 * `post_fail` counts POSTs the server refused or that never completed; a 401
   or 403 is reported to `espos_sk`, which owns the token, rather than
   triggering a second access request from here.
