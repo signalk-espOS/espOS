@@ -17,6 +17,7 @@
       "type": "bool",
       "default": false,
       "title": "Active scan",
+      "restart_required": true,
       "description": "Request scan responses (more data per device, more airtime). Leave off on the ESP32-P4: active scan needs the C6 co-processor to transmit SCAN_REQ over SDIO, which is unreliable and can silence advertisements entirely."
     },
     {
@@ -26,7 +27,8 @@
       "min": 3,
       "max": 10240,
       "unit": "ms",
-      "title": "Scan interval"
+      "title": "Scan interval",
+      "restart_required": true
     },
     {
       "name": "scan_win_ms",
@@ -36,6 +38,7 @@
       "max": 10240,
       "unit": "ms",
       "title": "Scan window",
+      "restart_required": true,
       "description": "Listening time per interval. Must not exceed the interval; window/interval is the duty cycle."
     },
     {
@@ -45,6 +48,7 @@
       "min": 250,
       "max": 60000,
       "unit": "ms",
+      "restart_required": true,
       "title": "POST interval",
       "description": "How often buffered advertisements are forwarded to the server."
     },
@@ -56,6 +60,7 @@
       "max": 600000,
       "unit": "ms",
       "title": "Status interval",
+      "restart_required": true,
       "description": "How often a status frame goes out on the control WebSocket."
     },
     {
@@ -65,6 +70,7 @@
       "min": 10,
       "max": 5000,
       "title": "Advertisement buffer",
+      "restart_required": true,
       "description": "Advertisements held between POSTs. When full the oldest are dropped and counted, so a slow or absent server cannot exhaust memory. The buffer is one contiguous block of about 128 B per entry, allocated at start: where the heap cannot spare it the gateway logs a warning and uses a smaller buffer rather than failing to start, so on a small-RAM board the effective size may be well below this."
     },
     {
@@ -82,6 +88,7 @@
       "min": 0,
       "max": 3,
       "title": "Max GATT connections",
+      "restart_required": true,
       "description": "Concurrent GATT connections advertised to the server. The Bluedroid GATT client supports at most 3."
     }
   ]
