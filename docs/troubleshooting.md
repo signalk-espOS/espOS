@@ -211,11 +211,15 @@ Three places answer most questions before you get here:
 **`Failed to create socket` or `httpd_accept_conn: error in accept (23)` in the log**
 :   The device has run out of sockets (23 is "too many open files"). The web
     server, the delta stream and every call to the server share one table of
-    `CONFIG_LWIP_MAX_SOCKETS`. espOS sets 16 in `sdkconfig.d/espos.defaults`.
-    A firmware that restates IDF's 10 in its own defaults runs out as soon as
-    a browser holds a few connections to the web UI, and the device's own
-    calls to the server fail until the browser lets go. Remove the override,
-    or raise it if the firmware opens connections of its own.
+    `CONFIG_LWIP_MAX_SOCKETS`. At IDF's 10 the table runs out as soon as a
+    browser holds a few connections to the web UI, and the device's own calls
+    to the server fail until the browser lets go. Check the value in the
+    build's `sdkconfig`:
+
+    * below 16, the firmware was built with an espOS from before 16 became
+      the default (the build now stops on anything lower): update espOS;
+    * at 16 or more, the firmware opens connections of its own on top of
+      espOS's: raise it in the firmware's `sdkconfig.defaults`.
 
 **A PUT comes back `COMPLETED` with `statusCode 405 "PUT not supported for …"`**
 :   That is the server's real answer: no plugin on the server handles PUTs for
