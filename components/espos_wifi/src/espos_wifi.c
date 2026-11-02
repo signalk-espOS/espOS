@@ -56,7 +56,8 @@ static struct {
                ACT_CONNECT,
                ACT_DISCONNECT,
                ACT_PORTAL_START,
-               ACT_PORTAL_STOP } type;
+               ACT_PORTAL_STOP,
+               ACT_FRESH_RECONNECT } type;
         espos_wifi_net_t net;
     } actions[8];
     size_t action_head, action_count;
@@ -438,6 +439,14 @@ static void drain_all_locked(void)
             p->portal_stop(NULL);
             espos_event_post(ESPOS_EVENT_PORTAL_DOWN, NULL, 0);
             break;
+        case ACT_FRESH_RECONNECT:
+            if (s.drv->fresh_reconnect && s.drv->fresh_reconnect() != ESP_OK) {
+                int reason = ESPOS_WIFI_REASON_CONNECT_TIMEOUT;
+                lock();
+                espos_wifi_sm_event(&s.sm, ESPOS_WIFI_EV_STA_DISCONNECTED, &reason);
+                unlock();
+            }
+            break;
         default:
             break;
         }
@@ -451,6 +460,17 @@ void espos_wifi_dispatch(espos_wifi_event_t ev, const void *arg)
     }
     lock();
     espos_wifi_sm_event(&s.sm, ev, arg);
+    unlock();
+    drain();
+}
+
+void espos_wifi_request_fresh_reconnect(void)
+{
+    if (!s.lock || !s.sm_ready) {
+        return;
+    }
+    lock();
+    queue_action(ACT_FRESH_RECONNECT, NULL);
     unlock();
     drain();
 }

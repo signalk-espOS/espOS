@@ -52,7 +52,7 @@ static atomic_bool s_fresh_enabled;
  * machine has taken the radio back (or let it go) in between, from another task,
  * and a reconnect would act behind its back. */
 static atomic_uint s_sm_radio_gen;
-static unsigned s_fresh_gen; /* event task only */
+static atomic_uint s_fresh_gen;
 
 /* Last AP we actually associated with, remembered across a disconnect so the
  * next attempts can go straight to it instead of scanning every channel first.
@@ -128,9 +128,15 @@ void espos_wifi_portal_dns_stop(void);
 /* Straight back to the AP we just left, on its channel, without a scan. The
  * state machine is still in CONNECTING with its connect timeout running, so if
  * this fails the disconnect or the timeout reaches it as a failed attempt and
- * its next p_connect() writes the full configuration again. */
-static void reconnect_fresh(void)
+ * its next p_connect() writes the full configuration again. Run by the drainer
+ * (espos_wifi.c), so no connect or disconnect of the state machine's can slip
+ * in between the generation check and esp_wifi_connect(), and the blocking
+ * driver calls stay where the state machine's own do. */
+static esp_err_t d_fresh_reconnect(void)
 {
+    if (atomic_load(&s_sm_radio_gen) != atomic_load(&s_fresh_gen)) {
+        return ESP_OK; /* the state machine has taken the radio since the drop */
+    }
     wifi_config_t cfg;
     if (esp_wifi_get_config(WIFI_IF_STA, &cfg) == ESP_OK && s_last_ap.channel) {
         cfg.sta.bssid_set = true;
@@ -142,9 +148,8 @@ static void reconnect_fresh(void)
     esp_err_t err = esp_wifi_connect();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_wifi_connect: %s", esp_err_to_name(err));
-        int reason = ESPOS_WIFI_REASON_CONNECT_TIMEOUT;
-        espos_wifi_dispatch(ESPOS_WIFI_EV_STA_DISCONNECTED, &reason);
     }
+    return err;
 }
 
 static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data)
@@ -180,7 +185,7 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
              * report, and its address must not be swallowed as the dropped one's. */
             (void)espos_wifi_fresh_on_connected(&s_fresh, false);
         } else if (espos_wifi_fresh_armed(&s_fresh)) {
-            s_fresh_gen = atomic_load(&s_sm_radio_gen);
+            atomic_store(&s_fresh_gen, atomic_load(&s_sm_radio_gen));
             if (espos_wifi_fresh_on_connected(&s_fresh, atomic_load(&s_fresh_enabled))) {
                 ESP_LOGI(TAG, "dropping the first association so the access point starts a fresh one");
                 if (esp_wifi_disconnect() == ESP_OK) {
@@ -204,9 +209,7 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
              * state machine's that never echoed can leave set: the drop's echo
              * would be swallowed as that one's and nothing would reconnect. */
             s_disconnect_requested = false;
-            if (atomic_load(&s_sm_radio_gen) == s_fresh_gen) {
-                reconnect_fresh();
-            }
+            espos_wifi_request_fresh_reconnect();
             break;
         }
         if (s_disconnect_requested && reason == WIFI_REASON_ASSOC_LEAVE) {
@@ -728,6 +731,7 @@ static const espos_wifi_driver_t k_driver = {
     .set_ps = d_set_ps,
     .portal_ip = PORTAL_IP,
     .stall_latch = &s_stall_latch,
+    .fresh_reconnect = d_fresh_reconnect,
 };
 
 const espos_wifi_driver_t *espos_wifi_driver(void)
