@@ -71,7 +71,7 @@ endif()
 # leaves none for the calls to the server (espos.defaults).
 if(DEFINED CONFIG_LWIP_MAX_SOCKETS AND CONFIG_LWIP_MAX_SOCKETS LESS 16)
     _espos_lint_report(
-        "CONFIG_LWIP_MAX_SOCKETS=${CONFIG_LWIP_MAX_SOCKETS}: espos_httpd may hold 7 clients and 3 sockets of its own, and the delta stream, espOS's HTTP calls to the server, the BLE gateway's control socket and an OTA download share the same table. Below 16 a browser with the web UI open leaves the device's own calls none: \"Failed to create socket\" in the log, and accept() failing with ENFILE."
+        "CONFIG_LWIP_MAX_SOCKETS=${CONFIG_LWIP_MAX_SOCKETS}: espos_httpd may hold 7 clients and 3 sockets of its own, the setup portal's DNS responder holds 1, and the delta stream, espOS's HTTP calls to the server, the BLE gateway's control socket and an OTA download share the same table. Below 16 a browser with the web UI open can take the sockets the device's own calls need: \"Failed to create socket\" in the log, and accept() failing with ENFILE."
         "CONFIG_LWIP_MAX_SOCKETS=16")
 endif()
 
