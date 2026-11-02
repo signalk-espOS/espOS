@@ -171,7 +171,11 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
         /* The state machine is not told about this association (wifi_fresh.c).
          * Put off while a disconnect of the state machine's is unanswered: the
          * echo of ours would be taken for that one and never reconnect. */
-        if (espos_wifi_fresh_armed(&s_fresh) && !s_disconnect_requested) {
+        if (espos_wifi_fresh_pending(&s_fresh)) {
+            /* The echo of the drop never came: this association is the one to
+             * report, and its address must not be swallowed as the dropped one's. */
+            (void)espos_wifi_fresh_on_connected(&s_fresh, false);
+        } else if (espos_wifi_fresh_armed(&s_fresh) && !s_disconnect_requested) {
             if (espos_wifi_fresh_on_connected(&s_fresh, atomic_load(&s_fresh_enabled))) {
                 ESP_LOGI(TAG, "dropping the first association so the access point starts a fresh one");
                 if (esp_wifi_disconnect() == ESP_OK) {
