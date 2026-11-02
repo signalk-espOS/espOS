@@ -26,6 +26,7 @@
 #include "espos_config.h"
 #include "espos_net.h"
 #include "espos_wifi_priv.h"
+#include "wifi_fresh.h"
 #include "wifi_ps.h"
 
 static const char *TAG = "espos_wifi";
@@ -40,6 +41,7 @@ static bool s_portal_up;
 static int s_portal_clients;
 static bool s_inited;
 static char s_ssid[33];     /* of the current association, for the GOT_IP line */
+static espos_wifi_fresh_t s_fresh; /* wifi.fresh_assoc */
 
 /* Last AP we actually associated with, remembered across a disconnect so the
  * next attempts can go straight to it instead of scanning every channel first.
@@ -112,6 +114,28 @@ void espos_wifi_portal_dns_stop(void);
 
 /* ----------------------------------------------------------- events */
 
+/* Straight back to the AP we just left, on its channel, without a scan. The
+ * state machine is still in CONNECTING with its connect timeout running, so if
+ * this fails the disconnect or the timeout reaches it as a failed attempt and
+ * its next p_connect() writes the full configuration again. */
+static void reconnect_fresh(void)
+{
+    wifi_config_t cfg;
+    if (esp_wifi_get_config(WIFI_IF_STA, &cfg) == ESP_OK && s_last_ap.channel) {
+        cfg.sta.bssid_set = true;
+        memcpy(cfg.sta.bssid, s_last_ap.bssid, 6);
+        cfg.sta.channel = s_last_ap.channel;
+        cfg.sta.scan_method = WIFI_FAST_SCAN;
+        (void)esp_wifi_set_config(WIFI_IF_STA, &cfg);
+    }
+    esp_err_t err = esp_wifi_connect();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_wifi_connect: %s", esp_err_to_name(err));
+        int reason = ESPOS_WIFI_REASON_CONNECT_TIMEOUT;
+        espos_wifi_dispatch(ESPOS_WIFI_EV_STA_DISCONNECTED, &reason);
+    }
+}
+
 static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     (void)arg;
@@ -139,6 +163,20 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
          * path forever and never falls back to the full scan that might find a
          * usable AP. Associating is not the same as working. */
         espos_wifi_last_ap_store(&s_last_ap, link.ssid, e->bssid, e->channel);
+        /* The state machine is not told about this association (wifi_fresh.c).
+         * Put off while a disconnect of the state machine's is unanswered: the
+         * echo of ours would be taken for that one and never reconnect. */
+        if (espos_wifi_fresh_armed(&s_fresh) && !s_disconnect_requested) {
+            bool fresh = false;
+            espos_config_get_bool(ESPOS_CFG_NS_WIFI, ESPOS_CFG_WIFI_FRESH_ASSOC, &fresh);
+            if (espos_wifi_fresh_on_connected(&s_fresh, fresh)) {
+                ESP_LOGI(TAG, "dropping the first association so the access point starts a fresh one");
+                if (esp_wifi_disconnect() == ESP_OK) {
+                    break;
+                }
+                espos_wifi_fresh_cancel(&s_fresh);
+            }
+        }
         wifi_ap_record_t ap;
         if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
             link.rssi = ap.rssi; /* we are on the event task, not under the SM lock */
@@ -153,6 +191,10 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
             /* the echo of our own esp_wifi_disconnect(); the SM already moved on */
             s_disconnect_requested = false;
             ESP_LOGD(TAG, "swallowing our own disconnect echo");
+            break;
+        }
+        if (espos_wifi_fresh_on_disconnected(&s_fresh, reason == WIFI_REASON_ASSOC_LEAVE)) {
+            reconnect_fresh();
             break;
         }
         ESP_LOGW(TAG, "disconnected: %d (%s)", reason, espos_wifi_reason_str(reason));
@@ -216,6 +258,11 @@ static void on_ip_event(void *arg, esp_event_base_t base, int32_t id, void *data
     (void)arg;
     (void)base;
     if (id == IP_EVENT_STA_GOT_IP) {
+        if (espos_wifi_fresh_pending(&s_fresh)) {
+            /* A static address is "leased" on association, the dropped one
+             * included: neither a connection nor a reason to refill the budget. */
+            return;
+        }
         /* A usable connection, not merely an association: this is what earns
          * the fast-reconnect budget back. See the STA_CONNECTED handler for why
          * it is not refilled there. */
@@ -318,6 +365,7 @@ static esp_err_t p_connect(void *ctx, const espos_wifi_net_t *net)
     /* NB: s_disconnect_requested is deliberately left as is: the echo of a
      * disconnect issued just before this connect (same drain) still has to
      * be swallowed when it arrives during the new attempt. */
+    espos_wifi_fresh_cancel(&s_fresh);
     apply_ip_mode();
     wifi_config_t cfg = { 0 };
     /* wifi_sta_config_t: ssid[32] / password[64] need not be NUL-terminated
@@ -378,6 +426,7 @@ static esp_err_t p_connect(void *ctx, const espos_wifi_net_t *net)
 static esp_err_t p_disconnect(void *ctx)
 {
     (void)ctx;
+    espos_wifi_fresh_cancel(&s_fresh);
     s_disconnect_requested = true;
     esp_err_t err = esp_wifi_disconnect();
     if (err != ESP_OK) {
