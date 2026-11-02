@@ -143,7 +143,11 @@ static esp_err_t d_fresh_reconnect(void)
         memcpy(cfg.sta.bssid, s_last_ap.bssid, 6);
         cfg.sta.channel = s_last_ap.channel;
         cfg.sta.scan_method = WIFI_FAST_SCAN;
-        (void)esp_wifi_set_config(WIFI_IF_STA, &cfg);
+        esp_err_t cfg_err = esp_wifi_set_config(WIFI_IF_STA, &cfg);
+        if (cfg_err != ESP_OK) {
+            /* the connect still runs, with a scan instead of the pinned AP */
+            ESP_LOGW(TAG, "esp_wifi_set_config: %s", esp_err_to_name(cfg_err));
+        }
     }
     esp_err_t err = esp_wifi_connect();
     if (err != ESP_OK) {
