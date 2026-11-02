@@ -73,9 +73,8 @@ endif()
 # consumers are sized by Kconfig, so the floor follows them: 11 fixed
 # (espos_httpd's 4 base clients and 3 of its own, the portal DNS responder,
 # the delta stream, the BLE control socket, an OTA download) plus the
-# event-stream clients and espos_sk's concurrent HTTP calls. A component not
-# in the build counts at its default, so the floor never drops below the 16
-# espos.defaults sets.
+# event-stream clients and espos_sk's concurrent HTTP calls, which is 16 at
+# the defaults. A component not in the build counts at its default.
 set(_espos_sse_clients 3)
 if(DEFINED CONFIG_ESPOS_HTTPD_SSE_MAX_CLIENTS)
     set(_espos_sse_clients ${CONFIG_ESPOS_HTTPD_SSE_MAX_CLIENTS})
