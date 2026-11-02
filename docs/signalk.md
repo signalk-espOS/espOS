@@ -907,7 +907,8 @@ isn't running (Signal K not started, or the sink couldn't register), and
   too long is refused with `ESP_ERR_INVALID_SIZE` rather than cut short,
   because a shortened key would never match the next call. While offline,
   notifications are buffered like any other delta.
-* **Every connect restates every condition**, cleared ones included. The
+* **Every connect restates every condition**, cleared ones included, and so
+  does a config reload while connected (a rename moves the paths). The
   offline buffer drops its oldest deltas when it fills, and a server restart
   forgets every notification, so without this a lost clear would leave a
   warning on the server for good, and a warning that is still true would

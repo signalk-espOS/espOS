@@ -176,7 +176,7 @@ TEST_CASE("replay restates every condition, NORMAL included", "[health]")
     espos_health_report("n2kBus", ESPOS_HEALTH_ALARM, "bus off");
     TEST_ASSERT_EQUAL_UINT32(3, (uint32_t)s_n);
 
-    espos_health_replay(recorder, NULL);
+    TEST_ASSERT_EQUAL(ESP_OK, espos_health_replay(recorder, NULL));
     TEST_ASSERT_EQUAL_UINT32(5, (uint32_t)s_n);
     TEST_ASSERT_EQUAL_STRING("lowMemory", s_calls[3].key);
     TEST_ASSERT_EQUAL(ESPOS_HEALTH_NORMAL, s_calls[3].state);
@@ -198,6 +198,35 @@ TEST_CASE("replay reaches only the sink it is given", "[health]")
     espos_health_replay(recorder, NULL);
     TEST_ASSERT_EQUAL_UINT32(2, (uint32_t)s_n);
     TEST_ASSERT_EQUAL_UINT32(1, (uint32_t)s_other_n);
+}
+
+/* Not registered: it changes the condition it is being told about, the way a
+ * report from another task can land between replay's copy and its sink call. */
+static size_t s_racing_n;
+static void racing_sink(const char *key, espos_health_state_t state, const char *message, void *arg)
+{
+    (void)arg;
+    recorder(key, state, message, NULL);
+    if (s_racing_n++ == 0) {
+        espos_health_report("n2kBus", ESPOS_HEALTH_NORMAL, "");
+    }
+}
+
+TEST_CASE("a condition that changes during replay is sent again, newest last", "[health]")
+{
+    fresh();
+    s_racing_n = 0;
+    espos_health_report("n2kBus", ESPOS_HEALTH_ALARM, "bus off");
+    TEST_ASSERT_EQUAL(ESP_OK, espos_health_replay(racing_sink, NULL));
+    TEST_ASSERT_EQUAL_UINT32(2, (uint32_t)s_n);
+    TEST_ASSERT_EQUAL(ESPOS_HEALTH_ALARM, s_calls[0].state);
+    TEST_ASSERT_EQUAL(ESPOS_HEALTH_NORMAL, s_calls[1].state);
+}
+
+TEST_CASE("replay refuses a NULL sink", "[health]")
+{
+    fresh();
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, espos_health_replay(NULL, NULL));
 }
 
 TEST_CASE("every registered sink is called", "[health]")

@@ -190,27 +190,41 @@ esp_err_t espos_health_add_sink(espos_health_sink_t sink, void *arg)
      * meanwhile can reach it twice -- harmless, because a condition is a level
      * and not an edge. Losing one would not be, which is why the registration
      * comes first. */
-    espos_health_replay(sink, arg);
+    (void)espos_health_replay(sink, arg);
     return ESP_OK;
 }
 
-void espos_health_replay(espos_health_sink_t sink, void *arg)
+esp_err_t espos_health_replay(espos_health_sink_t sink, void *arg)
 {
-    if (!sink) return;
+    if (!sink) return ESP_ERR_INVALID_ARG;
     /* With the lock released -- same reason as fan_out(). One condition at a
      * time rather than a copy of the whole table: this runs on the caller's
      * task, and a table's worth of conditions is a kilobyte of stack a small
      * task has better uses for. */
     for (size_t i = 0;; i++) {
         espos_health_condition_t c;
-        if (!lock()) break;
+        if (!lock()) return ESP_ERR_TIMEOUT;
         if (i >= s.cond_n) {
             unlock();
-            break;
+            return ESP_OK;
         }
         c = s.cond[i];
         unlock();
-        sink(c.key, c.state, c.message, arg);
+        /* A report that lands between the copy and the sink call fans out on
+         * its own, possibly BEFORE this stale copy reaches the sink, and the
+         * far end would keep the older state. So look again afterwards and
+         * send the newer state once more; a report after that look fans out
+         * after it, and therefore after this call. */
+        for (int pass = 0; pass < 4; pass++) {
+            sink(c.key, c.state, c.message, arg);
+            if (!lock()) return ESP_ERR_TIMEOUT;
+            /* Slots are never freed, only espos_health_reset() empties the table. */
+            bool same = i >= s.cond_n ||
+                        (s.cond[i].state == c.state && strcmp(s.cond[i].message, c.message) == 0);
+            if (!same) c = s.cond[i];
+            unlock();
+            if (same) break;
+        }
     }
 }
 

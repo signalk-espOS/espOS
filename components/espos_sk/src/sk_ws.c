@@ -453,13 +453,19 @@ _Static_assert((int)ESPOS_SK_ALERT_ALARM == (int)ESPOS_HEALTH_ALARM, "alert/heal
 /* Set once the sink is registered, which espos_sk_ws_start() does. */
 static volatile bool s_notify_ready;
 
+/* The sink's arg for a replay, which it logs more quietly than a change. The
+ * registered sink's arg stays NULL. */
+static char s_replay_tag;
+#define HEALTH_REPLAY ((void *)&s_replay_tag)
+
 /* Runs on whichever task reported the condition, with no espos_health lock
  * held. Returns void: a sink cannot fail usefully, and a delta that cannot be
  * published now is the buffer's problem, not the reporter's. */
 static void health_sink(const char *key, espos_health_state_t state,
                         const char *message, void *arg)
 {
-    (void)arg;
+    /* Stopped: a replay already running on ws_task must not publish into it. */
+    if (!s_notify_ready) return;
     const char *st = espos_health_state_str(state);
 
     char path[ESPOS_SK_PATH_MAX];
@@ -484,9 +490,34 @@ static void health_sink(const char *key, espos_health_state_t state,
     cJSON_Delete(v);
     if (!val) return;
 
-    ESP_LOGI(TAG, "notification %s: %s (%s)", key, st, message);
-    espos_sk_publish_json(path, val);
+    /* A replay restates every condition on each connect; logging each one
+     * would push the lines that explain a flapping link out of the log ring. */
+    if (arg == HEALTH_REPLAY) {
+        ESP_LOGD(TAG, "notification %s: %s (%s), restated", key, st, message);
+    } else {
+        ESP_LOGI(TAG, "notification %s: %s (%s)", key, st, message);
+    }
+    esp_err_t err = espos_sk_publish_json(path, val);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "notification %s not queued: %s", key, esp_err_to_name(err));
+    }
     cJSON_free(val);
+}
+
+/* A condition reaches the server only when it changes, so whatever the server
+ * lost since stays lost: a clear dropped from a full offline buffer leaves a
+ * warning there for good, and a server restart forgets a warning that is
+ * still true. Called on every connect and on a config reload while
+ * connected. Queued deltas drain first, so the current state lands last. */
+static void restate_conditions(void)
+{
+    if (!s_notify_ready) return;
+    esp_err_t err = espos_health_replay(health_sink, HEALTH_REPLAY);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "health conditions restated");
+    } else {
+        ESP_LOGW(TAG, "health conditions not all restated: %s", esp_err_to_name(err));
+    }
 }
 
 esp_err_t espos_sk_notify(const char *key, espos_sk_alert_t state, const char *message)
@@ -672,6 +703,13 @@ static void ws_task(void *arg)
         if (s.cfg_dirty) {
             s.cfg_dirty = false;
             load_cfg();
+#if CONFIG_ESPOS_SK_NOTIFICATIONS
+            /* The stream stays up across a reload, yet a rename moves every
+             * notification path and a new buffer size drops what was queued. */
+            if (connected) {
+                restate_conditions();
+            }
+#endif
         }
         /* preconditions: enabled, network up, server + token */
         espos_sk_server_t srv;
@@ -917,15 +955,7 @@ static void ws_task(void *arg)
             set_stream_connected(true);
             publish_status();
 #if CONFIG_ESPOS_SK_NOTIFICATIONS
-            /* A condition is published only when it changes, so whatever the
-             * server lost since then stays lost: a clear dropped from a full
-             * offline buffer leaves a warning on the server for good, and a
-             * server restart forgets a warning that is still true. Every
-             * connect restates them all; the queued deltas drain first, so
-             * the current state lands last. */
-            if (s_notify_ready) {
-                espos_health_replay(health_sink, NULL);
-            }
+            restate_conditions();
 #endif
         }
 
