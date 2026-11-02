@@ -66,6 +66,15 @@ if(DEFINED CONFIG_WS_BUFFER_SIZE AND CONFIG_WS_BUFFER_SIZE LESS 2048)
         "CONFIG_WS_BUFFER_SIZE=2048")
 endif()
 
+# One socket table serves espos_httpd and every connection the device opens
+# itself. At IDF's 10 a browser holding a few connections to the web UI
+# leaves none for the calls to the server (espos.defaults).
+if(DEFINED CONFIG_LWIP_MAX_SOCKETS AND CONFIG_LWIP_MAX_SOCKETS LESS 16)
+    _espos_lint_report(
+        "CONFIG_LWIP_MAX_SOCKETS=${CONFIG_LWIP_MAX_SOCKETS}: espos_httpd may hold 7 clients and 3 sockets of its own, the setup portal's DNS responder holds 1, and the delta stream, espOS's HTTP calls to the server, the BLE gateway's control socket and an OTA download share the same table. Below 16 a browser with the web UI open can take the sockets the device's own calls need: \"Failed to create socket\" in the log, and accept() failing with ENFILE."
+        "CONFIG_LWIP_MAX_SOCKETS=16")
+endif()
+
 if(CONFIG_IDF_TARGET STREQUAL "esp32p4")
     # From espos.defaults.esp32p4: without PSRAM, esp_hosted's startup
     # allocations leave so little internal RAM that FreeRTOS cannot allocate
