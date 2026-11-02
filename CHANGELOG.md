@@ -15,6 +15,17 @@ pull request. The `[Unreleased]` block below was written by hand before the
 switch; its entries belong to the next feature release and are folded into
 that section when it is cut.
 
+## 0.26.1 (2026-11-02)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Fixed
+* fix(ble): say a restart is needed for the settings read at start by @dirkwa in https://github.com/signalk-espOS/espOS/pull/287
+
+
+**Full Changelog**: https://github.com/signalk-espOS/espOS/compare/v0.26.0...v0.26.1
+
 ## 0.26.0 (2026-10-31)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
