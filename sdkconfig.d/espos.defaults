@@ -46,7 +46,9 @@ CONFIG_HTTPD_ERR_RESP_NO_DELAY=y
 # control socket 1 and an OTA download 1. At 10 a browser with the web UI
 # open left nothing for the outgoing calls: a P4 BLE gateway logged
 # "Failed to create socket" on every advertisement POST for a minute after
-# boot. 16 covers all of it.
+# boot. 16 covers all of it at the defaults; each event-stream client or
+# concurrent HTTP call a firmware adds needs one more, and the consumer lint
+# in espos_core/project_include.cmake asks for the sum.
 # A slot costs a few dozen bytes; an open connection costs the same either way.
 CONFIG_LWIP_MAX_SOCKETS=16
 

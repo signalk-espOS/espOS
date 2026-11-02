@@ -9,7 +9,8 @@
 # CONFIG_PARTITION_TABLE_CUSTOM).
 #
 # A firmware that includes cmake/espos_project.cmake inherits every value
-# checked below from sdkconfig.d/espos.defaults and never trips this. It is
+# checked below from sdkconfig.d/espos.defaults and never trips this, unless
+# it raises a limit a check is sized by (the socket floor below). It is
 # for the project that installs espOS's components from the registry and
 # writes its own CMakeLists.txt: without the shared defaults its sdkconfig is
 # IDF's, and the settings below are the ones whose absence does not show
@@ -68,11 +69,27 @@ endif()
 
 # One socket table serves espos_httpd and every connection the device opens
 # itself. At IDF's 10 a browser holding a few connections to the web UI
-# leaves none for the calls to the server (espos.defaults).
-if(DEFINED CONFIG_LWIP_MAX_SOCKETS AND CONFIG_LWIP_MAX_SOCKETS LESS 16)
+# leaves none for the calls to the server (espos.defaults). Two of the
+# consumers are sized by Kconfig, so the floor follows them: 11 fixed
+# (espos_httpd's 4 base clients and 3 of its own, the portal DNS responder,
+# the delta stream, the BLE control socket, an OTA download) plus the
+# event-stream clients and espos_sk's concurrent HTTP calls. A component not
+# in the build counts at its default, so the floor never drops below the 16
+# espos.defaults sets.
+set(_espos_sse_clients 3)
+if(DEFINED CONFIG_ESPOS_HTTPD_SSE_MAX_CLIENTS)
+    set(_espos_sse_clients ${CONFIG_ESPOS_HTTPD_SSE_MAX_CLIENTS})
+endif()
+set(_espos_sk_http 2)
+if(DEFINED CONFIG_ESPOS_SK_HTTP_MAX_CONCURRENT)
+    set(_espos_sk_http ${CONFIG_ESPOS_SK_HTTP_MAX_CONCURRENT})
+endif()
+math(EXPR _espos_httpd_clients "4 + ${_espos_sse_clients}")
+math(EXPR _espos_min_sockets "11 + ${_espos_sse_clients} + ${_espos_sk_http}")
+if(DEFINED CONFIG_LWIP_MAX_SOCKETS AND CONFIG_LWIP_MAX_SOCKETS LESS ${_espos_min_sockets})
     _espos_lint_report(
-        "CONFIG_LWIP_MAX_SOCKETS=${CONFIG_LWIP_MAX_SOCKETS}: espos_httpd may hold 7 clients and 3 sockets of its own, the setup portal's DNS responder holds 1, and the delta stream, espOS's HTTP calls to the server, the BLE gateway's control socket and an OTA download share the same table. Below 16 a browser with the web UI open can take the sockets the device's own calls need: \"Failed to create socket\" in the log, and accept() failing with ENFILE."
-        "CONFIG_LWIP_MAX_SOCKETS=16")
+        "CONFIG_LWIP_MAX_SOCKETS=${CONFIG_LWIP_MAX_SOCKETS}: espos_httpd may hold ${_espos_httpd_clients} clients (4 + CONFIG_ESPOS_HTTPD_SSE_MAX_CLIENTS) and 3 sockets of its own, the setup portal's DNS responder holds 1, and the delta stream, espOS's HTTP calls to the server (up to CONFIG_ESPOS_SK_HTTP_MAX_CONCURRENT=${_espos_sk_http}), the BLE gateway's control socket and an OTA download share the same table: ${_espos_min_sockets} in all. Below that a browser with the web UI open can take the sockets the device's own calls need: \"Failed to create socket\" in the log, and accept() failing with ENFILE."
+        "CONFIG_LWIP_MAX_SOCKETS=${_espos_min_sockets}")
 endif()
 
 if(CONFIG_IDF_TARGET STREQUAL "esp32p4")
@@ -371,6 +388,10 @@ unset(_espos_lint_problems)
 unset(_espos_lint_lines)
 unset(_espos_need)
 unset(_espos_stack)
+unset(_espos_sse_clients)
+unset(_espos_sk_http)
+unset(_espos_httpd_clients)
+unset(_espos_min_sockets)
 unset(_espos_table)
 unset(_espos_rows)
 unset(_espos_cols)

@@ -217,7 +217,9 @@ Three places answer most questions before you get here:
     build's `sdkconfig`:
 
     * below 16, the firmware was built with an espOS from before 16 became
-      the default (the build now stops on anything lower): update espOS;
+      the default (the build now stops on anything lower, and asks for more
+      when the firmware raises `CONFIG_ESPOS_HTTPD_SSE_MAX_CLIENTS` or
+      `CONFIG_ESPOS_SK_HTTP_MAX_CONCURRENT`): update espOS;
     * at 16 or more, the firmware opens connections of its own on top of
       espOS's: raise it in the firmware's `sdkconfig.defaults`.
 
