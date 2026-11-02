@@ -448,7 +448,16 @@ static void drain_all_locked(void)
             p->portal_stop(NULL);
             espos_event_post(ESPOS_EVENT_PORTAL_DOWN, NULL, 0);
             break;
-        case ACT_FRESH_RECONNECT:
+        case ACT_FRESH_RECONNECT: {
+            /* A connect or disconnect the machine queued after this one has
+             * taken the radio over: a disabled station must not be joined
+             * again, nor its disconnect wait behind the driver call. */
+            lock();
+            bool current = s.radio_gen == queued_gen && s.sm.st.state == ESPOS_WIFI_ST_CONNECTING;
+            unlock();
+            if (!current) {
+                break;
+            }
             if (s.drv->fresh_reconnect && s.drv->fresh_reconnect() != ESP_OK) {
                 /* Only against the attempt it was queued in: while it ran, a
                  * timer or config change may have started a newer one, which
@@ -461,6 +470,7 @@ static void drain_all_locked(void)
                 unlock();
             }
             break;
+        }
         default:
             break;
         }
