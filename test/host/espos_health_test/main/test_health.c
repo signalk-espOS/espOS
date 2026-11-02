@@ -165,6 +165,41 @@ TEST_CASE("a late sink is told the current state on registration", "[health]")
     TEST_ASSERT_EQUAL_STRING("lowMemory", s_calls[1].key);
 }
 
+/* espos_sk restates every condition on each stream connect, because the
+ * server may have lost a clear it was sent while the stream was down. */
+TEST_CASE("replay restates every condition, NORMAL included", "[health]")
+{
+    fresh();
+    espos_health_add_sink(recorder, NULL);
+    espos_health_report("lowMemory", ESPOS_HEALTH_WARN, "heap low");
+    espos_health_report("lowMemory", ESPOS_HEALTH_NORMAL, "");
+    espos_health_report("n2kBus", ESPOS_HEALTH_ALARM, "bus off");
+    TEST_ASSERT_EQUAL_UINT32(3, (uint32_t)s_n);
+
+    espos_health_replay(recorder, NULL);
+    TEST_ASSERT_EQUAL_UINT32(5, (uint32_t)s_n);
+    TEST_ASSERT_EQUAL_STRING("lowMemory", s_calls[3].key);
+    TEST_ASSERT_EQUAL(ESPOS_HEALTH_NORMAL, s_calls[3].state);
+    TEST_ASSERT_EQUAL_STRING("n2kBus", s_calls[4].key);
+    TEST_ASSERT_EQUAL(ESPOS_HEALTH_ALARM, s_calls[4].state);
+    TEST_ASSERT_EQUAL_STRING("bus off", s_calls[4].message);
+
+    /* Replaying does not count as a change: the next identical report stays quiet. */
+    espos_health_report("n2kBus", ESPOS_HEALTH_ALARM, "bus off");
+    TEST_ASSERT_EQUAL_UINT32(5, (uint32_t)s_n);
+}
+
+TEST_CASE("replay reaches only the sink it is given", "[health]")
+{
+    fresh();
+    espos_health_add_sink(recorder, NULL);
+    espos_health_add_sink(other_sink, NULL);
+    espos_health_report("n2kBus", ESPOS_HEALTH_WARN, "quiet");
+    espos_health_replay(recorder, NULL);
+    TEST_ASSERT_EQUAL_UINT32(2, (uint32_t)s_n);
+    TEST_ASSERT_EQUAL_UINT32(1, (uint32_t)s_other_n);
+}
+
 TEST_CASE("every registered sink is called", "[health]")
 {
     fresh();

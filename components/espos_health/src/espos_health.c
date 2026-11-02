@@ -186,13 +186,21 @@ esp_err_t espos_health_add_sink(espos_health_sink_t sink, void *arg)
 
     unlock();
 
-    /* Replay with the lock released — same reason as fan_out(). One condition
-     * at a time rather than a copy of the whole table: this runs on the
-     * caller's task, and a table's worth of conditions is a kilobyte of stack
-     * a small task has better uses for. The sink is registered before the
-     * replay starts, so a condition reported meanwhile can reach it twice —
-     * harmless, because a condition is a level and not an edge. Losing one
-     * would not be, which is why the registration comes first. */
+    /* The sink is registered before the replay starts, so a condition reported
+     * meanwhile can reach it twice -- harmless, because a condition is a level
+     * and not an edge. Losing one would not be, which is why the registration
+     * comes first. */
+    espos_health_replay(sink, arg);
+    return ESP_OK;
+}
+
+void espos_health_replay(espos_health_sink_t sink, void *arg)
+{
+    if (!sink) return;
+    /* With the lock released -- same reason as fan_out(). One condition at a
+     * time rather than a copy of the whole table: this runs on the caller's
+     * task, and a table's worth of conditions is a kilobyte of stack a small
+     * task has better uses for. */
     for (size_t i = 0;; i++) {
         espos_health_condition_t c;
         if (!lock()) break;
@@ -204,7 +212,6 @@ esp_err_t espos_health_add_sink(espos_health_sink_t sink, void *arg)
         unlock();
         sink(c.key, c.state, c.message, arg);
     }
-    return ESP_OK;
 }
 
 esp_err_t espos_health_remove_sink(espos_health_sink_t sink, void *arg)

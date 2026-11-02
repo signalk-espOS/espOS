@@ -916,6 +916,17 @@ static void ws_task(void *arg)
             ESP_LOGI(TAG, "stream connected");
             set_stream_connected(true);
             publish_status();
+#if CONFIG_ESPOS_SK_NOTIFICATIONS
+            /* A condition is published only when it changes, so whatever the
+             * server lost since then stays lost: a clear dropped from a full
+             * offline buffer leaves a warning on the server for good, and a
+             * server restart forgets a warning that is still true. Every
+             * connect restates them all; the queued deltas drain first, so
+             * the current state lands last. */
+            if (s_notify_ready) {
+                espos_health_replay(health_sink, NULL);
+            }
+#endif
         }
 
         /* connected: send what is due, read what comes in */
