@@ -238,14 +238,18 @@ and that example puts TLS buffers there; hardware.md says why and what to weigh.
 described in [rest-api.md](rest-api.md). Reading them:
 
 * `scan_hits` == `adv_received` — intake is keeping up.
-* `adv_dropped` rising — advertisements arrive faster than they reach the
-  server. Check the Signal K link first (`GET /api/v1/sk/status`): nothing is
-  posted while it is down. Then `post_fail`: after a failed POST the gateway
-  waits `post_int_ms` before it tries again. While POSTs succeed, the
-  interval is not the limit, because a full batch goes out as soon as it is
-  waiting: `CONFIG_ESPOS_BLE_POST_BATCH_MAX` advertisements (40 by default),
-  or the whole buffer when `max_pend_ads` is smaller. A larger
-  `max_pend_ads` bridges a short outage but cannot make up a steady
+* `adv_dropped` rising — advertisements are lost before they are posted. It
+  counts both the ones the full buffer sheds and the few that arrive while
+  the buffer is locked (the Bluetooth task never waits for it), so a small
+  count can come with a healthy link. A count that keeps climbing almost
+  always means the buffer is full: advertisements arrive faster than they
+  reach the server. Check the Signal K link first (`GET /api/v1/sk/status`):
+  nothing is posted while it is down. Then `post_fail`: after a failed POST
+  the gateway waits `post_int_ms` before it tries again. While POSTs
+  succeed, the interval is not the limit, because a full batch goes out as
+  soon as it is waiting: `CONFIG_ESPOS_BLE_POST_BATCH_MAX` advertisements
+  (40 by default), or the whole buffer when `max_pend_ads` is smaller. A
+  larger `max_pend_ads` bridges a short outage but cannot make up a steady
   shortfall. The count is exact and runs since the gateway started, so watch
   whether it rises rather than whether it is zero.
 * `post_fail` rising with `ws_connected: false` — a server or token problem,
