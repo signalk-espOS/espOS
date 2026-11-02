@@ -223,6 +223,25 @@ TEST_CASE("a condition that changes during replay is sent again, newest last", "
     TEST_ASSERT_EQUAL(ESPOS_HEALTH_NORMAL, s_calls[1].state);
 }
 
+/* Changes the condition on every call, so the replay never sees it settle. */
+static size_t s_flapping_n;
+static void flapping_sink(const char *key, espos_health_state_t state, const char *message, void *arg)
+{
+    (void)arg;
+    recorder(key, state, message, NULL);
+    s_flapping_n++;
+    espos_health_report("n2kBus", (s_flapping_n % 2) ? ESPOS_HEALTH_NORMAL : ESPOS_HEALTH_ALARM, "");
+}
+
+TEST_CASE("a replay that never settles says so instead of claiming success", "[health]")
+{
+    fresh();
+    s_flapping_n = 0;
+    espos_health_report("n2kBus", ESPOS_HEALTH_ALARM, "");
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, espos_health_replay(flapping_sink, NULL));
+    TEST_ASSERT_EQUAL_UINT32(4, (uint32_t)s_flapping_n);
+}
+
 TEST_CASE("replay refuses a NULL sink", "[health]")
 {
     fresh();

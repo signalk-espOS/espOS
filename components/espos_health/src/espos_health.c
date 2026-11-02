@@ -194,6 +194,10 @@ esp_err_t espos_health_add_sink(espos_health_sink_t sink, void *arg)
     return ESP_OK;
 }
 
+/* Bounded so a condition flapping faster than the sink can keep up cannot hold
+ * the caller here; the caller is told and replays again later. */
+#define REPLAY_PASSES 4
+
 esp_err_t espos_health_replay(espos_health_sink_t sink, void *arg)
 {
     if (!sink) return ESP_ERR_INVALID_ARG;
@@ -201,12 +205,13 @@ esp_err_t espos_health_replay(espos_health_sink_t sink, void *arg)
      * time rather than a copy of the whole table: this runs on the caller's
      * task, and a table's worth of conditions is a kilobyte of stack a small
      * task has better uses for. */
+    bool incomplete = false;
     for (size_t i = 0;; i++) {
         espos_health_condition_t c;
         if (!lock()) return ESP_ERR_TIMEOUT;
         if (i >= s.cond_n) {
             unlock();
-            return ESP_OK;
+            return incomplete ? ESP_ERR_TIMEOUT : ESP_OK;
         }
         c = s.cond[i];
         unlock();
@@ -215,15 +220,19 @@ esp_err_t espos_health_replay(espos_health_sink_t sink, void *arg)
          * far end would keep the older state. So look again afterwards and
          * send the newer state once more; a report after that look fans out
          * after it, and therefore after this call. */
-        for (int pass = 0; pass < 4; pass++) {
+        bool settled = false;
+        for (int pass = 0; pass < REPLAY_PASSES && !settled; pass++) {
             sink(c.key, c.state, c.message, arg);
             if (!lock()) return ESP_ERR_TIMEOUT;
             /* Slots are never freed, only espos_health_reset() empties the table. */
-            bool same = i >= s.cond_n ||
-                        (s.cond[i].state == c.state && strcmp(s.cond[i].message, c.message) == 0);
-            if (!same) c = s.cond[i];
+            settled = i >= s.cond_n ||
+                      (s.cond[i].state == c.state && strcmp(s.cond[i].message, c.message) == 0);
+            if (!settled) c = s.cond[i];
             unlock();
-            if (same) break;
+        }
+        if (!settled) {
+            /* Still changing under us: the newest state was not sent last. */
+            incomplete = true;
         }
     }
 }

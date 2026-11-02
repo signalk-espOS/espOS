@@ -120,7 +120,9 @@ esp_err_t espos_health_add_sink(espos_health_sink_t sink, void *arg);
  * state last.
  *
  * @return ESP_ERR_TIMEOUT if the table stayed locked and the replay stopped
- *         part way, ESP_ERR_INVALID_ARG for a NULL sink.
+ *         part way, or a condition kept changing while it was replayed and
+ *         its newest state may not have been the last one sent: replay again
+ *         later. ESP_ERR_INVALID_ARG for a NULL sink.
  */
 esp_err_t espos_health_replay(espos_health_sink_t sink, void *arg);
 
