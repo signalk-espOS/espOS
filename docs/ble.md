@@ -91,12 +91,14 @@ never resuming the scan.
 ## Configuration
 
 Namespace `ble` (see `components/espos_ble/config/ble.json`); everything is
-editable in the web UI. Note NVS caps key names at 15 characters, which is
-why they read `scan_int_ms` rather than `scan_interval_ms`.
+editable in the web UI. The gateway reads these settings when it starts, so
+a change takes effect after a restart; the Config page offers one when you
+save. Note NVS caps key names at 15 characters, which is why they read
+`scan_int_ms` rather than `scan_interval_ms`.
 
 | key | default | notes |
 |-----|---------|-------|
-| `enabled` | `true` | restart required |
+| `enabled` | `true` | master switch |
 | `active_scan` | `false` | see the P4 warning below |
 | `scan_int_ms` / `scan_win_ms` | 320 / 160 | window ≤ interval; the ratio is the duty cycle |
 | `post_int_ms` | 2000 | how often buffered advertisements are forwarded |
