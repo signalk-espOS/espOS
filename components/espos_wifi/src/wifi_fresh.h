@@ -33,8 +33,8 @@ bool espos_wifi_fresh_on_connected(espos_wifi_fresh_t *f, bool enabled);
  * while the drop is pending ends it, and the disconnect goes on as usual. */
 bool espos_wifi_fresh_on_disconnected(espos_wifi_fresh_t *f, bool leave);
 
-/* The state machine issued its own connect or disconnect: it owns the radio
- * again, so a pending drop must neither swallow its echo nor reconnect. */
+/* End a pending drop without its echo, e.g. when the disconnect could not be
+ * issued: the association is then reported as usual. */
 void espos_wifi_fresh_cancel(espos_wifi_fresh_t *f);
 
 #ifdef __cplusplus

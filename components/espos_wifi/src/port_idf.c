@@ -47,6 +47,12 @@ static espos_wifi_fresh_t s_fresh; /* wifi.fresh_assoc */
  * store lock, which an import holds across all its NVS writes, and the event
  * loop must not stall behind that. */
 static atomic_bool s_fresh_enabled;
+/* Bumped by every connect or disconnect the state machine issues. The drop's
+ * echo reconnects only if this is unchanged since the drop: otherwise the state
+ * machine has taken the radio back (or let it go) in between, from another task,
+ * and a reconnect would act behind its back. */
+static atomic_uint s_sm_radio_gen;
+static unsigned s_fresh_gen; /* event task only */
 
 /* Last AP we actually associated with, remembered across a disconnect so the
  * next attempts can go straight to it instead of scanning every channel first.
@@ -168,14 +174,13 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
          * path forever and never falls back to the full scan that might find a
          * usable AP. Associating is not the same as working. */
         espos_wifi_last_ap_store(&s_last_ap, link.ssid, e->bssid, e->channel);
-        /* The state machine is not told about this association (wifi_fresh.c).
-         * Put off while a disconnect of the state machine's is unanswered: the
-         * echo of ours would be taken for that one and never reconnect. */
+        /* The state machine is not told about this association (wifi_fresh.c). */
         if (espos_wifi_fresh_pending(&s_fresh)) {
             /* The echo of the drop never came: this association is the one to
              * report, and its address must not be swallowed as the dropped one's. */
             (void)espos_wifi_fresh_on_connected(&s_fresh, false);
-        } else if (espos_wifi_fresh_armed(&s_fresh) && !s_disconnect_requested) {
+        } else if (espos_wifi_fresh_armed(&s_fresh)) {
+            s_fresh_gen = atomic_load(&s_sm_radio_gen);
             if (espos_wifi_fresh_on_connected(&s_fresh, atomic_load(&s_fresh_enabled))) {
                 ESP_LOGI(TAG, "dropping the first association so the access point starts a fresh one");
                 if (esp_wifi_disconnect() == ESP_OK) {
@@ -194,14 +199,20 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
     case WIFI_EVENT_STA_DISCONNECTED: {
         const wifi_event_sta_disconnected_t *e = data;
         int reason = e->reason;
+        if (espos_wifi_fresh_on_disconnected(&s_fresh, reason == WIFI_REASON_ASSOC_LEAVE)) {
+            /* Checked before s_disconnect_requested, which a disconnect of the
+             * state machine's that never echoed can leave set: the drop's echo
+             * would be swallowed as that one's and nothing would reconnect. */
+            s_disconnect_requested = false;
+            if (atomic_load(&s_sm_radio_gen) == s_fresh_gen) {
+                reconnect_fresh();
+            }
+            break;
+        }
         if (s_disconnect_requested && reason == WIFI_REASON_ASSOC_LEAVE) {
             /* the echo of our own esp_wifi_disconnect(); the SM already moved on */
             s_disconnect_requested = false;
             ESP_LOGD(TAG, "swallowing our own disconnect echo");
-            break;
-        }
-        if (espos_wifi_fresh_on_disconnected(&s_fresh, reason == WIFI_REASON_ASSOC_LEAVE)) {
-            reconnect_fresh();
             break;
         }
         ESP_LOGW(TAG, "disconnected: %d (%s)", reason, espos_wifi_reason_str(reason));
@@ -372,7 +383,7 @@ static esp_err_t p_connect(void *ctx, const espos_wifi_net_t *net)
     /* NB: s_disconnect_requested is deliberately left as is: the echo of a
      * disconnect issued just before this connect (same drain) still has to
      * be swallowed when it arrives during the new attempt. */
-    espos_wifi_fresh_cancel(&s_fresh);
+    atomic_fetch_add(&s_sm_radio_gen, 1);
     apply_ip_mode();
     wifi_config_t cfg = { 0 };
     /* wifi_sta_config_t: ssid[32] / password[64] need not be NUL-terminated
@@ -433,7 +444,7 @@ static esp_err_t p_connect(void *ctx, const espos_wifi_net_t *net)
 static esp_err_t p_disconnect(void *ctx)
 {
     (void)ctx;
-    espos_wifi_fresh_cancel(&s_fresh);
+    atomic_fetch_add(&s_sm_radio_gen, 1);
     s_disconnect_requested = true;
     esp_err_t err = esp_wifi_disconnect();
     if (err != ESP_OK) {
