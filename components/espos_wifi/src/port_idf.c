@@ -7,6 +7,7 @@
  * esp_wifi_remote; nothing here knows the difference.
  */
 #include <inttypes.h>
+#include <stdatomic.h>
 #include <string.h>
 
 #include "freertos/FreeRTOS.h"
@@ -42,6 +43,10 @@ static int s_portal_clients;
 static bool s_inited;
 static char s_ssid[33];     /* of the current association, for the GOT_IP line */
 static espos_wifi_fresh_t s_fresh; /* wifi.fresh_assoc */
+/* Cached rather than read in the event handler: the getter waits on the config
+ * store lock, which an import holds across all its NVS writes, and the event
+ * loop must not stall behind that. */
+static atomic_bool s_fresh_enabled;
 
 /* Last AP we actually associated with, remembered across a disconnect so the
  * next attempts can go straight to it instead of scanning every channel first.
@@ -167,9 +172,7 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
          * Put off while a disconnect of the state machine's is unanswered: the
          * echo of ours would be taken for that one and never reconnect. */
         if (espos_wifi_fresh_armed(&s_fresh) && !s_disconnect_requested) {
-            bool fresh = false;
-            espos_config_get_bool(ESPOS_CFG_NS_WIFI, ESPOS_CFG_WIFI_FRESH_ASSOC, &fresh);
-            if (espos_wifi_fresh_on_connected(&s_fresh, fresh)) {
+            if (espos_wifi_fresh_on_connected(&s_fresh, atomic_load(&s_fresh_enabled))) {
                 ESP_LOGI(TAG, "dropping the first association so the access point starts a fresh one");
                 if (esp_wifi_disconnect() == ESP_OK) {
                     break;
@@ -576,6 +579,23 @@ static const espos_wifi_port_t k_sm_port = {
 
 /* ---------------------------------------------------------- driver */
 
+static void load_fresh(void)
+{
+    bool v = false;
+    espos_config_get_bool(ESPOS_CFG_NS_WIFI, ESPOS_CFG_WIFI_FRESH_ASSOC, &v);
+    atomic_store(&s_fresh_enabled, v);
+}
+
+/* On the writer's task, so a change made before the first association (from
+ * the setup portal, say) still applies to it. */
+static void on_fresh_change(const char *ns, const char *key, void *arg)
+{
+    (void)arg;
+    if (strcmp(ns, ESPOS_CFG_NS_WIFI) == 0 && strcmp(key, ESPOS_CFG_WIFI_FRESH_ASSOC) == 0) {
+        load_fresh();
+    }
+}
+
 static esp_err_t d_init(void)
 {
     if (s_inited) {
@@ -612,8 +632,10 @@ static esp_err_t d_init(void)
         ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_ip_event, NULL));
         ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_LOST_IP, on_ip_event, NULL));
         ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_ASSIGNED_IP_TO_CLIENT, on_ip_event, NULL));
+        (void)espos_config_subscribe(on_fresh_change, NULL);
         handlers_registered = true;
     }
+    load_fresh();
     if (!s_timer) {
         s_timer = xTimerCreate("espos_wifi", pdMS_TO_TICKS(1000), pdFALSE, NULL, timer_cb);
         if (!s_timer) {
