@@ -78,5 +78,28 @@ TEST_CASE("armed and pending follow the drop", "[fresh]")
     TEST_ASSERT_TRUE(espos_wifi_fresh_pending(&f));
     TEST_ASSERT_TRUE(espos_wifi_fresh_on_disconnected(&f, true));
     TEST_ASSERT_FALSE(espos_wifi_fresh_armed(&f));
+    /* a late address from the dropped association is still not reported */
+    TEST_ASSERT_TRUE(espos_wifi_fresh_pending(&f));
+    TEST_ASSERT_FALSE(espos_wifi_fresh_on_connected(&f, true));
+    TEST_ASSERT_FALSE(espos_wifi_fresh_pending(&f));
+}
+
+TEST_CASE("a failed rejoin after the echo goes to the state machine", "[fresh]")
+{
+    espos_wifi_fresh_t f = { 0 };
+    TEST_ASSERT_TRUE(espos_wifi_fresh_on_connected(&f, true));
+    TEST_ASSERT_TRUE(espos_wifi_fresh_on_disconnected(&f, true));
+    /* a second leave is the state machine's own, not another echo */
+    TEST_ASSERT_FALSE(espos_wifi_fresh_on_disconnected(&f, true));
+    TEST_ASSERT_FALSE(espos_wifi_fresh_pending(&f));
+    TEST_ASSERT_FALSE(espos_wifi_fresh_on_connected(&f, true));
+}
+
+TEST_CASE("cancel after the echo ends the drop", "[fresh]")
+{
+    espos_wifi_fresh_t f = { 0 };
+    TEST_ASSERT_TRUE(espos_wifi_fresh_on_connected(&f, true));
+    TEST_ASSERT_TRUE(espos_wifi_fresh_on_disconnected(&f, true));
+    espos_wifi_fresh_cancel(&f);
     TEST_ASSERT_FALSE(espos_wifi_fresh_pending(&f));
 }

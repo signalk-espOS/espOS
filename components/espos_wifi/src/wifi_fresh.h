@@ -20,7 +20,7 @@ typedef struct {
 /* The first association of this boot is still to come: worth reading the setting. */
 bool espos_wifi_fresh_armed(const espos_wifi_fresh_t *f);
 
-/* Dropped, and the echo of the disconnect has not arrived yet. Anything the
+/* Dropped, and the replacement association has not come up yet. Anything the
  * dropped association still produces (an address, say) is not to be reported. */
 bool espos_wifi_fresh_pending(const espos_wifi_fresh_t *f);
 
@@ -29,8 +29,10 @@ bool espos_wifi_fresh_pending(const espos_wifi_fresh_t *f);
 bool espos_wifi_fresh_on_connected(espos_wifi_fresh_t *f, bool enabled);
 
 /* A disconnect arrived. True: it is the echo of the drop (`leave` = reason
- * ASSOC_LEAVE), so the caller swallows it and reconnects at once. Anything else
- * while the drop is pending ends it, and the disconnect goes on as usual. */
+ * ASSOC_LEAVE), so the caller swallows it and reconnects at once; the drop
+ * stays pending until the replacement association. Anything else while the
+ * drop is pending, or after the echo, ends it, and the disconnect goes on as
+ * usual. */
 bool espos_wifi_fresh_on_disconnected(espos_wifi_fresh_t *f, bool leave);
 
 /* End a pending drop without its echo, e.g. when the disconnect could not be

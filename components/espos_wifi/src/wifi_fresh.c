@@ -26,6 +26,7 @@
 enum {
     FRESH_ARMED = 0, /* the first association of this boot is still to come */
     FRESH_PENDING,   /* dropped, waiting for the echo of our disconnect */
+    FRESH_REJOINING, /* echo seen, the replacement association is still to come */
     FRESH_DONE,
 };
 
@@ -36,7 +37,11 @@ bool espos_wifi_fresh_armed(const espos_wifi_fresh_t *f)
 
 bool espos_wifi_fresh_pending(const espos_wifi_fresh_t *f)
 {
-    return f && atomic_load(&f->phase) == FRESH_PENDING;
+    if (!f) {
+        return false;
+    }
+    uint_fast8_t p = atomic_load(&f->phase);
+    return p == FRESH_PENDING || p == FRESH_REJOINING;
 }
 
 bool espos_wifi_fresh_on_connected(espos_wifi_fresh_t *f, bool enabled)
@@ -56,17 +61,28 @@ bool espos_wifi_fresh_on_connected(espos_wifi_fresh_t *f, bool enabled)
 
 bool espos_wifi_fresh_on_disconnected(espos_wifi_fresh_t *f, bool leave)
 {
-    uint_fast8_t pending = FRESH_PENDING;
-    if (!f || !atomic_compare_exchange_strong(&f->phase, &pending, FRESH_DONE)) {
+    if (!f) {
         return false;
     }
-    return leave;
+    /* Still pending past the echo, so an address the dropped association's
+     * DHCP delivers late is not taken for the replacement's. */
+    uint_fast8_t pending = FRESH_PENDING;
+    if (leave && atomic_compare_exchange_strong(&f->phase, &pending, FRESH_REJOINING)) {
+        return true;
+    }
+    /* Any other reason while pending, or the rejoin failing: the state machine's. */
+    espos_wifi_fresh_cancel(f);
+    return false;
 }
 
 void espos_wifi_fresh_cancel(espos_wifi_fresh_t *f)
 {
-    uint_fast8_t pending = FRESH_PENDING;
-    if (f) {
-        (void)atomic_compare_exchange_strong(&f->phase, &pending, FRESH_DONE);
+    if (!f) {
+        return;
+    }
+    uint_fast8_t p = FRESH_PENDING;
+    if (!atomic_compare_exchange_strong(&f->phase, &p, FRESH_DONE)) {
+        p = FRESH_REJOINING;
+        (void)atomic_compare_exchange_strong(&f->phase, &p, FRESH_DONE);
     }
 }

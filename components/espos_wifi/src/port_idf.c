@@ -185,8 +185,9 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
         espos_wifi_last_ap_store(&s_last_ap, link.ssid, e->bssid, e->channel);
         /* The state machine is not told about this association (wifi_fresh.c). */
         if (espos_wifi_fresh_pending(&s_fresh)) {
-            /* The echo of the drop never came: this association is the one to
-             * report, and its address must not be swallowed as the dropped one's. */
+            /* The replacement (or, if the echo was lost, the next) association:
+             * this one is reported, and its address must not be swallowed as
+             * the dropped one's. */
             (void)espos_wifi_fresh_on_connected(&s_fresh, false);
         } else if (espos_wifi_fresh_armed(&s_fresh)) {
             atomic_store(&s_fresh_gen, atomic_load(&s_sm_radio_gen));
