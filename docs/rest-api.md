@@ -944,9 +944,11 @@ what a device *is* remains a server-side concern.
   triggering a second access request from here.
 * `gatt_max` is the concurrent-session ceiling (3, Bluedroid's own limit) and
   is what the gateway advertises to the server in its `hello`.
-* `gatt_pending` counts GATT frames waiting for the control WebSocket and
-  `gatt_dropped` the running total lost before it took them: the oldest
-  shed from a full queue, or a frame that could not be serialised. See
+* `gatt_pending` counts GATT frames waiting for the control WebSocket,
+  including one being sent, and `gatt_dropped` the running total lost before
+  it took them: the oldest shed from a full queue, frames for the previous
+  server when the server changed, or a notification that could not be
+  serialised or handed over. Both are left out if the queue could not be read. See
   [ble.md](ble.md#gatt-frames-are-queued-not-sent-from-the-bluetooth-task).
 
 There is no `POST /ble/...`: scanning is driven by config

@@ -86,6 +86,9 @@ static void on_update_event(void *arg, esp_event_base_t base, int32_t id, void *
 /* Between hello attempts on a socket that did not take the last one, so a
  * stalled socket does not cost a blocked attempt on every queued frame. */
 #define HELLO_RETRY_US (1000 * 1000LL)
+/* One drain sends for at most this long, so a slow socket that still takes
+ * frames cannot hold back POSTs, status and the init-write watchdog. */
+#define GATT_DRAIN_BUDGET_US (500 * 1000LL)
 
 typedef struct {
     bool active;
@@ -179,6 +182,8 @@ static struct {
     espos_ble_frameq_t gq;
     char *gq_slots[CONFIG_ESPOS_BLE_GATT_QUEUE_DEPTH];
     SemaphoreHandle_t gq_lock;
+    /* 1 while gatt_drain() sends the frame it popped. Under gq_lock. */
+    size_t gq_inflight;
     /* GATT frames freed unqueued: no memory to serialise one, or gq_lock
      * busy. Atomic for the same reason as lock_drops. */
     atomic_uint_least32_t gq_lost;
@@ -461,6 +466,19 @@ static void session_free(session_t *s)
     memset(s, 0, sizeof(*s));
 }
 
+/* Disconnects and frees every session. Freed under the lock, before the
+ * disconnect events arrive, so those find no session and report nothing. */
+static void close_all_sessions(void)
+{
+    if (!sess_lock()) return;
+    for (size_t i = 0; i < MAX_SESSIONS; i++) {
+        if (!g.sessions[i].active) continue;
+        espos_ble_gatt_disconnect(g.sessions[i].conn_handle);
+        session_free(&g.sessions[i]);
+    }
+    sess_unlock();
+}
+
 /* Once per run: a queue that overflows does so for every frame, and the
  * status counter carries the total. */
 static atomic_bool s_gq_drop_logged;
@@ -535,21 +553,27 @@ static void gatt_drain(void)
         hello_retry_at = 0;
         atomic_store(&g.ws_ready, true);
     }
+    int64_t drain_end = esp_timer_get_time() + GATT_DRAIN_BUDGET_US;
     for (size_t i = 0; i < CONFIG_ESPOS_BLE_GATT_QUEUE_DEPTH; i++) {
         if (!g.running || !atomic_load(&g.ws_ready) || !g.ws_connected) return;
+        if (esp_timer_get_time() >= drain_end) return;
         if (xSemaphoreTake(g.gq_lock, pdMS_TO_TICKS(100)) != pdTRUE) return;
         char *txt = espos_ble_frameq_pop(&g.gq);
+        /* Still pending while it is being sent: set under the lock, so a
+         * status read sees the frame in exactly one of the two places. */
+        if (txt) g.gq_inflight = 1;
         xSemaphoreGive(g.gq_lock);
         if (!txt) return;
-        if (ws_send_text(txt, GATT_SEND_TIMEOUT_MS)) {
+        bool sent = ws_send_text(txt, GATT_SEND_TIMEOUT_MS);
+        xSemaphoreTake(g.gq_lock, portMAX_DELAY);
+        g.gq_inflight = 0;
+        bool kept = sent || espos_ble_frameq_unshift(&g.gq, txt);
+        xSemaphoreGive(g.gq_lock);
+        if (sent) {
             free(txt);
             continue;
         }
-        if (xSemaphoreTake(g.gq_lock, portMAX_DELAY) == pdTRUE) {
-            bool kept = espos_ble_frameq_unshift(&g.gq, txt);
-            xSemaphoreGive(g.gq_lock);
-            gatt_report_drop(!kept);
-        }
+        gatt_report_drop(!kept);
         return;
     }
 }
@@ -869,9 +893,12 @@ static void ws_connect(void)
             ESP_LOGI(TAG, "control WS server changed %s://%s:%u -> %s://%s:%u",
                      s_ws_tls ? "wss" : "ws", s_ws_host, s_ws_port,
                      srv.tls ? "wss" : "ws", srv.host, srv.port);
-            /* Queued frames belong to sessions the old server opened; the
-             * new one has never heard of them. */
+            /* The old server's sessions, and the frames they queued, mean
+             * nothing to the new one. Freed first, so their disconnects find
+             * no session and queue nothing; the frames count as dropped. */
+            close_all_sessions();
             xSemaphoreTake(g.gq_lock, portMAX_DELAY);
+            atomic_fetch_add_explicit(&g.gq_lost, (uint32_t)espos_ble_frameq_count(&g.gq), memory_order_relaxed);
             espos_ble_frameq_clear(&g.gq);
             xSemaphoreGive(g.gq_lock);
         }
@@ -994,7 +1021,10 @@ static void on_gatt_notify(int h, const char *uuid, const uint8_t *data,
 {
     (void)arg;
     char sid[sizeof(g.sessions[0].session_id)];
-    if (!sess_lock()) return;
+    if (!sess_lock()) {
+        atomic_fetch_add_explicit(&g.gq_lost, 1, memory_order_relaxed);
+        return;
+    }
     session_t *s = session_by_handle(h);
     if (!s) {
         sess_unlock();
@@ -1695,14 +1725,7 @@ esp_err_t espos_ble_stop(void)
 
     /* Close any live session and release its allocations - a stop/start cycle
      * would otherwise orphan them and leave stale connection handles behind. */
-    if (sess_lock()) {
-        for (size_t i = 0; i < MAX_SESSIONS; i++) {
-            if (!g.sessions[i].active) continue;
-            espos_ble_gatt_disconnect(g.sessions[i].conn_handle);
-            session_free(&g.sessions[i]);
-        }
-        sess_unlock();
-    }
+    close_all_sessions();
 
     if (g.lock) {
         vSemaphoreDelete(g.lock);
@@ -1771,7 +1794,7 @@ esp_err_t espos_ble_gatt_queue_stats(uint32_t *dropped, size_t *pending)
     }
     if (xSemaphoreTake(g.gq_lock, pdMS_TO_TICKS(100)) != pdTRUE) return ESP_ERR_TIMEOUT;
     *dropped = g.gq.dropped;
-    *pending = espos_ble_frameq_count(&g.gq);
+    *pending = espos_ble_frameq_count(&g.gq) + g.gq_inflight;
     xSemaphoreGive(g.gq_lock);
     *dropped += (uint32_t)atomic_load_explicit(&g.gq_lost, memory_order_relaxed);
     return ESP_OK;

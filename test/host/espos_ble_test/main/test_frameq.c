@@ -88,6 +88,21 @@ TEST_CASE("a frame that failed to send goes out first next time", "[frameq]")
     expect_pop(&q, "c");
 }
 
+TEST_CASE("the only frame, put back after a failed send, is queued again", "[frameq]")
+{
+    char *slots[3];
+    espos_ble_frameq_t q;
+    espos_ble_frameq_init(&q, slots, 3);
+    espos_ble_frameq_push(&q, frame("a"));
+    char *f = espos_ble_frameq_pop(&q);
+    TEST_ASSERT_EQUAL_UINT(0, espos_ble_frameq_count(&q));
+    TEST_ASSERT_TRUE(espos_ble_frameq_unshift(&q, f));
+    TEST_ASSERT_EQUAL_UINT(1, espos_ble_frameq_count(&q));
+    TEST_ASSERT_EQUAL_UINT32(0, q.dropped);
+    expect_pop(&q, "a");
+    TEST_ASSERT_NULL(espos_ble_frameq_pop(&q));
+}
+
 TEST_CASE("a frame put back into a queue that filled up is the one dropped", "[frameq]")
 {
     char *slots[2];

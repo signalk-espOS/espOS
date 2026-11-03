@@ -80,7 +80,10 @@ lost reply.
 
 The queue survives a re-dial to the same server: frames queued while the
 socket is down go out once the new socket has sent its `hello`. A change of
-server empties it, since the new server never opened those sessions. It holds
+server closes the GATT sessions the old server opened and empties the queue,
+counting its frames in `gatt_dropped`: the new server never opened those
+sessions. One drain sends for at most 500 ms, so a slow socket cannot hold
+back the advertisement POSTs. It holds
 `CONFIG_ESPOS_BLE_GATT_QUEUE_DEPTH` frames (16 by default); when it is full
 the oldest frame is dropped and counted in `gatt_dropped`. The gateway task
 also sends each socket's `hello`, before anything else, and tries again
