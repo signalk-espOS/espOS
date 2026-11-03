@@ -78,7 +78,7 @@ TEST_CASE("armed and pending follow the drop", "[fresh]")
     TEST_ASSERT_TRUE(espos_wifi_fresh_pending(&f));
     TEST_ASSERT_TRUE(espos_wifi_fresh_on_disconnected(&f, true));
     TEST_ASSERT_FALSE(espos_wifi_fresh_armed(&f));
-    /* a late address from the dropped association is still not reported */
+    /* still pending, so the port withholds a late address of the dropped association */
     TEST_ASSERT_TRUE(espos_wifi_fresh_pending(&f));
     TEST_ASSERT_FALSE(espos_wifi_fresh_on_connected(&f, true));
     TEST_ASSERT_FALSE(espos_wifi_fresh_pending(&f));
