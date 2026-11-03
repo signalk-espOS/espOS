@@ -32,6 +32,14 @@ extern "C" {
  * and espos_httpd_start() to have run. Idempotent.
  */
 esp_err_t espos_wifi_start(void);
+
+/**
+ * Stop the state machine and shut the driver down after the actions the stop
+ * queued. Waits up to 10 s for the radio; ESP_ERR_TIMEOUT if it is still
+ * busy, in which case the driver stops when it answers and
+ * espos_wifi_start() returns ESP_ERR_INVALID_STATE until then. Do not call it
+ * from the default event loop: the radio's answer may need that task.
+ */
 esp_err_t espos_wifi_stop(void);
 
 /**

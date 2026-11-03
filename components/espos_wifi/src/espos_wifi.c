@@ -13,6 +13,7 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 #include "freertos/timers.h"
 #include "cJSON.h"
 #include "esp_log.h"
@@ -57,7 +58,8 @@ static struct {
                ACT_DISCONNECT,
                ACT_PORTAL_START,
                ACT_PORTAL_STOP,
-               ACT_FRESH_RECONNECT } type;
+               ACT_FRESH_RECONNECT,
+               ACT_DEINIT } type;
         espos_wifi_net_t net;
         uint32_t radio_gen; /* ACT_FRESH_RECONNECT: radio_gen when queued */
     } actions[8];
@@ -88,7 +90,16 @@ static struct {
         bool pending;
         TimerHandle_t timer;
     } stall;
-    SemaphoreHandle_t drain_lock;
+    /* Runs every queued driver action, report and status publish. Never the
+     * caller's task: dispatch comes from the WiFi/IP event loop, timers and
+     * HTTP handlers, and a driver call can block for as long as the radio (on
+     * a P4, an RPC to the co-processor) takes to answer. */
+    TaskHandle_t drainer;
+    /* espos_wifi_stop() queues the driver's deinit behind the actions the
+     * stop issued; the drainer gives `stopped` once it has run. */
+    SemaphoreHandle_t stopped;
+    bool stopping;
+    esp_err_t stop_err;
     bool sm_ready;
     bool api_registered;
 } s;
@@ -207,7 +218,7 @@ void espos_wifi_portal_credentials(char ssid[33], char psk[65])
 /* --------------------------------------------------------- SM plumbing */
 
 static char *status_json_locked(void);
-static void drain_all_locked(void);
+static void drain_all(void);
 
 /* Lock held: append a driver action for later. */
 static void queue_action(int type, const espos_wifi_net_t *net)
@@ -339,31 +350,30 @@ static uint32_t load_stall_ms(void)
     return ms < ESPOS_WIFI_STALL_MIN_MS ? ESPOS_WIFI_STALL_MIN_MS : ms;
 }
 
-/* Run queued driver actions in FIFO order, outside the SM lock. A single
- * drainer at a time keeps global ordering. */
+/* Hand whatever is queued to the drainer task. Never blocks: the caller may be
+ * the event task, and the drainer may be inside a driver call whose completion
+ * needs that very task. On the drainer itself it is a no-op, as the drainer
+ * looks again before it sleeps. */
 static void drain(void)
 {
-    for (;;) {
-        /* Never block here: the event task may be the caller, and the current
-         * drainer may be inside a driver call whose completion needs that
-         * very task. Whoever holds the drain lock drains everything queued. */
-        if (xSemaphoreTake(s.drain_lock, 0) != pdTRUE) {
-            return;
-        }
-        drain_all_locked();
-        xSemaphoreGive(s.drain_lock);
-        /* something may have been queued between our last look and the give */
-        lock();
-        bool more = s.action_count > 0 || s.pending_status_json != NULL || s.net_report.pending || s.stall.pending;
-        unlock();
-        if (!more) {
-            return;
-        }
+    if (s.drainer && xTaskGetCurrentTaskHandle() != s.drainer) {
+        xTaskNotifyGive(s.drainer);
     }
 }
 
-/* Called with drain_lock held. */
-static void drain_all_locked(void)
+/* One task runs the queue in FIFO order, outside the SM lock, which keeps the
+ * driver calls in the order the machine issued them. */
+static void drain_task(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        (void)ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        drain_all();
+    }
+}
+
+/* The drainer's loop: until nothing is left. */
+static void drain_all(void)
 {
     for (;;) {
         lock();
@@ -423,7 +433,9 @@ static void drain_all_locked(void)
                 /* the SM saw ESP_OK from the wrapper; report the failure as an event */
                 int reason = ESPOS_WIFI_REASON_CONNECT_TIMEOUT;
                 lock();
-                espos_wifi_sm_event(&s.sm, ESPOS_WIFI_EV_STA_DISCONNECTED, &reason);
+                if (s.sm_ready) { /* a stop since leaves the machine alone */
+                    espos_wifi_sm_event(&s.sm, ESPOS_WIFI_EV_STA_DISCONNECTED, &reason);
+                }
                 unlock();
             }
             break;
@@ -433,7 +445,9 @@ static void drain_all_locked(void)
         case ACT_PORTAL_START:
             if (p->portal_start(NULL) != ESP_OK) {
                 lock();
-                espos_wifi_sm_event(&s.sm, ESPOS_WIFI_EV_PORTAL_FAILED, NULL);
+                if (s.sm_ready) {
+                    espos_wifi_sm_event(&s.sm, ESPOS_WIFI_EV_PORTAL_FAILED, NULL);
+                }
                 unlock();
             } else {
                 /* Announced BEFORE anyone tries to associate. On a part whose
@@ -471,6 +485,15 @@ static void drain_all_locked(void)
             }
             break;
         }
+        case ACT_DEINIT: {
+            esp_err_t e = s.drv->deinit ? s.drv->deinit() : ESP_OK;
+            lock();
+            s.stop_err = e;
+            s.stopping = false;
+            unlock();
+            xSemaphoreGive(s.stopped);
+            break;
+        }
         default:
             break;
         }
@@ -490,11 +513,14 @@ void espos_wifi_dispatch(espos_wifi_event_t ev, const void *arg)
 
 void espos_wifi_request_fresh_reconnect(void)
 {
-    if (!s.lock || !s.sm_ready) {
+    if (!s.lock) {
         return;
     }
     lock();
-    queue_action(ACT_FRESH_RECONNECT, NULL);
+    /* Under the lock: a stop's deinit must stay the last thing queued. */
+    if (s.sm_ready) {
+        queue_action(ACT_FRESH_RECONNECT, NULL);
+    }
     unlock();
     drain();
 }
@@ -618,8 +644,9 @@ esp_err_t espos_wifi_get_status(espos_wifi_status_t *out)
      * wedge turns into a panic on whichever task happened to ask.
      *
      * A status snapshot must never depend on the radio answering.
-     * out->rssi is the value cached at association and refreshed by
-     * espos_wifi_refresh_rssi(), both on the event task. */
+     * out->rssi is the value cached at association or by the last
+     * espos_wifi_refresh_rssi(); espos_net's copy follows from the
+     * espos_wifi task. */
     return ESP_OK;
 }
 
@@ -881,6 +908,10 @@ esp_err_t espos_wifi_start(void)
     if (s.started) {
         return ESP_OK;
     }
+    if (s.stopping) {
+        ESP_LOGE(TAG, "espos_wifi_start: the last stop is still shutting the driver down");
+        return ESP_ERR_INVALID_STATE;
+    }
     /* The /wifi endpoints and the portal's page live on the HTTP server; a
      * portal that comes up with nothing to serve is the worst first
      * impression a device can make. */
@@ -903,11 +934,17 @@ esp_err_t espos_wifi_start(void)
             return ESP_ERR_NO_MEM;
         }
     }
-    if (!s.drain_lock) {
-        s.drain_lock = xSemaphoreCreateMutex();
-        if (!s.drain_lock) {
+    if (!s.stopped) {
+        s.stopped = xSemaphoreCreateBinary();
+        if (!s.stopped) {
             return ESP_ERR_NO_MEM;
         }
+    }
+    /* Created once and kept across stop/start, like the timers. */
+    if (!s.drainer && xTaskCreate(drain_task, "espos_wifi", CONFIG_ESPOS_WIFI_DRAIN_TASK_STACK, NULL,
+                                  CONFIG_ESPOS_WIFI_DRAIN_TASK_PRIO, &s.drainer) != pdPASS) {
+        s.drainer = NULL;
+        return ESP_ERR_NO_MEM;
     }
     if (!s.cfg_debounce) {
         s.cfg_debounce = xTimerCreate("wifi_cfg", pdMS_TO_TICKS(150), pdFALSE, NULL, cfg_debounce_cb);
@@ -1045,11 +1082,28 @@ esp_err_t espos_wifi_stop(void)
     (void)espos_event_unsubscribe(ESPOS_EVENT_NETWORK_DOWN, on_network_event);
     xTimerStop(s.cfg_debounce, 0);
     xTimerStop(s.stall.timer, 0);
-    espos_wifi_dispatch(ESPOS_WIFI_EV_STOP, NULL);
-    s.started = false;
-    esp_err_t err = s.drv->deinit ? s.drv->deinit() : ESP_OK;
+    (void)xSemaphoreTake(s.stopped, 0); /* a give left by a stop that timed out */
+    /* The machine stops and the driver's deinit goes in behind whatever the
+     * stop queued, all under one lock: no event dispatches after it (deinit
+     * raises some), and nothing reaches a driver that is already down. */
     lock();
+    espos_wifi_sm_event(&s.sm, ESPOS_WIFI_EV_STOP, NULL);
     s.sm_ready = false;
+    s.stopping = true;
+    queue_action(ACT_DEINIT, NULL);
+    unlock();
+    s.started = false;
+    if (xTaskGetCurrentTaskHandle() == s.drainer) {
+        drain_all(); /* a callback on the drainer: run it here, in order */
+    } else {
+        xTaskNotifyGive(s.drainer);
+        if (xSemaphoreTake(s.stopped, pdMS_TO_TICKS(10000)) != pdTRUE) {
+            ESP_LOGW(TAG, "radio still busy after 10 s; the driver stops when it answers");
+            return ESP_ERR_TIMEOUT;
+        }
+    }
+    lock();
+    esp_err_t err = s.stop_err;
     unlock();
     return err;
 }

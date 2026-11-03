@@ -147,10 +147,10 @@ SSID, portal, reason codes).
    whether the *default route* changed; a second link coming up while the
    first carries the route is not a network event to anyone above the seam.
 
-The station reports from `espos_wifi`'s drainer, outside its state-machine
-lock, so the events go out from inside the `IP_EVENT_STA_GOT_IP` handler and
-both `espos_wifi_get_status()` and `espos_net_get_status()` already say
-"up" when a `NETWORK_UP` handler runs. Static addressing is a WiFi setting
+The station reports from `espos_wifi`'s own task, outside its state-machine
+lock and after the machine has taken the link up, so both
+`espos_wifi_get_status()` and `espos_net_get_status()` already say "up" when
+a `NETWORK_UP` handler runs. Static addressing is a WiFi setting
 (`wifi.ip_mode` and friends, [wifi.md](wifi.md), "Addressing"): the netif
 still raises `GOT_IP` with a static address, so `espos_net` sees no
 difference.
