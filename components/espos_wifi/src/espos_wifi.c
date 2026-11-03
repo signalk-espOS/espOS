@@ -104,6 +104,10 @@ static struct {
     SemaphoreHandle_t stopped;
     bool stopping;
     esp_err_t stop_err;
+    /* Numbers each stop, and the last one whose deinit ran: a waiter that
+     * takes another stop's give can tell, and hands it back. */
+    uint32_t stop_seq, stop_done;
+    int stop_waiters;
     bool sm_ready;
     bool api_registered;
 } s;
@@ -498,6 +502,7 @@ static void drain_all(void)
             esp_err_t e = s.drv->deinit ? s.drv->deinit() : ESP_OK;
             lock();
             s.stop_err = e;
+            s.stop_done = s.stop_seq;
             s.stopping = false;
             unlock();
             xSemaphoreGive(s.stopped);
@@ -1097,7 +1102,10 @@ esp_err_t espos_wifi_stop(void)
     if (running && !busy) {
         s.started = false; /* this caller owns the stop */
         s.stopping = true; /* and start() waits for its deinit */
+        s.stop_seq++;
+        s.stop_waiters++;
     }
+    uint32_t seq = s.stop_seq;
     unlock();
     if (busy) {
         return ESP_ERR_INVALID_STATE; /* another stop is still shutting the driver down */
@@ -1110,7 +1118,6 @@ esp_err_t espos_wifi_stop(void)
     (void)espos_event_unsubscribe(ESPOS_EVENT_NETWORK_DOWN, on_network_event);
     xTimerStop(s.cfg_debounce, 0);
     xTimerStop(s.stall.timer, 0);
-    (void)xSemaphoreTake(s.stopped, 0); /* a give left by a stop that timed out */
     /* The machine stops and the driver's deinit goes in behind whatever the
      * stop queued, all under one lock: no event dispatches after it (deinit
      * raises some), and nothing reaches a driver that is already down. */
@@ -1120,12 +1127,35 @@ esp_err_t espos_wifi_stop(void)
     queue_action(ACT_DEINIT, NULL);
     unlock();
     xTaskNotifyGive(s.drainer);
-    if (xSemaphoreTake(s.stopped, pdMS_TO_TICKS(10000)) != pdTRUE) {
-        ESP_LOGW(TAG, "radio still busy after 10 s; the driver stops when it answers");
-        return ESP_ERR_TIMEOUT;
+    TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(10000);
+    esp_err_t err = ESP_ERR_TIMEOUT;
+    for (;;) {
+        lock();
+        bool done = (int32_t)(s.stop_done - seq) >= 0;
+        if (done) {
+            err = s.stop_err;
+        }
+        unlock();
+        if (done) {
+            break;
+        }
+        TickType_t now = xTaskGetTickCount();
+        if ((int32_t)(deadline - now) <= 0 || xSemaphoreTake(s.stopped, deadline - now) != pdTRUE) {
+            ESP_LOGW(TAG, "radio still busy after 10 s; the driver stops when it answers");
+            break;
+        }
+        lock();
+        bool hand_back = (int32_t)(s.stop_done - seq) < 0 && s.stop_waiters > 1;
+        unlock();
+        if (hand_back) {
+            /* An earlier stop's, whose waiter has not woken yet. Without one,
+             * the give is stale (its stop timed out) and is dropped. */
+            xSemaphoreGive(s.stopped);
+            vTaskDelay(1);
+        }
     }
     lock();
-    esp_err_t err = s.stop_err;
+    s.stop_waiters--;
     unlock();
     return err;
 }
