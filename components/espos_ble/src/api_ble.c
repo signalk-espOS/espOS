@@ -13,6 +13,7 @@
 
 #include "cJSON.h"
 #include "esp_log.h"
+#include "ble_types.h"
 #include "espos_ble.h"
 #include "espos_httpd.h"
 #include "espos_httpd_sse.h"
@@ -25,6 +26,11 @@ esp_err_t espos_ble_status_json(char **out_json)
     espos_ble_status_t st;
     esp_err_t err = espos_ble_get_status(&st);
     if (err != ESP_OK) return err;
+    uint32_t gatt_dropped = 0;
+    size_t gatt_pending = 0;
+    /* Left out rather than failing the whole document: a busy queue lock is
+     * no reason to hide the advertisement counters. */
+    bool gatt_queue = espos_ble_gatt_queue_stats(&gatt_dropped, &gatt_pending) == ESP_OK;
 
     cJSON *d = cJSON_CreateObject();
     if (!d) return ESP_ERR_NO_MEM;
@@ -42,6 +48,10 @@ esp_err_t espos_ble_status_json(char **out_json)
     cJSON_AddBoolToObject(d, "ws_connected", st.ws_connected);
     cJSON_AddNumberToObject(d, "gatt_sessions", st.gatt_sessions);
     cJSON_AddNumberToObject(d, "gatt_max", st.gatt_max);
+    if (gatt_queue) {
+        cJSON_AddNumberToObject(d, "gatt_dropped", gatt_dropped);
+        cJSON_AddNumberToObject(d, "gatt_pending", (double)gatt_pending);
+    }
 
     *out_json = cJSON_PrintUnformatted(d);
     cJSON_Delete(d);

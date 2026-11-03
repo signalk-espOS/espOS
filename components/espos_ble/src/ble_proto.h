@@ -53,6 +53,40 @@ bool espos_ble_advq_push(espos_ble_advq_t *q, const espos_ble_adv_t *adv);
 size_t espos_ble_advq_drain(espos_ble_advq_t *q, espos_ble_adv_t *out, size_t max);
 static inline size_t espos_ble_advq_count(const espos_ble_advq_t *q) { return q->count; }
 
+/* GATT frames waiting for the control WebSocket.
+ *
+ * The Bluetooth stack task serialises a frame and pushes it here instead of
+ * sending it: a send can wait on a busy socket, and a notification that
+ * missed its 100 ms send window used to be gone. The gateway task pops the
+ * oldest frame, sends it and, when the send fails, puts it back at the head
+ * so it goes out first once the socket works. One FIFO for every frame type
+ * keeps notifications, read results and session events in the order they
+ * happened.
+ *
+ * Frames are heap strings owned by the queue while queued. Fixed capacity
+ * with drop-oldest, and every frame the queue frees unsent is counted. */
+typedef struct {
+    char **slots;
+    size_t cap;
+    size_t head;  /* oldest entry */
+    size_t count; /* live entries */
+    uint32_t dropped;
+} espos_ble_frameq_t;
+
+void espos_ble_frameq_init(espos_ble_frameq_t *q, char **storage, size_t cap);
+/* Append, taking ownership of `frame`. When full, the oldest frame is freed
+ * and counted. Returns true if a frame was dropped. A NULL frame is ignored. */
+bool espos_ble_frameq_push(espos_ble_frameq_t *q, char *frame);
+/* Remove and return the oldest frame, or NULL when empty; the caller owns it. */
+char *espos_ble_frameq_pop(espos_ble_frameq_t *q);
+/* Put a frame that could not be sent back at the head, taking ownership.
+ * When the queue filled up meanwhile, that frame is the oldest, so it is the
+ * one freed and counted; returns false then. */
+bool espos_ble_frameq_unshift(espos_ble_frameq_t *q, char *frame);
+/* Free every queued frame without counting it as dropped. */
+void espos_ble_frameq_clear(espos_ble_frameq_t *q);
+static inline size_t espos_ble_frameq_count(const espos_ble_frameq_t *q) { return q->count; }
+
 /* When the gateway POSTs.
  *
  * A full batch goes out as soon as it is waiting and a partial one after at
