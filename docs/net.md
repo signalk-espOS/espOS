@@ -79,7 +79,7 @@ clock (`espos_net_sm.h`, `src/net_sm.c`) and every row above is a case in
 | Signal | When | Runs on |
 |---|---|---|
 | `ESPOS_EVENT_NETWORK_UP` / `_DOWN` | route edges, as in the table above; `NETWORK_UP` carries `espos_event_network_t {ip, hostname}` | the default event loop task |
-| `espos_net_subscribe()` callback | every edge (not RSSI refreshes), with a copy of the status | the task of the transport that reported — for WiFi the default event loop task; no `espos_net` lock held; copy out and return, never block |
+| `espos_net_subscribe()` callback | every edge (not RSSI refreshes), with a copy of the status | the task of the transport that reported — for WiFi the `espos_wifi` task, whose queued driver calls wait while it runs; no `espos_net` lock held; copy out and return, never block |
 | `net` SSE event | every status change, RSSI refreshes included; a snapshot on connect | the reporting task, through `espos_httpd_sse_publish()` |
 | `ESPOS_EVENT_MDNS_READY` | every `NETWORK_UP` once the responder runs | the default event loop task |
 

@@ -399,8 +399,7 @@ interface carries the default route, its options are
   esp_netif. The host port (`port_sim.c`) scripts a fake driver, so the REST
   and SSE layer can be tested too.
 * **Driver calls are never made while the state machine is locked.** The
-  state machine queues actions, and `espos_wifi_dispatch()` runs them after
-  unlocking. On the ESP32-P4 the driver is a radio chip behind an RPC that
+  state machine queues actions, and they run after the lock is released. On the ESP32-P4 the driver is a radio chip behind an RPC that
   itself delivers events into the state machine; calling it under the lock
   deadlocked within a second of boot.
 * **Queued actions run on their own task**, `espos_wifi`, in the order the

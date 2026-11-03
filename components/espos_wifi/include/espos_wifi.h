@@ -39,6 +39,9 @@ esp_err_t espos_wifi_start(void);
  * busy, in which case the driver stops when it answers and
  * espos_wifi_start() returns ESP_ERR_INVALID_STATE until then. Do not call it
  * from the default event loop: the radio's answer may need that task.
+ * ESP_ERR_INVALID_STATE from an espos_net subscriber or a health sink (they
+ * run on the task that would do the shutdown), or while another stop is
+ * still shutting the driver down.
  */
 esp_err_t espos_wifi_stop(void);
 

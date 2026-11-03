@@ -61,13 +61,17 @@ static struct {
                ACT_FRESH_RECONNECT,
                ACT_DEINIT } type;
         espos_wifi_net_t net;
-        uint32_t radio_gen; /* ACT_FRESH_RECONNECT: radio_gen when queued */
+        uint32_t radio_gen;  /* radio_gen when queued */
+        uint32_t portal_gen; /* portal_gen when queued */
     } actions[8];
     size_t action_head, action_count;
     /* Bumped whenever the machine queues a connect or disconnect, so a fresh
      * reconnect can tell whether its failure still belongs to the attempt it
      * was queued in. */
     uint32_t radio_gen;
+    /* The same for portal starts and stops: a failed start that a later one
+     * superseded must not tell the machine the portal is down. */
+    uint32_t portal_gen;
     char *pending_status_json;   /* latest snapshot to publish (coalesced) */
     /* The link as espos_net should hear it, decided under the lock on every
      * SM status change and delivered by the drainer outside it:
@@ -231,6 +235,7 @@ static void queue_action(int type, const espos_wifi_net_t *net)
     size_t i = (s.action_head + s.action_count) % (sizeof(s.actions) / sizeof(s.actions[0]));
     s.actions[i].type = type;
     s.actions[i].radio_gen = s.radio_gen;
+    s.actions[i].portal_gen = s.portal_gen;
     if (net) {
         s.actions[i].net = *net;
     }
@@ -255,12 +260,14 @@ static esp_err_t q_disconnect(void *ctx)
 static esp_err_t q_portal_start(void *ctx)
 {
     (void)ctx;
+    s.portal_gen++;
     queue_action(ACT_PORTAL_START, NULL);
     return ESP_OK;
 }
 static esp_err_t q_portal_stop(void *ctx)
 {
     (void)ctx;
+    s.portal_gen++;
     queue_action(ACT_PORTAL_STOP, NULL);
     return ESP_OK;
 }
@@ -421,6 +428,7 @@ static void drain_all(void)
         int type = s.actions[s.action_head].type;
         espos_wifi_net_t net = s.actions[s.action_head].net;
         uint32_t queued_gen = s.actions[s.action_head].radio_gen;
+        uint32_t queued_portal_gen = s.actions[s.action_head].portal_gen;
         s.action_head = (s.action_head + 1) % (sizeof(s.actions) / sizeof(s.actions[0]));
         s.action_count--;
         unlock();
@@ -433,7 +441,8 @@ static void drain_all(void)
                 /* the SM saw ESP_OK from the wrapper; report the failure as an event */
                 int reason = ESPOS_WIFI_REASON_CONNECT_TIMEOUT;
                 lock();
-                if (s.sm_ready) { /* a stop since leaves the machine alone */
+                /* a stop, or a newer attempt queued while it ran, leaves the machine alone */
+                if (s.sm_ready && s.radio_gen == queued_gen && s.sm.st.state == ESPOS_WIFI_ST_CONNECTING) {
                     espos_wifi_sm_event(&s.sm, ESPOS_WIFI_EV_STA_DISCONNECTED, &reason);
                 }
                 unlock();
@@ -445,7 +454,7 @@ static void drain_all(void)
         case ACT_PORTAL_START:
             if (p->portal_start(NULL) != ESP_OK) {
                 lock();
-                if (s.sm_ready) {
+                if (s.sm_ready && s.portal_gen == queued_portal_gen) {
                     espos_wifi_sm_event(&s.sm, ESPOS_WIFI_EV_PORTAL_FAILED, NULL);
                 }
                 unlock();
@@ -1074,7 +1083,26 @@ esp_err_t espos_wifi_portal_auto(void)
 
 esp_err_t espos_wifi_stop(void)
 {
-    if (!s.started) {
+    /* On the drainer (an espos_net subscriber or a health sink) a stop would
+     * have to run the queue nested inside the report it was called from. */
+    if (s.drainer && xTaskGetCurrentTaskHandle() == s.drainer) {
+        ESP_LOGE(TAG, "espos_wifi_stop: not from an espos_net callback or health sink");
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!s.lock) {
+        return ESP_OK; /* never started */
+    }
+    lock();
+    bool busy = s.stopping, running = s.started;
+    if (running && !busy) {
+        s.started = false; /* this caller owns the stop */
+        s.stopping = true; /* and start() waits for its deinit */
+    }
+    unlock();
+    if (busy) {
+        return ESP_ERR_INVALID_STATE; /* another stop is still shutting the driver down */
+    }
+    if (!running) {
         return ESP_OK;
     }
     espos_config_unsubscribe(on_config_change, NULL);
@@ -1089,18 +1117,12 @@ esp_err_t espos_wifi_stop(void)
     lock();
     espos_wifi_sm_event(&s.sm, ESPOS_WIFI_EV_STOP, NULL);
     s.sm_ready = false;
-    s.stopping = true;
     queue_action(ACT_DEINIT, NULL);
     unlock();
-    s.started = false;
-    if (xTaskGetCurrentTaskHandle() == s.drainer) {
-        drain_all(); /* a callback on the drainer: run it here, in order */
-    } else {
-        xTaskNotifyGive(s.drainer);
-        if (xSemaphoreTake(s.stopped, pdMS_TO_TICKS(10000)) != pdTRUE) {
-            ESP_LOGW(TAG, "radio still busy after 10 s; the driver stops when it answers");
-            return ESP_ERR_TIMEOUT;
-        }
+    xTaskNotifyGive(s.drainer);
+    if (xSemaphoreTake(s.stopped, pdMS_TO_TICKS(10000)) != pdTRUE) {
+        ESP_LOGW(TAG, "radio still busy after 10 s; the driver stops when it answers");
+        return ESP_ERR_TIMEOUT;
     }
     lock();
     esp_err_t err = s.stop_err;
