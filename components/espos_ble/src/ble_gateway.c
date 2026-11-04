@@ -1221,9 +1221,51 @@ esp_err_t espos_ble_reserve_controller(void)
     return espos_ble_backend_controller_only();
 }
 
+/* Set when a stop ended with the GATT sessions still open; see
+ * finish_teardown(). The gateway is down; the next stop or start finishes it. */
+static bool s_teardown_pending;
+
+/* Frees what the stopped gateway task leaves behind. False, with nothing
+ * freed, if the GATT sessions cannot be closed: their holders are Bluetooth
+ * callbacks that each hold the lock briefly, so a few tries outlast any of
+ * them, and deleting a mutex another task holds is undefined. */
+static bool finish_teardown(void)
+{
+    /* Close any live session and release its allocations - a stop/start cycle
+     * would otherwise orphan them and leave stale connection handles behind. */
+    bool closed = false;
+    for (int i = 0; i < 4 && !closed; i++) closed = close_all_sessions();
+    if (!closed) {
+        ESP_LOGW(TAG, "session lock busy; leaving the GATT sessions alone");
+        s_teardown_pending = true;
+        return false;
+    }
+    s_teardown_pending = false;
+
+    if (g.lock) {
+        vSemaphoreDelete(g.lock);
+        g.lock = NULL;
+    }
+    if (g.sess_lock) {
+        vSemaphoreDelete(g.sess_lock);
+        g.sess_lock = NULL;
+    }
+    free(g.storage);
+    g.storage = NULL;
+    memset(&g.q, 0, sizeof(g.q));
+    /* Frames for sessions that no longer exist; a restart starts empty. */
+    xSemaphoreTake(g.gq_lock, portMAX_DELAY);
+    espos_ble_frameq_clear(&g.gq);
+    xSemaphoreGive(g.gq_lock);
+    return true;
+}
+
 esp_err_t espos_ble_start(void)
 {
     if (g.running) return ESP_OK;
+    /* A stop that left sessions open is finished first, or the start would
+     * build on half-freed state. */
+    if (s_teardown_pending && !finish_teardown()) return ESP_ERR_TIMEOUT;
 
     bool enabled = true;
     espos_config_get_bool(ESPOS_CFG_NS_BLE, ESPOS_CFG_BLE_ENABLED, &enabled);
@@ -1711,6 +1753,7 @@ bool espos_ble_scan_is_suspended(void) { return g.scan_suspend_count > 0; }
 
 esp_err_t espos_ble_stop(void)
 {
+    if (s_teardown_pending) return finish_teardown() ? ESP_OK : ESP_ERR_TIMEOUT;
     if (!g.running) return ESP_OK;
     g.running = false;
     espos_ble_scan_stop();
@@ -1736,36 +1779,7 @@ esp_err_t espos_ble_stop(void)
         ws_destroy();
     }
 
-    /* Close any live session and release its allocations - a stop/start cycle
-     * would otherwise orphan them and leave stale connection handles behind.
-     * The lock's holders are Bluetooth callbacks that each hold it briefly, so
-     * a few tries outlast any of them. If they do not, the sessions and their
-     * mutex stay as they are: deleting a mutex another task holds is
-     * undefined. running is restored for the same reason as above. */
-    bool closed = false;
-    for (int i = 0; i < 4 && !closed; i++) closed = close_all_sessions();
-    if (!closed) {
-        ESP_LOGW(TAG, "session lock busy; leaving the GATT sessions alone");
-        g.running = true;
-        return ESP_ERR_TIMEOUT;
-    }
-
-    if (g.lock) {
-        vSemaphoreDelete(g.lock);
-        g.lock = NULL;
-    }
-    if (g.sess_lock) {
-        vSemaphoreDelete(g.sess_lock);
-        g.sess_lock = NULL;
-    }
-    free(g.storage);
-    g.storage = NULL;
-    memset(&g.q, 0, sizeof(g.q));
-    /* Frames for sessions that no longer exist; a restart starts empty. */
-    xSemaphoreTake(g.gq_lock, portMAX_DELAY);
-    espos_ble_frameq_clear(&g.gq);
-    xSemaphoreGive(g.gq_lock);
-    return ESP_OK;
+    return finish_teardown() ? ESP_OK : ESP_ERR_TIMEOUT;
 }
 
 esp_err_t espos_ble_get_status(espos_ble_status_t *out)
