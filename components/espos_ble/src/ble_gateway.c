@@ -184,6 +184,10 @@ static struct {
     SemaphoreHandle_t gq_lock;
     /* 1 while gatt_drain() sends the frame it popped. Under gq_lock. */
     size_t gq_inflight;
+    /* Bumped under sess_lock whenever every session is closed. A callback
+     * reads it under the lock with the session id, and gatt_enqueue() drops
+     * a frame whose sessions were closed after that read; see send_gatt_at(). */
+    atomic_uint_least32_t sess_gen;
     /* GATT frames freed unqueued: no memory to serialise one, or gq_lock
      * busy. Atomic for the same reason as lock_drops. */
     atomic_uint_least32_t gq_lost;
@@ -471,6 +475,7 @@ static void session_free(session_t *s)
 static void close_all_sessions(void)
 {
     if (!sess_lock()) return;
+    atomic_fetch_add(&g.sess_gen, 1);
     for (size_t i = 0; i < MAX_SESSIONS; i++) {
         if (!g.sessions[i].active) continue;
         espos_ble_gatt_disconnect(g.sessions[i].conn_handle);
@@ -494,7 +499,7 @@ static void gatt_report_drop(bool dropped)
  * on the websocket, so it is safe on the Bluetooth stack task and under the
  * session lock. A frame queued while the socket is down goes out after the
  * next hello. */
-static void gatt_enqueue(char *txt)
+static void gatt_enqueue(char *txt, uint32_t gen)
 {
     if (!txt) {
         atomic_fetch_add_explicit(&g.gq_lost, 1, memory_order_relaxed);
@@ -506,15 +511,24 @@ static void gatt_enqueue(char *txt)
         atomic_fetch_add_explicit(&g.gq_lost, 1, memory_order_relaxed);
         return;
     }
+    /* Checked under gq_lock: a server change bumps the generation before it
+     * empties the queue, so a frame for the closed sessions is either
+     * emptied with the queue or refused here, never sent to the new server. */
+    if (gen != atomic_load(&g.sess_gen)) {
+        xSemaphoreGive(g.gq_lock);
+        free(txt);
+        return;
+    }
     bool dropped = espos_ble_frameq_push(&g.gq, txt);
     xSemaphoreGive(g.gq_lock);
     gatt_report_drop(dropped);
     gateway_wake();
 }
 
-static void send_gatt_event(const char *type, const char *session_id,
-                            const char *uuid, const char *data_hex,
-                            const char *error, int reason)
+/* gen is g.sess_gen as read under sess_lock together with session_id, for a
+ * frame reported after the lock is released. */
+static void send_gatt_at(uint32_t gen, const char *type, const char *session_id, const char *uuid,
+                         const char *data_hex, const char *error, int reason)
 {
     cJSON *d = cJSON_CreateObject();
     if (!d) {
@@ -527,8 +541,15 @@ static void send_gatt_event(const char *type, const char *session_id,
     if (data_hex) cJSON_AddStringToObject(d, "data", data_hex);
     if (error) cJSON_AddStringToObject(d, "error", error);
     if (reason >= 0) cJSON_AddNumberToObject(d, "reason", reason);
-    gatt_enqueue(cJSON_PrintUnformatted(d));
+    gatt_enqueue(cJSON_PrintUnformatted(d), gen);
     cJSON_Delete(d);
+}
+
+/* For a report made under sess_lock, or one that no session owns yet. */
+static void send_gatt_event(const char *type, const char *session_id, const char *uuid, const char *data_hex,
+                            const char *error, int reason)
+{
+    send_gatt_at(atomic_load(&g.sess_gen), type, session_id, uuid, data_hex, error, reason);
 }
 
 /* Gateway task only. Sends the hello a new socket owes, then queued frames
@@ -660,9 +681,9 @@ static void handle_gatt_subscribe(cJSON *doc)
         }
     }
     if (!s) {
+        uint32_t gen = atomic_load(&g.sess_gen);
         sess_unlock();
-        send_gatt_event("gatt_error", sid->valuestring, NULL, NULL,
-                        "no free session slot", -1);
+        send_gatt_at(gen, "gatt_error", sid->valuestring, NULL, NULL, "no free session slot", -1);
         return;
     }
 
@@ -723,8 +744,9 @@ static void handle_gatt_subscribe(cJSON *doc)
         char sid_copy[sizeof(s->session_id)];
         snprintf(sid_copy, sizeof(sid_copy), "%s", s->session_id);
         session_free(s);
+        uint32_t gen = atomic_load(&g.sess_gen);
         sess_unlock();
-        send_gatt_event("gatt_error", sid_copy, NULL, NULL, "connect failed", -1);
+        send_gatt_at(gen, "gatt_error", sid_copy, NULL, NULL, "connect failed", -1);
         return;
     }
     sess_unlock();
@@ -749,9 +771,9 @@ static void handle_gatt_write(cJSON *doc)
     if (len < 0) {
         char sid_copy[sizeof(s->session_id)];
         snprintf(sid_copy, sizeof(sid_copy), "%s", s->session_id);
+        uint32_t gen = atomic_load(&g.sess_gen);
         sess_unlock();
-        send_gatt_event("gatt_error", sid_copy, uuid->valuestring, NULL,
-                        "bad hex payload", -1);
+        send_gatt_at(gen, "gatt_error", sid_copy, uuid->valuestring, NULL, "bad hex payload", -1);
         return;
     }
     espos_ble_gatt_write(s->conn_handle, uuid->valuestring, buf, (size_t)len,
@@ -1012,8 +1034,9 @@ static void on_gatt_disconnected(int h, int reason, void *arg)
     char sid[sizeof(s->session_id)];
     snprintf(sid, sizeof(sid), "%s", s->session_id);
     session_free(s);
+    uint32_t gen = atomic_load(&g.sess_gen);
     sess_unlock();
-    send_gatt_event("gatt_disconnected", sid, NULL, NULL, NULL, reason);
+    send_gatt_at(gen, "gatt_disconnected", sid, NULL, NULL, NULL, reason);
 }
 
 static void on_gatt_notify(int h, const char *uuid, const uint8_t *data,
@@ -1022,6 +1045,9 @@ static void on_gatt_notify(int h, const char *uuid, const uint8_t *data,
     (void)arg;
     char sid[sizeof(g.sessions[0].session_id)];
     if (!sess_lock()) {
+        /* Counted although the handle cannot be checked without the lock: a
+         * notification for a session that just closed may count too, but a
+         * lost reply must never go uncounted. */
         atomic_fetch_add_explicit(&g.gq_lost, 1, memory_order_relaxed);
         return;
     }
@@ -1031,6 +1057,7 @@ static void on_gatt_notify(int h, const char *uuid, const uint8_t *data,
         return;
     }
     snprintf(sid, sizeof(sid), "%s", s->session_id);
+    uint32_t gen = atomic_load(&g.sess_gen);
     sess_unlock();
 
     /* len comes from the peripheral (bounded by the negotiated MTU), so cap it
@@ -1047,7 +1074,7 @@ static void on_gatt_notify(int h, const char *uuid, const uint8_t *data,
     }
     /* lowercase on the GATT channel */
     espos_ble_hex_encode_lower(data, len, hex);
-    send_gatt_event("gatt_data", sid, uuid, hex, NULL, -1);
+    send_gatt_at(gen, "gatt_data", sid, uuid, hex, NULL, -1);
     free(hex);
 }
 
@@ -1104,8 +1131,9 @@ static void on_gatt_error(int h, const char *error, void *arg)
     char sid[sizeof(s->session_id)];
     snprintf(sid, sizeof(sid), "%s", s->session_id);
     session_free(s);
+    uint32_t gen = atomic_load(&g.sess_gen);
     sess_unlock();
-    send_gatt_event("gatt_error", sid, NULL, NULL, error, -1);
+    send_gatt_at(gen, "gatt_error", sid, NULL, NULL, error, -1);
 }
 
 /* ---------------------------------------------------------------- */
