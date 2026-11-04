@@ -1737,8 +1737,18 @@ esp_err_t espos_ble_stop(void)
     }
 
     /* Close any live session and release its allocations - a stop/start cycle
-     * would otherwise orphan them and leave stale connection handles behind. */
-    (void)close_all_sessions();
+     * would otherwise orphan them and leave stale connection handles behind.
+     * The lock's holders are Bluetooth callbacks that each hold it briefly, so
+     * a few tries outlast any of them. If they do not, the sessions and their
+     * mutex stay as they are: deleting a mutex another task holds is
+     * undefined. running is restored for the same reason as above. */
+    bool closed = false;
+    for (int i = 0; i < 4 && !closed; i++) closed = close_all_sessions();
+    if (!closed) {
+        ESP_LOGW(TAG, "session lock busy; leaving the GATT sessions alone");
+        g.running = true;
+        return ESP_ERR_TIMEOUT;
+    }
 
     if (g.lock) {
         vSemaphoreDelete(g.lock);
