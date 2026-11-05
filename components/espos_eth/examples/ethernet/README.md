@@ -12,6 +12,13 @@ that vary per board — the PHY's MDIO address and its reset GPIO — are Kconfi
 defaulting to this board's `1` and `51`. Details: [docs/net.md](../../../../docs/net.md),
 "Wired Ethernet".
 
+On an **ESP32-S3** the example builds for the **Waveshare
+ESP32-S3-ETH-8DI-8RO-C** instead. The S3 has no EMAC, so
+`sdkconfig.defaults.esp32s3` selects the board's W5500 on SPI, whose pins are
+the defaults in menu "espOS Ethernet". That board takes power from its own
+supply (7 to 36 V, or USB-C) rather than PoE, so the warning below does
+not apply to it.
+
 ## WiFi is off
 
 `sdkconfig.defaults` sets `CONFIG_ESPOS_WIFI=n`, which is what makes this an
@@ -32,7 +39,8 @@ and why the checks below are all over the network.
 
 ## Checking it
 
-With the board on PoE and a DHCP server on the network:
+With the board on the network (the PoE board on PoE, the ESP32-S3 board on
+its own supply or USB-C) and a DHCP server there:
 
 1. **Find it.** `avahi-browse -rt _espos._tcp` (or your router's lease table).
 2. **Confirm the route is the cable:**
@@ -44,5 +52,6 @@ With the board on PoE and a DHCP server on the network:
    logs `on the cable as <address>` when the route arrives.
 
 If `/api/v1/net/status` never answers, the device has no address. The two
-likely causes fail the same quiet way: a wrong PHY address or reset GPIO (the
-start log names both), or no DHCP server on that network.
+likely causes fail the same quiet way: wiring that does not match the settings
+(a PHY address or reset GPIO, or the W5500's SPI pins; the start log names
+them), or no DHCP server on that network.

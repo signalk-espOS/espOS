@@ -34,10 +34,10 @@
 #else
 #define START_WIFI 0
 #endif
-/* Wired Ethernet: the component, a chip with an internal EMAC, and the switch.
- * Started beside the WiFi station, not instead of it -- espos_net picks the
- * route and prefers the cable. */
-#if ESPOS_HAVE_ETH && CONFIG_ETH_USE_ESP32_EMAC && CONFIG_ESPOS_ETH
+/* Wired Ethernet: the component, a controller (the internal EMAC or a W5500),
+ * and the switch. Started beside the WiFi station, not instead of it --
+ * espos_net picks the route and prefers the cable. */
+#if ESPOS_HAVE_ETH && CONFIG_ESPOS_ETH_HAVE_CONTROLLER && CONFIG_ESPOS_ETH
 #define START_ETH 1
 #include "espos_eth.h"
 #else

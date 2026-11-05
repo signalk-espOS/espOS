@@ -12,6 +12,7 @@ writing; the lock files are authoritative.
 | [espressif/mdns](https://components.espressif.com/components/espressif/mdns) | wifi (responder, `espos_mdns.h`), sk (discovery), n2k | Apache-2.0 |
 | [NMEA2000](https://github.com/ttlappalainen/NMEA2000) (Timo Lappalainen, vendored in `components/espos_n2k/third_party/NMEA2000`) | n2k, only with `CONFIG_ESPOS_N2K_NODE` | MIT |
 | [joltwallet/littlefs](https://components.espressif.com/components/joltwallet/littlefs) | httpd (UI partition) | BSD-3-Clause (littlefs) / Apache-2.0 (port) |
+| [espressif/w5500](https://components.espressif.com/components/espressif/w5500), [espressif/wiznet_common](https://components.espressif.com/components/espressif/wiznet_common) | eth (W5500 on SPI) | Apache-2.0 |
 | [espressif/esp_websocket_client](https://components.espressif.com/components/espressif/esp_websocket_client) | ble | Apache-2.0 |
 | [espressif/esp_hosted](https://components.espressif.com/components/espressif/esp_hosted), [espressif/esp_wifi_remote](https://components.espressif.com/components/espressif/esp_wifi_remote) | wifi/ble on ESP32-P4 | Apache-2.0 |
 | [espressif/esp-sr](https://components.espressif.com/components/espressif/esp-sr) (WakeNet/AFE) | voice (esp32s3, esp32p4) | Apache-2.0 for the API; the wake-word **model binaries are under Espressif's own model license** — read it before redistributing a voice firmware image |
