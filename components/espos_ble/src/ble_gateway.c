@@ -77,6 +77,19 @@ static void on_update_event(void *arg, esp_event_base_t base, int32_t id, void *
  * JSON document out of a busy marina. */
 #define POST_BATCH_MAX CONFIG_ESPOS_BLE_POST_BATCH_MAX
 
+/* How long the gateway task waits for the socket lock, and then for the send,
+ * when it sends the hello or a queued GATT frame. Longer than the 100 ms a
+ * status frame gets, because a frame that times out is retried rather than
+ * lost; short enough that a stalled socket cannot keep espos_ble_stop()
+ * waiting for the task. */
+#define GATT_SEND_TIMEOUT_MS 250
+/* Between hello attempts on a socket that did not take the last one, so a
+ * stalled socket does not cost a blocked attempt on every queued frame. */
+#define HELLO_RETRY_US (1000 * 1000LL)
+/* One drain sends for at most this long, so a slow socket that still takes
+ * frames cannot hold back POSTs, status and the init-write watchdog. */
+#define GATT_DRAIN_BUDGET_US (500 * 1000LL)
+
 typedef struct {
     bool active;
     char session_id[40];
@@ -117,6 +130,9 @@ static struct {
     atomic_bool ws_unauth_reported;
     /* This socket got as far as CONNECTED, so its end restarts the backoff. */
     volatile bool ws_connected_once;
+    /* The hello on this socket has gone out, so queued GATT frames may
+     * follow: the server only takes them from a gateway that said hello. */
+    atomic_bool ws_ready;
     TaskHandle_t task;
     session_t sessions[MAX_SESSIONS];
 
@@ -160,6 +176,17 @@ static struct {
      * g.lock. Written on the Bluetooth stack task without the lock, read on
      * the API task, so it is atomic rather than a plain counter. */
     atomic_uint_least32_t lock_drops;
+
+    /* GATT frames for the control socket; see espos_ble_frameq_t. gq_lock
+     * guards gq only and is held for pointer moves, never across a send. */
+    espos_ble_frameq_t gq;
+    char *gq_slots[CONFIG_ESPOS_BLE_GATT_QUEUE_DEPTH];
+    SemaphoreHandle_t gq_lock;
+    /* 1 while gatt_drain() sends the frame it popped. Under gq_lock. */
+    size_t gq_inflight;
+    /* GATT frames freed unqueued: no memory to serialise one, or gq_lock
+     * busy. Atomic for the same reason as lock_drops. */
+    atomic_uint_least32_t gq_lost;
 } g;
 
 /* ---------------------------------------------------------------- */
@@ -317,28 +344,49 @@ static size_t pending_count(void)
  * first send and needs no teardown. */
 static StaticSemaphore_t s_ws_lock_buf;
 static SemaphoreHandle_t s_ws_lock;
+static StaticSemaphore_t s_gq_lock_buf;
+/* Wakes the gateway task early to send queued frames. A static semaphore
+ * rather than a task notification: a callback racing stop() would otherwise
+ * notify a task that has already deleted itself. */
+static StaticSemaphore_t s_wake_buf;
+static SemaphoreHandle_t s_wake;
 
-static void ws_send_json(cJSON *doc)
+static void gateway_wake(void)
 {
-    if (!g.ws_connected) return;
-    char *txt = cJSON_PrintUnformatted(doc);
-    if (!txt) return;
-    /* Short, because run_subscribes()/run_init_writes() report through here
-     * while holding the session lock, on the Bluetooth stack task. A long
-     * timeout there stalls the radio; a dropped status frame does not. */
-    if (xSemaphoreTake(s_ws_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
+    if (s_wake) xSemaphoreGive(s_wake);
+}
+
+/* True once the whole frame went out. */
+static bool ws_send_text(const char *txt, uint32_t timeout_ms)
+{
+    bool sent = false;
+    if (!g.ws_connected) return false;
+    if (xSemaphoreTake(s_ws_lock, pdMS_TO_TICKS(timeout_ms)) == pdTRUE) {
         if (g.ws && g.ws_connected) {
-            esp_websocket_client_send_text(g.ws, txt, strlen(txt), pdMS_TO_TICKS(100));
+            int len = (int)strlen(txt);
+            sent = esp_websocket_client_send_text(g.ws, txt, len, pdMS_TO_TICKS(timeout_ms)) == len;
         }
         xSemaphoreGive(s_ws_lock);
     }
-    free(txt);
+    return sent;
 }
 
-static void send_hello(void)
+/* For status, which the next one replaces: a short wait, and a frame that
+ * misses it is dropped. True once it went out. */
+static bool ws_send_json(cJSON *doc, uint32_t timeout_ms)
+{
+    if (!g.ws_connected) return false;
+    char *txt = cJSON_PrintUnformatted(doc);
+    if (!txt) return false;
+    bool sent = ws_send_text(txt, timeout_ms);
+    free(txt);
+    return sent;
+}
+
+static bool send_hello(void)
 {
     cJSON *d = cJSON_CreateObject();
-    if (!d) return;
+    if (!d) return false;
     cJSON_AddStringToObject(d, "type", "hello");
     cJSON_AddStringToObject(d, "gateway_id", espos_ble_mac());
     cJSON_AddStringToObject(d, "mac", espos_ble_mac());
@@ -346,12 +394,14 @@ static void send_hello(void)
     cJSON_AddNumberToObject(d, "max_gatt_connections", g.max_gatt);
     cJSON_AddNumberToObject(d, "active_gatt_connections",
                             espos_ble_gatt_active_count());
-    ws_send_json(d);
+    bool sent = ws_send_json(d, GATT_SEND_TIMEOUT_MS);
     cJSON_Delete(d);
+    return sent;
 }
 
 static void send_status(void)
 {
+    if (!atomic_load(&g.ws_ready)) return; /* the hello goes first */
     cJSON *d = cJSON_CreateObject();
     if (!d) return;
     cJSON_AddStringToObject(d, "type", "status");
@@ -364,7 +414,7 @@ static void send_status(void)
     cJSON_AddNumberToObject(d, "active_gatt_connections",
                             espos_ble_gatt_active_count());
     cJSON_AddNumberToObject(d, "max_gatt_connections", g.max_gatt);
-    ws_send_json(d);
+    ws_send_json(d, 100);
     cJSON_Delete(d);
 }
 
@@ -376,14 +426,9 @@ static void send_status(void)
  * through its return value instead of invoking on_gatt_write_done() inline:
  * doing so deadlocked the init chain, which then only advanced when the 3 s
  * watchdog fired. */
-/* Must exceed the worst case a holder can take. The longest is a session
- * bring-up that reports several events through ws_send_json(), each capped at
- * 100 ms. 500 ms leaves room for that without letting a degraded websocket
- * make every other task fail to acquire the lock.
- *
- * The deeper fix is to hand callback work to gateway_task through a queue so
- * the Bluetooth stack task never blocks at all; that is a larger change than
- * this one is worth, and the timeouts here bound the exposure meanwhile. */
+/* Must exceed the worst case a holder can take: a session bring-up issues
+ * its subscribes and first init write and queues its reports, none of which
+ * waits on the websocket (see gatt_enqueue()). */
 static inline bool sess_lock(void)
 {
     return g.sess_lock && xSemaphoreTake(g.sess_lock, pdMS_TO_TICKS(500)) == pdTRUE;
@@ -421,20 +466,123 @@ static void session_free(session_t *s)
     memset(s, 0, sizeof(*s));
 }
 
-static void send_gatt_event(const char *type, const char *session_id,
-                            const char *uuid, const char *data_hex,
+/* Disconnects and frees every session. Freed under the lock, before the
+ * disconnect events arrive, so those find no session and report nothing.
+ * False if the lock could not be taken and the sessions are still open. */
+static bool close_all_sessions(void)
+{
+    if (!sess_lock()) return false;
+    for (size_t i = 0; i < MAX_SESSIONS; i++) {
+        if (!g.sessions[i].active) continue;
+        espos_ble_gatt_disconnect(g.sessions[i].conn_handle);
+        session_free(&g.sessions[i]);
+    }
+    sess_unlock();
+    return true;
+}
+
+/* Once per run: a queue that overflows does so for every frame, and the
+ * status counter carries the total. */
+static atomic_bool s_gq_drop_logged;
+
+static void gatt_report_drop(bool dropped)
+{
+    if (dropped && !atomic_exchange(&s_gq_drop_logged, true)) {
+        ESP_LOGW(TAG, "GATT queue full - dropping the oldest frames (see gatt_dropped)");
+    }
+}
+
+/* Hands a serialised frame to the gateway task, which sends it. Never waits
+ * on the websocket, so it is safe on the Bluetooth stack task and under the
+ * session lock. A frame queued while the socket is down goes out after the
+ * next hello. */
+static void gatt_enqueue(char *txt)
+{
+    if (!txt) {
+        atomic_fetch_add_explicit(&g.gq_lost, 1, memory_order_relaxed);
+        return;
+    }
+    /* Every holder only moves pointers, so a short wait is plenty. */
+    if (!g.gq_lock || xSemaphoreTake(g.gq_lock, pdMS_TO_TICKS(10)) != pdTRUE) {
+        free(txt);
+        atomic_fetch_add_explicit(&g.gq_lost, 1, memory_order_relaxed);
+        return;
+    }
+    bool dropped = espos_ble_frameq_push(&g.gq, txt);
+    xSemaphoreGive(g.gq_lock);
+    gatt_report_drop(dropped);
+    gateway_wake();
+}
+
+/* A frame about a session is queued while sess_lock is held, from the
+ * lookup that found the session: a server change closes the sessions under
+ * that lock before it empties the queue, so every frame of a closed session
+ * is either emptied with the queue or never made, and none is queued behind
+ * a later report on the same session id. Only a reply for a session that
+ * does not exist is queued without the lock. */
+static void send_gatt_event(const char *type, const char *session_id, const char *uuid, const char *data_hex,
                             const char *error, int reason)
 {
     cJSON *d = cJSON_CreateObject();
-    if (!d) return;
+    if (!d) {
+        atomic_fetch_add_explicit(&g.gq_lost, 1, memory_order_relaxed);
+        return;
+    }
     cJSON_AddStringToObject(d, "type", type);
     cJSON_AddStringToObject(d, "session_id", session_id);
     if (uuid) cJSON_AddStringToObject(d, "uuid", uuid);
     if (data_hex) cJSON_AddStringToObject(d, "data", data_hex);
     if (error) cJSON_AddStringToObject(d, "error", error);
     if (reason >= 0) cJSON_AddNumberToObject(d, "reason", reason);
-    ws_send_json(d);
+    gatt_enqueue(cJSON_PrintUnformatted(d));
     cJSON_Delete(d);
+}
+
+/* Gateway task only. Sends the hello a new socket owes, then queued frames
+ * oldest first until the queue is empty or a send fails. A failed frame goes
+ * back to the head, so nothing is reordered and nothing is lost to a busy
+ * socket. A send that fails after writing part of a frame aborts the
+ * connection (esp_websocket_client does), so the retry starts the frame
+ * again on the next socket; the server may then see a frame twice, never a
+ * torn one. Bounded by the depth, so a stream of notifications cannot keep
+ * the task from its other work. */
+static void gatt_drain(void)
+{
+    static int64_t hello_retry_at;
+    if (!g.ws_connected) return;
+    if (!atomic_load(&g.ws_ready)) {
+        int64_t now = esp_timer_get_time();
+        if (now < hello_retry_at) return;
+        if (!send_hello()) {
+            hello_retry_at = now + HELLO_RETRY_US;
+            return;
+        }
+        hello_retry_at = 0;
+        atomic_store(&g.ws_ready, true);
+    }
+    int64_t drain_end = esp_timer_get_time() + GATT_DRAIN_BUDGET_US;
+    for (size_t i = 0; i < CONFIG_ESPOS_BLE_GATT_QUEUE_DEPTH; i++) {
+        if (!g.running || !atomic_load(&g.ws_ready) || !g.ws_connected) return;
+        if (esp_timer_get_time() >= drain_end) return;
+        if (xSemaphoreTake(g.gq_lock, pdMS_TO_TICKS(100)) != pdTRUE) return;
+        char *txt = espos_ble_frameq_pop(&g.gq);
+        /* Still pending while it is being sent: set under the lock, so a
+         * status read sees the frame in exactly one of the two places. */
+        if (txt) g.gq_inflight = 1;
+        xSemaphoreGive(g.gq_lock);
+        if (!txt) return;
+        bool sent = ws_send_text(txt, GATT_SEND_TIMEOUT_MS);
+        xSemaphoreTake(g.gq_lock, portMAX_DELAY);
+        g.gq_inflight = 0;
+        bool kept = sent || espos_ble_frameq_unshift(&g.gq, txt);
+        xSemaphoreGive(g.gq_lock);
+        if (sent) {
+            free(txt);
+            continue;
+        }
+        gatt_report_drop(!kept);
+        return;
+    }
 }
 
 /* Drive the init-write chain. Each write starts when the previous completes -
@@ -519,9 +667,8 @@ static void handle_gatt_subscribe(cJSON *doc)
         }
     }
     if (!s) {
+        send_gatt_event("gatt_error", sid->valuestring, NULL, NULL, "no free session slot", -1);
         sess_unlock();
-        send_gatt_event("gatt_error", sid->valuestring, NULL, NULL,
-                        "no free session slot", -1);
         return;
     }
 
@@ -582,8 +729,8 @@ static void handle_gatt_subscribe(cJSON *doc)
         char sid_copy[sizeof(s->session_id)];
         snprintf(sid_copy, sizeof(sid_copy), "%s", s->session_id);
         session_free(s);
-        sess_unlock();
         send_gatt_event("gatt_error", sid_copy, NULL, NULL, "connect failed", -1);
+        sess_unlock();
         return;
     }
     sess_unlock();
@@ -608,9 +755,8 @@ static void handle_gatt_write(cJSON *doc)
     if (len < 0) {
         char sid_copy[sizeof(s->session_id)];
         snprintf(sid_copy, sizeof(sid_copy), "%s", s->session_id);
+        send_gatt_event("gatt_error", sid_copy, uuid->valuestring, NULL, "bad hex payload", -1);
         sess_unlock();
-        send_gatt_event("gatt_error", sid_copy, uuid->valuestring, NULL,
-                        "bad hex payload", -1);
         return;
     }
     espos_ble_gatt_write(s->conn_handle, uuid->valuestring, buf, (size_t)len,
@@ -665,10 +811,13 @@ static void ws_event(void *arg, esp_event_base_t base, int32_t id, void *data)
         g.ws_connected_once = true;
         s_ws_up_at = esp_timer_get_time();
         ESP_LOGI(TAG, "control WS connected");
-        send_hello();
+        /* The gateway task sends the hello, so no other send can crowd it
+         * out and queued GATT frames cannot overtake it. */
+        gateway_wake();
         break;
     case WEBSOCKET_EVENT_DISCONNECTED:
     case WEBSOCKET_EVENT_CLOSED: {
+        atomic_store(&g.ws_ready, false);
         g.ws_connected = false;
         int status = ev->error_handle.esp_ws_handshake_status_code;
         bool refused = status == 401 || status == 403 || ev->close_status_code == WS_CLOSE_UNAUTHORIZED;
@@ -709,6 +858,7 @@ static void ws_destroy(void)
     xSemaphoreTake(s_ws_lock, portMAX_DELAY);
     esp_websocket_client_handle_t h = g.ws;
     g.ws = NULL;
+    atomic_store(&g.ws_ready, false);
     g.ws_connected = false;
     xSemaphoreGive(s_ws_lock);
     /* Outside the lock: destroy() waits for the client's task, which may be
@@ -716,6 +866,7 @@ static void ws_destroy(void)
      * task has ended would only log that it was not started. */
     if (h) esp_websocket_client_destroy(h);
     /* Again: a handshake finishing before destroy() joined the task set it. */
+    atomic_store(&g.ws_ready, false);
     g.ws_connected = false;
 }
 
@@ -747,6 +898,18 @@ static void ws_connect(void)
             ESP_LOGI(TAG, "control WS server changed %s://%s:%u -> %s://%s:%u",
                      s_ws_tls ? "wss" : "ws", s_ws_host, s_ws_port,
                      srv.tls ? "wss" : "ws", srv.host, srv.port);
+            /* The old server's sessions, and the frames they queued, mean
+             * nothing to the new one. Its socket goes first, so no request
+             * from it opens a session meanwhile; the sessions are freed
+             * before their disconnects arrive, so those queue nothing; the
+             * frames count as dropped. Until the sessions are closed, no new
+             * socket is dialled, and the next pass tries again. */
+            ws_destroy();
+            if (!close_all_sessions()) return;
+            xSemaphoreTake(g.gq_lock, portMAX_DELAY);
+            atomic_fetch_add_explicit(&g.gq_lost, (uint32_t)espos_ble_frameq_count(&g.gq), memory_order_relaxed);
+            espos_ble_frameq_clear(&g.gq);
+            xSemaphoreGive(g.gq_lock);
         }
         s_ws_retry_at = 0;
         s_ws_round = 0;
@@ -858,9 +1021,8 @@ static void on_gatt_disconnected(int h, int reason, void *arg)
     char sid[sizeof(s->session_id)];
     snprintf(sid, sizeof(sid), "%s", s->session_id);
     session_free(s);
-    sess_unlock();
-    /* Report outside the lock: the send can block on the websocket. */
     send_gatt_event("gatt_disconnected", sid, NULL, NULL, NULL, reason);
+    sess_unlock();
 }
 
 static void on_gatt_notify(int h, const char *uuid, const uint8_t *data,
@@ -868,14 +1030,19 @@ static void on_gatt_notify(int h, const char *uuid, const uint8_t *data,
 {
     (void)arg;
     char sid[sizeof(g.sessions[0].session_id)];
-    if (!sess_lock()) return;
+    if (!sess_lock()) {
+        /* Counted although the handle cannot be checked without the lock: a
+         * notification for a session that just closed may count too, but a
+         * lost reply must never go uncounted. */
+        atomic_fetch_add_explicit(&g.gq_lost, 1, memory_order_relaxed);
+        return;
+    }
     session_t *s = session_by_handle(h);
     if (!s) {
         sess_unlock();
         return;
     }
     snprintf(sid, sizeof(sid), "%s", s->session_id);
-    sess_unlock();
 
     /* len comes from the peripheral (bounded by the negotiated MTU), so cap it
      * rather than sizing an allocation from a remote value. A GATT payload
@@ -885,10 +1052,15 @@ static void on_gatt_notify(int h, const char *uuid, const uint8_t *data,
         len = 512;
     }
     char *hex = malloc(len * 2 + 1);
-    if (!hex) return;
+    if (!hex) {
+        sess_unlock();
+        atomic_fetch_add_explicit(&g.gq_lost, 1, memory_order_relaxed);
+        return;
+    }
     /* lowercase on the GATT channel */
     espos_ble_hex_encode_lower(data, len, hex);
     send_gatt_event("gatt_data", sid, uuid, hex, NULL, -1);
+    sess_unlock();
     free(hex);
 }
 
@@ -945,8 +1117,8 @@ static void on_gatt_error(int h, const char *error, void *arg)
     char sid[sizeof(s->session_id)];
     snprintf(sid, sizeof(sid), "%s", s->session_id);
     session_free(s);
-    sess_unlock();
     send_gatt_event("gatt_error", sid, NULL, NULL, error, -1);
+    sess_unlock();
 }
 
 /* ---------------------------------------------------------------- */
@@ -975,6 +1147,7 @@ static void gateway_task(void *arg)
             }
             if (g.control_ws) {
                 ws_connect();
+                gatt_drain();
                 if (now >= next_status) {
                     send_status();
                     next_status = now + (int64_t)g.status_int * 1000;
@@ -1007,7 +1180,15 @@ static void gateway_task(void *arg)
             sess_unlock();
         }
 
-        vTaskDelay(pdMS_TO_TICKS(100));
+        /* Until the next pass, a queued frame or a new socket wakes the
+         * task for the drain alone, so a notification does not wait out the
+         * pass and a busy peripheral does not run the rest of it each time. */
+        int64_t pass_end = esp_timer_get_time() + 100 * 1000;
+        for (;;) {
+            int64_t left_ms = (pass_end - esp_timer_get_time()) / 1000;
+            if (left_ms <= 0 || xSemaphoreTake(s_wake, pdMS_TO_TICKS(left_ms)) != pdTRUE) break;
+            if (sk_up && g.control_ws) gatt_drain();
+        }
     }
     g.task_exited = true;
 #if CONFIG_ESPOS_BLE_STACK_IN_PSRAM
@@ -1040,9 +1221,51 @@ esp_err_t espos_ble_reserve_controller(void)
     return espos_ble_backend_controller_only();
 }
 
+/* Set when a stop ended with the GATT sessions still open; see
+ * finish_teardown(). The gateway is down; the next stop or start finishes it. */
+static bool s_teardown_pending;
+
+/* Frees what the stopped gateway task leaves behind. False, with nothing
+ * freed, if the GATT sessions cannot be closed: their holders are Bluetooth
+ * callbacks that each hold the lock briefly, so a few tries outlast any of
+ * them, and deleting a mutex another task holds is undefined. */
+static bool finish_teardown(void)
+{
+    /* Close any live session and release its allocations - a stop/start cycle
+     * would otherwise orphan them and leave stale connection handles behind. */
+    bool closed = false;
+    for (int i = 0; i < 4 && !closed; i++) closed = close_all_sessions();
+    if (!closed) {
+        ESP_LOGW(TAG, "session lock busy; leaving the GATT sessions alone");
+        s_teardown_pending = true;
+        return false;
+    }
+    s_teardown_pending = false;
+
+    if (g.lock) {
+        vSemaphoreDelete(g.lock);
+        g.lock = NULL;
+    }
+    if (g.sess_lock) {
+        vSemaphoreDelete(g.sess_lock);
+        g.sess_lock = NULL;
+    }
+    free(g.storage);
+    g.storage = NULL;
+    memset(&g.q, 0, sizeof(g.q));
+    /* Frames for sessions that no longer exist; a restart starts empty. */
+    xSemaphoreTake(g.gq_lock, portMAX_DELAY);
+    espos_ble_frameq_clear(&g.gq);
+    xSemaphoreGive(g.gq_lock);
+    return true;
+}
+
 esp_err_t espos_ble_start(void)
 {
     if (g.running) return ESP_OK;
+    /* A stop that left sessions open is finished first, or the start would
+     * build on half-freed state. */
+    if (s_teardown_pending && !finish_teardown()) return ESP_ERR_TIMEOUT;
 
     bool enabled = true;
     espos_config_get_bool(ESPOS_CFG_NS_BLE, ESPOS_CFG_BLE_ENABLED, &enabled);
@@ -1183,6 +1406,18 @@ esp_err_t espos_ble_start(void)
     espos_ble_advq_init(&g.q, g.storage, (size_t)cap);
 
     if (!s_ws_lock) s_ws_lock = xSemaphoreCreateMutexStatic(&s_ws_lock_buf);
+    /* Static and never deleted, like s_ws_lock: a GATT callback that races
+     * stop() then finds a working lock rather than a freed one. */
+    if (!g.gq_lock) g.gq_lock = xSemaphoreCreateMutexStatic(&s_gq_lock_buf);
+    if (!s_wake) s_wake = xSemaphoreCreateBinaryStatic(&s_wake_buf);
+    xSemaphoreTake(g.gq_lock, portMAX_DELAY);
+    /* A callback that raced the last stop() may have queued after it
+     * cleared. */
+    espos_ble_frameq_clear(&g.gq);
+    espos_ble_frameq_init(&g.gq, g.gq_slots, CONFIG_ESPOS_BLE_GATT_QUEUE_DEPTH);
+    xSemaphoreGive(g.gq_lock);
+    atomic_store(&g.gq_lost, 0);
+    atomic_store(&s_gq_drop_logged, false);
     g.lock = xSemaphoreCreateMutex();
     g.sess_lock = xSemaphoreCreateMutex();
     if (!g.lock || !g.sess_lock) {
@@ -1518,6 +1753,7 @@ bool espos_ble_scan_is_suspended(void) { return g.scan_suspend_count > 0; }
 
 esp_err_t espos_ble_stop(void)
 {
+    if (s_teardown_pending) return finish_teardown() ? ESP_OK : ESP_ERR_TIMEOUT;
     if (!g.running) return ESP_OK;
     g.running = false;
     espos_ble_scan_stop();
@@ -1543,29 +1779,7 @@ esp_err_t espos_ble_stop(void)
         ws_destroy();
     }
 
-    /* Close any live session and release its allocations - a stop/start cycle
-     * would otherwise orphan them and leave stale connection handles behind. */
-    if (sess_lock()) {
-        for (size_t i = 0; i < MAX_SESSIONS; i++) {
-            if (!g.sessions[i].active) continue;
-            espos_ble_gatt_disconnect(g.sessions[i].conn_handle);
-            session_free(&g.sessions[i]);
-        }
-        sess_unlock();
-    }
-
-    if (g.lock) {
-        vSemaphoreDelete(g.lock);
-        g.lock = NULL;
-    }
-    if (g.sess_lock) {
-        vSemaphoreDelete(g.sess_lock);
-        g.sess_lock = NULL;
-    }
-    free(g.storage);
-    g.storage = NULL;
-    memset(&g.q, 0, sizeof(g.q));
-    return ESP_OK;
+    return finish_teardown() ? ESP_OK : ESP_ERR_TIMEOUT;
 }
 
 esp_err_t espos_ble_get_status(espos_ble_status_t *out)
@@ -1604,6 +1818,22 @@ esp_err_t espos_ble_get_status(espos_ble_status_t *out)
     out->ws_connected = g.ws_connected;
     out->gatt_sessions = espos_ble_gatt_active_count();
     out->gatt_max = g.max_gatt;
+    return ESP_OK;
+}
+
+esp_err_t espos_ble_gatt_queue_stats(uint32_t *dropped, size_t *pending)
+{
+    if (!dropped || !pending) return ESP_ERR_INVALID_ARG;
+    if (!g.gq_lock) {
+        *dropped = 0;
+        *pending = 0;
+        return ESP_OK;
+    }
+    if (xSemaphoreTake(g.gq_lock, pdMS_TO_TICKS(100)) != pdTRUE) return ESP_ERR_TIMEOUT;
+    *dropped = g.gq.dropped;
+    *pending = espos_ble_frameq_count(&g.gq) + g.gq_inflight;
+    xSemaphoreGive(g.gq_lock);
+    *dropped += (uint32_t)atomic_load_explicit(&g.gq_lost, memory_order_relaxed);
     return ESP_OK;
 }
 

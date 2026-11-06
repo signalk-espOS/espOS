@@ -26,6 +26,19 @@ menu "espOS BLE gateway"
             implementation this replaced could not reassemble it. It also
             bounds the status frames going the other way.
 
+    config ESPOS_BLE_GATT_QUEUE_DEPTH
+        int "GATT frames queued for the control WebSocket"
+        default 16
+        range 1 128
+        help
+            Notifications, read results and session events wait here until
+            the gateway task has sent them on the control WebSocket, so a
+            busy or re-dialling socket delays a frame instead of losing it.
+            When the queue is full the oldest frame is dropped and counted
+            in gatt_dropped (GET /api/v1/ble/status). A frame is its JSON
+            text on the heap, at most about 1.1 KB for a 512-byte value, so
+            the default bounds the queue at under 20 KB.
+
     config ESPOS_BLE_GATTC_MAX_CONN
         int "Simultaneous GATT connections"
         default 3

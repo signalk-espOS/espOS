@@ -617,6 +617,13 @@ export function startMock(port = 8484): http.Server {
           { id: "out", title: "sk::Output<float>(environment.inside.illuminance)" },
         ],
       });
+      // ---- ble (docs/rest-api.md, GET /ble/status)
+      if (r === "/ble/status" && m === "GET") return json(res, 200, {
+        enabled: true, scanning: true, scan_suspended: false, mac: "D8:85:AC:FA:2C:46",
+        scan_hits: 2766, adv_received: 2766, adv_posted: 1840, adv_dropped: 0, adv_pending: 126,
+        post_success: 46, post_fail: 0, ws_connected: true,
+        gatt_sessions: 0, gatt_max: 3, gatt_dropped: 0, gatt_pending: 0,
+      });
       // ---- signalk
       if (r === "/sk/status" && m === "GET") return json(res, 200, skStatus());
       if (r === "/sk/servers" && m === "GET") return json(res, 200, serversDoc());

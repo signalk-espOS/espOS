@@ -7,6 +7,7 @@
 
 #include "ble_proto.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #include "cJSON.h"
@@ -114,6 +115,68 @@ size_t espos_ble_advq_drain(espos_ble_advq_t *q, espos_ble_adv_t *out, size_t ma
     }
     q->count -= n;
     return n;
+}
+
+void espos_ble_frameq_init(espos_ble_frameq_t *q, char **storage, size_t cap)
+{
+    q->slots = storage;
+    q->cap = cap;
+    q->head = 0;
+    q->count = 0;
+    q->dropped = 0;
+}
+
+bool espos_ble_frameq_push(espos_ble_frameq_t *q, char *frame)
+{
+    if (!q || !frame) return false;
+    if (!q->cap) {
+        free(frame);
+        q->dropped++;
+        return true;
+    }
+    bool evicted = false;
+    if (q->count == q->cap) {
+        free(q->slots[q->head]);
+        q->slots[q->head] = NULL;
+        q->head = (q->head + 1) % q->cap;
+        q->count--;
+        q->dropped++;
+        evicted = true;
+    }
+    q->slots[(q->head + q->count) % q->cap] = frame;
+    q->count++;
+    return evicted;
+}
+
+char *espos_ble_frameq_pop(espos_ble_frameq_t *q)
+{
+    if (!q || !q->count) return NULL;
+    char *frame = q->slots[q->head];
+    q->slots[q->head] = NULL;
+    q->head = (q->head + 1) % q->cap;
+    q->count--;
+    return frame;
+}
+
+bool espos_ble_frameq_unshift(espos_ble_frameq_t *q, char *frame)
+{
+    if (!q || !frame) return false;
+    if (q->count == q->cap) {
+        free(frame);
+        q->dropped++;
+        return false;
+    }
+    q->head = (q->head + q->cap - 1) % q->cap;
+    q->slots[q->head] = frame;
+    q->count++;
+    return true;
+}
+
+void espos_ble_frameq_clear(espos_ble_frameq_t *q)
+{
+    if (!q) return;
+    while (q->count) free(espos_ble_frameq_pop(q));
+    q->head = 0;
 }
 
 espos_ble_write_mode_t espos_ble_parse_write_mode(const void *cjson_obj)

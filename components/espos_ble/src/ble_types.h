@@ -105,6 +105,12 @@ esp_err_t espos_ble_gatt_write(int conn_id, const char *char_uuid,
 esp_err_t espos_ble_gatt_disconnect(int conn_id);
 uint32_t espos_ble_gatt_active_count(void);
 
+/* The gateway's GATT frame queue for GET /api/v1/ble/status: frames lost
+ * before the control socket took them, and frames still waiting. Internal
+ * rather than in espos_ble_status_t, whose layout is public ABI.
+ * ESP_ERR_TIMEOUT if the queue's lock could not be taken. */
+esp_err_t espos_ble_gatt_queue_stats(uint32_t *dropped, size_t *pending);
+
 #ifdef __cplusplus
 }
 #endif

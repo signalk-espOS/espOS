@@ -67,6 +67,31 @@ upgrade or a 4401 close is reported to the token machine like a rejected
 POST, once per token. esp_websocket_client's own reconnect is off because it
 resends the token the client was built with.
 
+### GATT frames are queued, not sent from the Bluetooth task
+
+Every frame of a GATT session (`gatt_connected`, `gatt_data`,
+`gatt_disconnected`, `gatt_error`) is serialised where it happens and put in
+one queue; the gateway task sends it. The Bluetooth stack task never waits on
+the socket, and a frame that meets a busy socket is delayed, not lost: when a
+send fails it goes back to the head of the queue and is retried, so the order
+the server sees is the order things happened. A BMS that answers each command
+once over its notify characteristic relies on that; one lost `gatt_data` is a
+lost reply.
+
+The queue survives a re-dial to the same server: frames queued while the
+socket is down go out once the new socket has sent its `hello`. A change of
+server closes the GATT sessions the old server opened and empties the queue,
+counting its frames in `gatt_dropped`: the new server never opened those
+sessions. One drain sends for at most 500 ms, so a slow socket cannot hold
+back the advertisement POSTs. It holds
+`CONFIG_ESPOS_BLE_GATT_QUEUE_DEPTH` frames (16 by default); when it is full
+the oldest frame is dropped and counted in `gatt_dropped`. The gateway task
+also sends each socket's `hello`, before anything else, and tries again
+every second until it goes out. `status` is not queued: the next one replaces it, so one that
+misses its 100 ms window is dropped. A send that fails partway through a
+frame ends the connection, so the retry goes out whole on the next socket;
+the server can see a frame twice, but never a torn one.
+
 ## GATT writes: `with_response`
 
 Every write in `init[]` and the direct `gatt_write` command may carry an
@@ -252,6 +277,12 @@ described in [rest-api.md](rest-api.md). Reading them:
   larger `max_pend_ads` bridges a short outage but cannot make up a steady
   shortfall. The count is exact and runs since the gateway started, so watch
   whether it rises rather than whether it is zero.
+* `gatt_dropped` rising — GATT frames were lost before the control socket
+  took them: the queue was full, or there was no memory to serialise one.
+  `gatt_pending` staying high says the socket is down or not keeping up;
+  check `ws_connected` and the Signal K link. A deeper queue
+  (`CONFIG_ESPOS_BLE_GATT_QUEUE_DEPTH`) bridges a longer outage at the cost
+  of heap.
 * `post_fail` rising with `ws_connected: false` — a server or token problem,
   not a BLE one; check `GET /api/v1/sk/status` first.
 * `scanning: false` while `enabled: true` — the controller refused to start;
@@ -261,7 +292,8 @@ described in [rest-api.md](rest-api.md). Reading them:
 
 `test/host/espos_ble_test` runs the wire-format logic on the linux target
 (hex encoders, the advertisement ring and its drop accounting, when a POST
-is due, UUID parsing and endianness, `with_response` defaulting):
+is due, the GATT frame queue's order, retry and drop accounting, UUID parsing
+and endianness, `with_response` defaulting):
 
 ```sh
 cd test/host/espos_ble_test
