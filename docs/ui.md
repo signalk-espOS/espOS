@@ -165,9 +165,10 @@ espos_project_ui_partition()   # same directory, for builds with the embed off
 `espos_httpd` then builds that bundle into the app image in place of its own
 (`CONFIG_ESPOS_HTTPD_UI_EMBED`), so an OTA update brings the firmware's pages
 too, and `espos_project_ui_partition()` defaults to it. With the embed on,
-the storage copy is served only where the built-in bundle has no file, which
-for the same directory is never; it is what a build with the embed off
-serves. A plain file kept beside its `.gz` is not embedded twice. It is a build
+storage answers only paths the built-in bundle has no file for. A device
+keeps whatever a USB flash last wrote there, so a file a later release
+dropped can still be served from it; the bundle's own pages never are. The
+storage copy is what a build with the embed off serves. A plain file kept beside its `.gz` is not embedded twice. It is a build
 property, not a prologue option, so a firmware that takes espOS from the
 component registry sets it the same way. A bundle that is only passed as
 `espos_project_ui_partition(DIR ...)` is served from `storage`, which OTA

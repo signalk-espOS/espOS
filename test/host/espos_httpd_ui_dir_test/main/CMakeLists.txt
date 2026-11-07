@@ -5,3 +5,4 @@ idf_component_register(
     INCLUDE_DIRS "." "${CMAKE_CURRENT_LIST_DIR}/../../../../components/espos_httpd/src"
     PRIV_REQUIRES unity espos_httpd espressif__cjson
     WHOLE_ARCHIVE)
+target_compile_definitions(${COMPONENT_LIB} PRIVATE UI_FIXTURE_DIR="${CMAKE_CURRENT_LIST_DIR}/../ui-fixture")

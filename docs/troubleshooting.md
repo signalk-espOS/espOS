@@ -54,8 +54,10 @@ Three places answer most questions before you get here:
     flashed over USB. Update to a firmware whose `/system/info` says
     `ui: "embedded"`, then reload the page with Ctrl/Cmd-Shift-R. A project
     with its own page bundle serves it from storage unless it names the bundle
-    with `ESPOS_HTTPD_UI_DIR` before `project()`; until it does, flash it over
-    USB with `idf.py flash`. [Web UI](ui.md#pages-from-a-firmware).
+    with `ESPOS_HTTPD_UI_DIR` before `project()`, and also when it passes
+    `espos_project_ui_partition()` a `DIR` other than that one (the build
+    warns). Drop `DIR`, or flash the storage bundle over USB with
+    `idf.py flash`. [Web UI](ui.md#pages-from-a-firmware).
 
 **The device shows a placeholder instead of the web UI** (`ui: "placeholder"` in `/system/info`; boot log `ui storage … has no index.html: serving the embedded page`)
 :   There is no page bundle in the image or in storage. With

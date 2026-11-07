@@ -76,7 +76,7 @@ function(espos_project_ui_partition)
             # bundle built into the app.
             idf_component_get_property(_ui_lib espos_httpd COMPONENT_LIB)
             target_compile_definitions(${_ui_lib} PRIVATE ESPOS_HTTPD_UI_FROM_STORAGE=1)
-            if(NOT _ui_embed_dir STREQUAL _UI_DEFAULT_DIR)
+            if(CONFIG_ESPOS_HTTPD_UI_EMBED AND NOT _ui_embed_dir STREQUAL _UI_DEFAULT_DIR)
                 # Both were named and they differ: the embedded bundle the
                 # firmware asked for would never be served.
                 message(WARNING "${_UI_NAME}: DIR ${_UI_DIR} differs from ESPOS_HTTPD_UI_DIR ${_ui_embed_dir}; "
@@ -101,12 +101,20 @@ function(espos_project_ui_partition)
         # the device then silently serves the placeholder page instead of the
         # real config UI, which looks like a firmware bug rather than a missing
         # build step.
-        if(_ui_dir_given)
-            set(_ui_fix "drop DIR to use the bundle that ships with espos_httpd")
+        if(CONFIG_ESPOS_HTTPD_UI_EMBED)
+            # Nothing is packed and FROM_STORAGE stays off, so the device
+            # serves the bundle built into the app.
+            message(WARNING "${_UI_NAME}: ${_UI_DIR} missing — nothing is packed into '${_UI_PARTITION}'; "
+                            "the device serves the bundle built into the app (${_ui_embed_dir}). Build "
+                            "${_UI_DIR}, or drop DIR to pack that bundle.")
         else()
-            set(_ui_fix "point ESPOS_HTTPD_UI_DIR at a built bundle")
+            if(_ui_dir_given)
+                set(_ui_fix "drop DIR to pack ${_ui_embed_dir}")
+            else()
+                set(_ui_fix "point ESPOS_HTTPD_UI_DIR at a built bundle")
+            endif()
+            message(WARNING "${_UI_NAME}: ${_UI_DIR} missing — the device will serve the placeholder page, "
+                            "not a web UI. Build it, or ${_ui_fix}.")
         endif()
-        message(WARNING "${_UI_NAME}: ${_UI_DIR} missing — the device will serve the placeholder page, "
-                        "not the espOS web UI. Build it, or ${_ui_fix}.")
     endif()
 endfunction()
