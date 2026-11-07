@@ -191,6 +191,42 @@ menu "espOS SignalK"
             sooner than it looks, and the declaration that does not fit is
             the one silently missing its units in every dashboard.
 
+    config ESPOS_SK_MAX_SUBS
+        int "Inbound subscription handles"
+        default 48
+        range 1 48
+        help
+            How many espos_sk_subscribe() handles the device can hold. Each
+            slot is ~112 bytes of heap, allocated at start. ESPOS_SK_MAX_SUBS
+            in espos_sk.h stays the cap callers are told about; lowering this
+            reserves less RAM and makes subscribe calls beyond it fail.
+
+    config ESPOS_SK_MAX_SERVERS
+        int "Discovered servers kept"
+        default 12
+        range 1 12
+        help
+            How many discovered SignalK servers are kept for selection. Each
+            entry costs ~320 bytes of static RAM. ESPOS_SK_MAX_SERVERS in
+            espos_sk.h stays the cap callers are told about; lowering this
+            leaves extra discovered servers off the list, but not the
+            server the token belongs to, chosen by the same rule as the
+            server selection.
+
+    config ESPOS_SK_TOKEN_MAX
+        int "Internal access-token capacity (bytes)"
+        default 1024
+        range 128 1024
+        help
+            Capacity of the internal copies of the SignalK access token. A
+            signalk JWT is a few hundred bytes. ESPOS_SK_TOKEN_MAX in
+            espos_sk_token_sm.h stays the size callers' buffers are told
+            about; lowering this shrinks the working copies in the device
+            state, on the stream task stack and in each HTTP request. The
+            persistent store keeps the full size. A longer token is never
+            clipped: an approved one stops in DENIED, a stored one is dropped
+            and access requested again.
+
     config ESPOS_SK_PENDING_MAX
         int "Values coalesced per batch window"
         default 32

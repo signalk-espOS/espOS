@@ -47,6 +47,46 @@ bool espos_sk_is_anchor(const espos_sk_discovered_t *d, const espos_sk_anchor_t 
 bool espos_sk_disc_before(const espos_sk_discovered_t *a, const espos_sk_discovered_t *b,
                           const char *cur_host, uint16_t cur_port);
 
+/* What discovery must not lose: the anchored server, chosen the way the
+ * merge and select_server() choose it (espos_sk_find_anchored). */
+typedef struct {
+    const espos_sk_anchor_t *anchor;
+    const char *cur_host; /* the server in use, "" for none */
+    uint16_t cur_port;
+    bool self_fallback;
+} espos_sk_keep_t;
+
+/* Add one discovery answer to out[0..*n) of max. A server already listed is
+ * replaced (the later answer wins, which makes https win over a stale http
+ * record). On a full list the anchored server still gets in: it replaces the
+ * listed entry find_anchored would pick when it would pick the newcomer over
+ * that one, else the last slot. Answers come plaintext first, and a crowded
+ * network must not crowd out the server the device is paired with. keep may
+ * be NULL. */
+void espos_sk_disc_add(espos_sk_discovered_t *out, size_t *n, size_t max, const espos_sk_discovered_t *d,
+                       const espos_sk_keep_t *keep);
+
+/* One discovery round merged into the server table. Pure: the caller holds
+ * the lock and owns every buffer. */
+typedef struct {
+    const espos_sk_discovered_t *table; /* the list before this round */
+    const uint32_t *table_avoid;        /* its avoid_until_ms stamps */
+    size_t table_n;
+    const espos_sk_discovered_t *found; /* this round's answers */
+    size_t found_n;
+    const espos_sk_anchor_t *anchor;
+    const char *cur_host; /* the server in use, "" for none */
+    uint16_t cur_port;
+    bool self_fallback;
+    uint32_t now_ms;
+    uint32_t carry_ms; /* how long an unanswered entry is kept */
+} espos_sk_merge_in_t;
+/* Fills out[] and out_avoid[] (cap entries each; out_avoid is zeroed first)
+ * and returns how many entries out[] holds. The anchored server takes the
+ * first slot, then this round's answers, then carried-over entries. */
+size_t espos_sk_merge_servers(const espos_sk_merge_in_t *in, espos_sk_discovered_t *out, uint32_t *out_avoid,
+                              size_t cap);
+
 /* HTTP (blocking, esp_http_client): sk_http.c */
 void espos_sk_http_request(const espos_sk_server_t *srv, const espos_sk_tok_cfg_t *cfg, espos_sk_http_result_t *out);
 void espos_sk_http_poll(const espos_sk_server_t *srv, const char *href, espos_sk_http_result_t *out);
@@ -109,7 +149,8 @@ esp_err_t espos_sk_http_self_path(const char *sk_path, const char *suffix, char 
 
 /* Discovery (blocking ~3 s): discovery.c / discovery_sim.c */
 esp_err_t espos_sk_discovery_init(const char *hostname);
-size_t espos_sk_discovery_run(espos_sk_discovered_t *out, size_t max);
+/* keep (may be NULL) is passed to espos_sk_disc_add for every answer. */
+size_t espos_sk_discovery_run(espos_sk_discovered_t *out, size_t max, const espos_sk_keep_t *keep);
 
 /* HTTP endpoints: api_sk.c */
 esp_err_t espos_sk_register_api(void);
@@ -128,6 +169,28 @@ esp_err_t espos_sk_tls_reset_now(void);
 #else
 #define ESPOS_SK_META_CAP ESPOS_SK_MAX_META
 #endif
+
+/* The subscription, server and token tables the implementation allocates.
+ * The public caps in espos_sk.h / espos_sk_token_sm.h stay literals for
+ * callers and the ABI; these tune what the device actually reserves. */
+#ifdef CONFIG_ESPOS_SK_MAX_SUBS
+#define ESPOS_SK_SUBS_CAP CONFIG_ESPOS_SK_MAX_SUBS
+#else
+#define ESPOS_SK_SUBS_CAP ESPOS_SK_MAX_SUBS
+#endif
+#ifdef CONFIG_ESPOS_SK_MAX_SERVERS
+#define ESPOS_SK_SERVERS_CAP CONFIG_ESPOS_SK_MAX_SERVERS
+#else
+#define ESPOS_SK_SERVERS_CAP ESPOS_SK_MAX_SERVERS
+#endif
+#ifdef CONFIG_ESPOS_SK_TOKEN_MAX
+#define ESPOS_SK_TOKEN_CAP CONFIG_ESPOS_SK_TOKEN_MAX
+#else
+#define ESPOS_SK_TOKEN_CAP ESPOS_SK_TOKEN_MAX
+#endif
+/* The reason an approved token that does not fit is refused, wherever the
+ * length is caught: the reply parser or the token machine. */
+#define ESPOS_SK_TOKEN_TOO_LONG "token longer than CONFIG_ESPOS_SK_TOKEN_MAX allows; raise it, then retry"
 
 esp_err_t espos_sk_ws_start(void);
 void espos_sk_ws_stop(void);

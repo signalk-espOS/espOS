@@ -66,7 +66,7 @@ static struct {
     espos_sk_tok_cfg_t cfg;
     action_t action;
     char action_href[ESPOS_SK_HREF_MAX];
-    char action_token[ESPOS_SK_TOKEN_MAX];
+    char action_token[ESPOS_SK_TOKEN_CAP];
     uint32_t timer_due_ms;           /* 0 = none */
     uint32_t discover_due_ms;
     bool discovery_enabled;
@@ -98,11 +98,11 @@ static struct {
 
     /* shared snapshot */
     espos_sk_tok_status_t snap;
-    char snap_token[ESPOS_SK_TOKEN_MAX];
+    char snap_token[ESPOS_SK_TOKEN_CAP];
     char client_id[40];
     char vessel_context[ESPOS_SK_CONTEXT_MAX]; /* written once in espos_sk_start(), read-only after */
-    espos_sk_discovered_t servers[ESPOS_SK_MAX_SERVERS];
-    uint32_t avoid_until_ms[ESPOS_SK_MAX_SERVERS]; /* unreachable discovered servers are skipped for a while */
+    espos_sk_discovered_t servers[ESPOS_SK_SERVERS_CAP];
+    uint32_t avoid_until_ms[ESPOS_SK_SERVERS_CAP]; /* unreachable discovered servers are skipped for a while */
     /* Discovery rounds, among those anyone answered, in which the anchored
      * address (anchor_self_fallback) was not heard; keyed by that address. */
     char anchor_unheard_host[ESPOS_SK_HOST_MAX];
@@ -207,7 +207,10 @@ static void narrate_token_state(void)
         ESP_LOGI(TAG, "server security is off: no token needed, streaming");
         break;
     case ESPOS_SK_TOK_DENIED:
-        ESP_LOGW(TAG, "access denied by the server — request again from the device's web UI when it is allowed");
+        /* last_error says why: an admin's no, requests switched off on the
+         * server, or a token larger than this build keeps. */
+        ESP_LOGW(TAG, "%s — request again from the device's web UI when it is allowed",
+                 s.sm.st.last_error[0] ? s.sm.st.last_error : "access denied by the server");
         break;
     case ESPOS_SK_TOK_CERT_ERROR:
         ESP_LOGW(TAG, "%s — trust it from the device's web UI (SignalK page) if the server's certificate "
@@ -660,100 +663,50 @@ static void publish_servers(void)
 
 static void run_discovery(void)
 {
-    /* heap, not stack: two arrays of ~2 KiB each */
-    espos_sk_discovered_t *found = calloc(ESPOS_SK_MAX_SERVERS, sizeof(*found));
-    espos_sk_discovered_t *merged = calloc(ESPOS_SK_MAX_SERVERS, sizeof(*merged));
+    /* heap, not stack: two arrays of up to ~3.8 KiB each */
+    espos_sk_discovered_t *found = calloc(ESPOS_SK_SERVERS_CAP, sizeof(*found));
+    espos_sk_discovered_t *merged = calloc(ESPOS_SK_SERVERS_CAP, sizeof(*merged));
     if (!found || !merged) {
         free(found);
         free(merged);
         return;
     }
-    size_t n = espos_sk_discovery_run(found, ESPOS_SK_MAX_SERVERS);
+    /* What this round must not lose, chosen as the merge below chooses. The
+     * store belongs to this task; the rest is copied under the lock. */
+    espos_sk_anchor_t anchor;
+    espos_sk_store_anchor(&s.sm.store, &anchor);
+    char cur_host[ESPOS_SK_HOST_MAX];
+    lock();
+    snprintf(cur_host, sizeof(cur_host), "%s", s.have_server ? s.server.host : "");
+    const espos_sk_keep_t keep = {
+        .anchor = &anchor,
+        .cur_host = cur_host,
+        .cur_port = s.have_server ? s.server.port : 0,
+        .self_fallback = anchor_self_fallback(&anchor),
+    };
+    unlock();
+    size_t n = espos_sk_discovery_run(found, ESPOS_SK_SERVERS_CAP, &keep);
     uint32_t t = now_ms();
     lock();
     /* Merge: fresh results replace, but keep recently seen entries that
-     * dropped out of one query (mDNS is lossy) for two intervals. */
-    uint32_t avoid[ESPOS_SK_MAX_SERVERS] = { 0 };
-    size_t m = 0;
-    /* The server our token belongs to gets the first slot.
-     *
-     * Fresh results used to fill the array first, so on a network
-     * advertising ESPOS_SK_MAX_SERVERS or more the carry-over loop below
-     * — the whole defence against mDNS being lossy — could not run at
-     * all. One missed answer then evicted the anchored server, the
-     * anchor lookup in select_server() found nothing, and a perfectly
-     * reachable server was dropped with "no server". Reserving its slot
-     * first means a full list can never cost us the one entry that
-     * matters.
-     *
-     * Reserved by address, not by self URN: a second server advertising
-     * the same self (sk_select.c) would otherwise take the slot whenever
-     * mDNS answered for it first. And only while it is as fresh as any
-     * carried-over entry: a server that moved must age out at its old
-     * address, or the stale entry would keep winning select_server()'s
-     * address match and the device would never follow it. */
-    espos_sk_anchor_t anchor;
-    espos_sk_store_anchor(&s.sm.store, &anchor);
+     * dropped out of one query (mDNS is lossy) for two intervals. The
+     * anchored server takes the first slot (sk_select.c says why). */
     anchor_note_answers(&anchor, found, n);
-    int keep = espos_sk_find_anchored(s.servers, s.server_count, &anchor, s.have_server ? s.server.host : "",
-                                      s.have_server ? s.server.port : 0, anchor_self_fallback(&anchor));
-    bool keep_reserved = false;
-    char keep_host[ESPOS_SK_HOST_MAX] = "";
-    uint16_t keep_port = 0;
-    if (keep >= 0) {
-        /* Prefer this round's fresher copy if mDNS did answer for it. */
-        bool fresh = false;
-        for (size_t k = 0; k < n; k++) {
-            if (espos_sk_same_addr(&found[k], s.servers[keep].host, s.servers[keep].port)) {
-                merged[m] = found[k];
-                merged[m].seen_ms = t;
-                fresh = true;
-                break;
-            }
-        }
-        if (!fresh && (int32_t)(t - s.servers[keep].seen_ms) < (int32_t)carry_window_ms()) {
-            merged[m] = s.servers[keep];
-            fresh = true;
-        }
-        if (fresh) {
-            snprintf(keep_host, sizeof(keep_host), "%s", merged[m].host);
-            keep_port = merged[m].port;
-            avoid[m] = s.avoid_until_ms[keep];
-            m++;
-            keep_reserved = true;
-        }
-    }
-    for (size_t i = 0; i < n && m < ESPOS_SK_MAX_SERVERS; i++) {
-        /* Skip only what the reservation above actually took. Testing
-         * m > 0 instead would drop the anchored server whenever the
-         * reservation did NOT run — the empty-s.servers[] case on a
-         * fresh boot with a token restored from NVS, which is exactly
-         * when it must not be lost. */
-        if (keep_reserved && espos_sk_same_addr(&found[i], keep_host, keep_port)) {
-            continue;
-        }
-        merged[m] = found[i];
-        merged[m].seen_ms = t;
-        for (size_t k = 0; k < s.server_count; k++) { /* carry the avoid stamp over */
-            if (strcmp(s.servers[k].host, found[i].host) == 0 && s.servers[k].port == found[i].port) {
-                avoid[m] = s.avoid_until_ms[k];
-            }
-        }
-        m++;
-    }
-    for (size_t i = 0; i < s.server_count && m < ESPOS_SK_MAX_SERVERS; i++) {
-        bool dup = false;
-        for (size_t k = 0; k < m; k++) {   /* against what we kept, including the reserved anchor */
-            if (strcmp(merged[k].host, s.servers[i].host) == 0 && merged[k].port == s.servers[i].port) {
-                dup = true;
-                break;
-            }
-        }
-        if (!dup && (int32_t)(t - s.servers[i].seen_ms) < (int32_t)carry_window_ms()) {
-            avoid[m] = s.avoid_until_ms[i];
-            merged[m++] = s.servers[i];
-        }
-    }
+    uint32_t avoid[ESPOS_SK_SERVERS_CAP];
+    const espos_sk_merge_in_t in = {
+        .table = s.servers,
+        .table_avoid = s.avoid_until_ms,
+        .table_n = s.server_count,
+        .found = found,
+        .found_n = n,
+        .anchor = &anchor,
+        .cur_host = s.have_server ? s.server.host : "",
+        .cur_port = s.have_server ? s.server.port : 0,
+        .self_fallback = anchor_self_fallback(&anchor),
+        .now_ms = t,
+        .carry_ms = carry_window_ms(),
+    };
+    size_t m = espos_sk_merge_servers(&in, merged, avoid, ESPOS_SK_SERVERS_CAP);
     memcpy(s.servers, merged, m * sizeof(merged[0]));
     memcpy(s.avoid_until_ms, avoid, sizeof(avoid));
     s.server_count = m;
@@ -1197,7 +1150,7 @@ esp_err_t espos_sk_tls_reset_now(void) { return post_cmd(CMD_TLS_RESET, NULL); }
 
 esp_err_t espos_sk_set_token(const char *token)
 {
-    if (!token || !token[0] || strlen(token) >= ESPOS_SK_TOKEN_MAX) {
+    if (!token || !token[0] || strlen(token) >= ESPOS_SK_TOKEN_CAP) {
         return ESP_ERR_INVALID_ARG;
     }
     char *copy = strdup(token);

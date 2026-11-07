@@ -253,7 +253,7 @@ esp_err_t espos_sk_http_perform(const espos_sk_http_req_t *rq, espos_sk_http_res
             esp_http_client_set_header(c, "Content-Type", "application/json");
             esp_http_client_set_post_field(c, rq->json_body, (int)strlen(rq->json_body));
         }
-        char auth[ESPOS_SK_TOKEN_MAX + 8];
+        char auth[ESPOS_SK_TOKEN_CAP + 8];
         if (rq->bearer && rq->bearer[0]) {
             snprintf(auth, sizeof(auth), "Bearer %s", rq->bearer);
             esp_http_client_set_header(c, "Authorization", auth);
@@ -384,7 +384,15 @@ static void parse_reply(const char *body, espos_sk_http_result_t *out)
     cJSON *ar = cJSON_GetObjectItem(j, "accessRequest");
     if (cJSON_IsObject(ar)) {
         copy_str(out->permission, sizeof(out->permission), cJSON_GetObjectItem(ar, "permission"));
-        copy_str(out->token, sizeof(out->token), cJSON_GetObjectItem(ar, "token"));
+        const cJSON *tok = cJSON_GetObjectItem(ar, "token");
+        if (cJSON_IsString(tok) && tok->valuestring && strlen(tok->valuestring) >= sizeof(out->token)) {
+            /* A clipped bearer is refused by the server, or worse, accepted
+             * nowhere and kept: report it as a rejection with a reason. */
+            out->token[0] = '\0';
+            snprintf(out->message, sizeof(out->message), "%s", ESPOS_SK_TOKEN_TOO_LONG);
+        } else {
+            copy_str(out->token, sizeof(out->token), tok);
+        }
     }
     /* a COMPLETED reply may carry the failing statusCode inside the body */
     cJSON *sc = cJSON_GetObjectItem(j, "statusCode");
