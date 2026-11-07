@@ -1,0 +1,4 @@
+# espos_httpd lists cJSON as a private requirement; a host project has to
+# pull it from the registry itself, at the same pin as espos_httpd_test.
+dependencies:
+  espressif/cjson: "==1.7.19~2"

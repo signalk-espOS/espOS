@@ -135,7 +135,10 @@ espos_project_ui_partition()
 `espos_project_ui_partition()` (after `project()`) packs the committed
 `espos_httpd/ui-dist` into the LittleFS `storage` partition; `PARTITION` and
 `DIR` change that, and a custom `DIR` that is missing is a warning, not an
-error. Further prologue options: `IDF_VERSION_FILE`, and `SIGNING_KEY` for a
+error. A firmware with pages of its own sets
+`idf_build_set_property(ESPOS_HTTPD_UI_DIR <dir>)` before `project()` instead:
+the app image then embeds that bundle and `DIR` defaults to it
+([ui.md](ui.md#pages-from-a-firmware)). Further prologue options: `IDF_VERSION_FILE`, and `SIGNING_KEY` for a
 key kept outside the project ([ota.md](ota.md), "Signing key").
 
 A project that installs espOS's components from the registry and writes its

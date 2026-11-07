@@ -2,9 +2,10 @@
  * SPDX-FileCopyrightText: 2026 Dirk Wahrheit
  * SPDX-License-Identifier: Apache-2.0
  *
- * Static UI. The gzipped Vite bundle is built into the app image
- * (ui_bundle.h, CONFIG_ESPOS_HTTPD_UI_EMBED) and served from there, so an OTA
- * update brings the UI that matches its firmware. The LittleFS "storage"
+ * Static UI. The gzipped Vite bundle -- espOS's, or the firmware's own named
+ * by ESPOS_HTTPD_UI_DIR -- is built into the app image (ui_bundle.h,
+ * CONFIG_ESPOS_HTTPD_UI_EMBED) and served from there, so an OTA update brings
+ * the UI that matches its firmware. The LittleFS "storage"
  * partition (mounted at CONFIG_ESPOS_HTTPD_WWW_DIR) comes first only for a
  * custom UI packed into it (ESPOS_HTTPD_UI_FROM_STORAGE), and otherwise
  * answers what the built-in bundle does not have. There `<path>.gz` is tried
