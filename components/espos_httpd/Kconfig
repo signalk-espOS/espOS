@@ -60,8 +60,9 @@ menu "espOS HTTP server"
         bool "Build the web UI into the firmware image"
         default y
         help
-            Embed the gzipped UI bundle (ui-dist/, about 25 KiB) in the app
-            image and serve it from there. An OTA update writes only the app
+            Embed the gzipped UI bundle in the app image and serve it from
+            there: espOS's ui-dist/ (about 25 KiB), or the firmware's own
+            bundle named by ESPOS_HTTPD_UI_DIR, which costs its own size. An OTA update writes only the app
             slot, never the "storage" partition, so a UI served from storage
             stays at whatever version was flashed over USB while the firmware
             moves on; one built into the app moves with it. A firmware
