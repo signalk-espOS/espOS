@@ -15,6 +15,21 @@ pull request. The `[Unreleased]` block below was written by hand before the
 switch; its entries belong to the next feature release and are folded into
 that section when it is cut.
 
+## 0.27.0 (2026-11-07)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Added
+* feat(eth): support a W5500 on SPI by @dirkwa in https://github.com/signalk-espOS/espOS/pull/277
+### Fixed
+* fix(ble): queue GATT frames instead of dropping them by @dirkwa in https://github.com/signalk-espOS/espOS/pull/296
+### Other
+* feat(sk): make the subscription, server and token tables configurable by @night199uk in https://github.com/signalk-espOS/espOS/pull/298
+
+
+**Full Changelog**: https://github.com/signalk-espOS/espOS/compare/v0.26.1...v0.27.0
+
 ## 0.26.1 (2026-11-03)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
