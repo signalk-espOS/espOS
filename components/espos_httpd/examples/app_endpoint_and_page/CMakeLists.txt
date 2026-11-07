@@ -9,6 +9,7 @@ cmake_minimum_required(VERSION 3.22)
 include("${CMAKE_CURRENT_LIST_DIR}/../../../../cmake/espos_project.cmake")
 espos_project_prologue(NAME "app_endpoint_and_page")
 project(app_endpoint_and_page)
-# The stock UI bundle. A firmware with a page of its own points DIR at the
-# dist-gz/ of its own UI build (README, "A page in the web UI").
+# The stock UI bundle. A firmware with a page of its own names the dist-gz/
+# of its own UI build with idf_build_set_property(ESPOS_HTTPD_UI_DIR ...)
+# before project() (README, "A page in the web UI").
 espos_project_ui_partition()

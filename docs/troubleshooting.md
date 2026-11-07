@@ -53,8 +53,9 @@ Three places answer most questions before you get here:
     over-the-air update never writes that partition. So the page stayed the one
     flashed over USB. Update to a firmware whose `/system/info` says
     `ui: "embedded"`, then reload the page with Ctrl/Cmd-Shift-R. A project
-    with its own page bundle (`DIR`) still serves it from storage; flash it over
-    USB with `idf.py flash`. [Web UI](ui.md).
+    with its own page bundle serves it from storage unless it names the bundle
+    with `ESPOS_HTTPD_UI_DIR` before `project()`; until it does, flash it over
+    USB with `idf.py flash`. [Web UI](ui.md#pages-from-a-firmware).
 
 **The device shows a placeholder instead of the web UI** (`ui: "placeholder"` in `/system/info`; boot log `ui storage … has no index.html: serving the embedded page`)
 :   There is no page bundle in the image or in storage. With

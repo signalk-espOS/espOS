@@ -23,9 +23,12 @@
 # espos_project_ui_partition([PARTITION <name>] [DIR <dir>] [NAME <label>])
 #
 # Pack the espOS web UI into a LittleFS image flashed with `idf.py flash`.
-# The default bundle is also built into the app image and served from there
-# (CONFIG_ESPOS_HTTPD_UI_EMBED), because OTA never rewrites this partition;
-# a custom DIR is served from the partition instead.
+# The bundle built into the app image is served ahead of it
+# (CONFIG_ESPOS_HTTPD_UI_EMBED), because OTA never rewrites this partition.
+# That is espOS's own bundle, or the one a firmware named before project()
+# with idf_build_set_property(ESPOS_HTTPD_UI_DIR <dir>), which is then also
+# the default DIR here. A DIR that differs from the embedded bundle is served
+# from the partition instead.
 # Call AFTER project() -- littlefs_create_partition_image comes from the
 # managed component. Default DIR is the bundle committed in this component, so
 # a firmware build never needs Node; `npm run build` in <espos>/ui regenerates
@@ -45,9 +48,16 @@ function(espos_project_ui_partition)
     # Resolves the same whether espos_httpd came from a submodule checkout or
     # from managed_components/, because it was captured where this file lives.
     set(_UI_DEFAULT_DIR "${ESPOS_HTTPD_UI_DIST}")
-    if(NOT _UI_DIR)
-        set(_UI_DIR "${_UI_DEFAULT_DIR}")
+    idf_build_get_property(_ui_embed_dir ESPOS_HTTPD_UI_DIR)
+    if(NOT _ui_embed_dir)
+        set(_ui_embed_dir "${_UI_DEFAULT_DIR}")
     endif()
+    if(NOT _UI_DIR)
+        set(_UI_DIR "${_ui_embed_dir}")
+    endif()
+    get_filename_component(_UI_DIR "${_UI_DIR}" ABSOLUTE)
+    get_filename_component(_ui_embed_dir "${_ui_embed_dir}" ABSOLUTE BASE_DIR "${CMAKE_SOURCE_DIR}")
+    get_filename_component(_UI_DEFAULT_DIR "${_UI_DEFAULT_DIR}" ABSOLUTE)
     if(NOT _UI_NAME)
         get_filename_component(_UI_NAME "${CMAKE_SOURCE_DIR}" NAME)
     endif()
@@ -55,11 +65,15 @@ function(espos_project_ui_partition)
     if(EXISTS "${_UI_DIR}/index.html.gz")
         littlefs_create_partition_image(${_UI_PARTITION} "${_UI_DIR}" FLASH_IN_PROJECT)
         message(STATUS "${_UI_NAME}: UI bundle from ${_UI_DIR} will be flashed to '${_UI_PARTITION}'")
-        if(NOT _UI_DIR STREQUAL _UI_DEFAULT_DIR)
-            # A custom UI lives only in the partition: serve it ahead of the
-            # espOS bundle built into the app.
+        if(NOT _UI_DIR STREQUAL _ui_embed_dir)
+            # This UI lives only in the partition: serve it ahead of the
+            # bundle built into the app.
             idf_component_get_property(_ui_lib espos_httpd COMPONENT_LIB)
             target_compile_definitions(${_ui_lib} PRIVATE ESPOS_HTTPD_UI_FROM_STORAGE=1)
+            if(NOT _UI_DIR STREQUAL _UI_DEFAULT_DIR AND CONFIG_ESPOS_HTTPD_UI_EMBED)
+                message(STATUS "${_UI_NAME}: ${_UI_DIR} is served from '${_UI_PARTITION}', which OTA never "
+                               "updates. Set ESPOS_HTTPD_UI_DIR to it before project() to build it into the app.")
+            endif()
         endif()
     elseif(_UI_DIR STREQUAL _UI_DEFAULT_DIR)
         # The default bundle ships with the component; its absence is a damaged

@@ -64,8 +64,11 @@ menu "espOS HTTP server"
             image and serve it from there. An OTA update writes only the app
             slot, never the "storage" partition, so a UI served from storage
             stays at whatever version was flashed over USB while the firmware
-            moves on; one built into the app moves with it. A custom UI
-            (espos_project_ui_partition(DIR ...)) is still served from storage.
+            moves on; one built into the app moves with it. A firmware
+            with its own pages embeds its bundle instead by setting the
+            ESPOS_HTTPD_UI_DIR build property before project(); a bundle
+            given only as espos_project_ui_partition(DIR ...) is still
+            served from storage.
 
     config ESPOS_HTTPD_WWW_DIR
         string "Mount point of the UI storage partition"
