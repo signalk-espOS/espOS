@@ -333,8 +333,9 @@ the same measurements `espos_health` compares, not similar ones.
 
 `ui_storage` (M5) is true when the LittleFS UI partition is mounted. `ui`
 says where the page this device serves comes from: `embedded` (the bundle
-built into the firmware image, the default), `storage` (a project's own
-bundle from the LittleFS partition) or `placeholder` (neither).
+built into the firmware image: espOS's, or a project's own named by
+`ESPOS_HTTPD_UI_DIR`; the default), `storage` (a project's own bundle from
+the LittleFS partition) or `placeholder` (neither).
 `config_storage_reset` is true when the NVS partition had to be erased at
 boot (corrupt/incompatible) and every value is a default.
 `reset_reason` ∈ `poweron external software panic int_wdt task_wdt wdt
@@ -464,8 +465,10 @@ persisted.
 ## Static UI — M5 — public
 
 Everything that is not `/api/…` is the web UI (the gzipped Vite bundle, see
-[ui.md](ui.md)), served from the firmware image or, for a project with its
-own bundle, from the LittleFS `storage` partition: `<path>.gz` is
+[ui.md](ui.md)), served from the firmware image (espOS's bundle or the
+project's own named by `ESPOS_HTTPD_UI_DIR`) or, for a project that packs
+its own bundle only into the partition, from the LittleFS `storage`
+partition: `<path>.gz` is
 preferred and sent with `Content-Encoding: gzip` (`curl --compressed`),
 `/assets/*` (content-hashed) with `Cache-Control: public, max-age=31536000,
 immutable`, everything else `no-cache`. An extension-less path that does
