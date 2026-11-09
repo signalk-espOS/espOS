@@ -113,8 +113,8 @@ export function TankPage() {
 }
 ```
 
-`npm ci && npm run build` in `ui/` writes `ui/dist-gz/`; point the partition at
-it in the root `CMakeLists.txt` — `espos_project_ui_partition(DIR "${CMAKE_CURRENT_LIST_DIR}/ui/dist-gz")` —
-rebuild and flash. `http://espos-xxxx.local/tank` shows the new tab, updating with every reading;
+`npm ci && npm run build` in `ui/` writes `ui/dist-gz/`; name it in the root `CMakeLists.txt`
+before `project()` — `idf_build_set_property(ESPOS_HTTPD_UI_DIR "${CMAKE_CURRENT_LIST_DIR}/ui/dist-gz")` —
+so it is built into the app image and every OTA update carries it, then rebuild and flash. `http://espos-xxxx.local/tank` shows the new tab, updating with every reading;
 `ESPOS_API=http://espos-xxxx.local npm run dev` develops the page against the live device without
 reflashing. Commit `dist-gz/` with the source, as espOS does: a firmware build must never depend on Node.

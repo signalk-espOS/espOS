@@ -16,16 +16,48 @@ endif()
 # app slot, so a UI served from the "storage" partition stayed at whatever a
 # USB flash put there while the firmware moved on: a fixed page never reached
 # an OTA-updated device. ui_bundle.c is the table static.c serves from.
+#
+# A firmware with pages of its own names its bundle before project() with
+# idf_build_set_property(ESPOS_HTTPD_UI_DIR <dir>). A build property, because
+# this file runs inside project() and espos_project_ui_partition() only after
+# it, too late to change what is embedded; and because a registry consumer
+# never runs the prologue, so an option there would not reach it.
+idf_build_get_property(ui_dir ESPOS_HTTPD_UI_DIR)
+if(ui_dir)
+    get_filename_component(ui_dir "${ui_dir}" ABSOLUTE BASE_DIR "${CMAKE_SOURCE_DIR}")
+endif()
 set(ui_files "")
+if(CONFIG_ESPOS_HTTPD_UI_EMBED AND ui_dir)
+    if(NOT EXISTS "${ui_dir}/index.html.gz")
+        # Embedding a bundle without its index would serve the placeholder
+        # page from an image that was meant to carry the firmware's own UI.
+        message(FATAL_ERROR "espos_httpd: ${ui_dir}/index.html.gz is missing. ESPOS_HTTPD_UI_DIR must name "
+                            "a built UI bundle (every file gzipped as <name>.gz, as `npm run build` writes it).")
+    endif()
+endif()
+if(NOT ui_dir)
+    set(ui_dir "${CMAKE_CURRENT_LIST_DIR}/ui-dist")
+endif()
 if(CONFIG_ESPOS_HTTPD_UI_EMBED)
-    file(GLOB_RECURSE ui_files CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/ui-dist/*")
+    # FOLLOW_SYMLINKS: a firmware may link its assets/ in from its UI build.
+    file(GLOB_RECURSE ui_files FOLLOW_SYMLINKS CONFIGURE_DEPENDS "${ui_dir}/*")
     list(SORT ui_files)
 endif()
 set(ui_decls "")
 set(ui_rows "")
 set(ui_index 0)
+# espOS's ui-dist holds only .gz files; a firmware's bundle may also keep the
+# plain original beside one, and two rows for one path would embed both.
+set(ui_kept "")
 foreach(f ${ui_files})
-    file(RELATIVE_PATH rel "${CMAKE_CURRENT_LIST_DIR}/ui-dist" "${f}")
+    if(NOT f MATCHES "\\.gz$" AND EXISTS "${f}.gz")
+        continue()
+    endif()
+    list(APPEND ui_kept "${f}")
+endforeach()
+set(ui_files ${ui_kept})
+foreach(f ${ui_files})
+    file(RELATIVE_PATH rel "${ui_dir}" "${f}")
     set(gz false)
     if(rel MATCHES "^(.*)\\.gz$")
         set(rel "${CMAKE_MATCH_1}")
@@ -43,7 +75,7 @@ set(ui_table "${CMAKE_CURRENT_BINARY_DIR}/ui_bundle.c")
 # file(CONFIGURE) rewrites only on a change, so an unchanged bundle does not
 # rebuild the component. Not in the requirements pass, which has no sdkconfig.
 if(NOT CMAKE_BUILD_EARLY_EXPANSION)
-file(CONFIGURE OUTPUT "${ui_table}" CONTENT "/* Generated from ui-dist/ by espos_httpd/CMakeLists.txt. */
+file(CONFIGURE OUTPUT "${ui_table}" CONTENT "/* Generated from ${ui_dir} by espos_httpd/CMakeLists.txt. */
 #include \"${CMAKE_CURRENT_LIST_DIR}/src/ui_bundle.h\"
 
 ${ui_decls}

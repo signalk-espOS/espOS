@@ -57,7 +57,7 @@ registerPage({ path: "/counter", title: "Counter", page: CounterPage, order: 35 
 `order` places the tab (core pages sit on 10–70); `available()` on the route hides
 it where the endpoint is missing. The page opens its own `EventSource` — the shell's
 stream feeds only its own stores — and each stream is one of `CONFIG_ESPOS_HTTPD_SSE_MAX_CLIENTS`
-(3). `npm run build` writes `dist-gz/`; `espos_project_ui_partition(DIR ...)` flashes it instead of the stock bundle.
+(3). `npm run build` writes `dist-gz/`; `idf_build_set_property(ESPOS_HTTPD_UI_DIR ...)` before `project()` builds it into the app image instead of the stock bundle, and `espos_project_ui_partition()` packs the same directory.
 
 ## Build
 
