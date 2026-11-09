@@ -21,13 +21,13 @@
 
 /* The esp_hosted version the image is built from: the esp_hosted pin in this
  * component's idf_component.yml, checked against the host at compile time. */
-#define ESPOS_COPROC_FW_VERSION       "3.0.10"
+#define ESPOS_COPROC_FW_VERSION       "3.1.0"
 #define ESPOS_COPROC_FW_VERSION_MAJOR 3
-#define ESPOS_COPROC_FW_VERSION_MINOR 0
-#define ESPOS_COPROC_FW_VERSION_PATCH 10
+#define ESPOS_COPROC_FW_VERSION_MINOR 1
+#define ESPOS_COPROC_FW_VERSION_PATCH 0
 #define ESPOS_COPROC_FW_SHA256        "aa9e9742a77c6a0fd9f94888736633915e243cf3261df9ec0441d375ba4eecd3"
 /* Used when the update request names no URL; a client such as the Signal K
  * manager may pass its own mirror instead. */
-#define ESPOS_COPROC_FW_URL                                                                    \
-    "https://raw.githubusercontent.com/signalk-espOS/espOS/coprocessor-assets/esp32c6/3.0.10/" \
-    "espos-coprocessor-esp32c6-3.0.10-aa9e9742a77c.bin"
+#define ESPOS_COPROC_FW_URL                                                                   \
+    "https://raw.githubusercontent.com/signalk-espOS/espOS/coprocessor-assets/esp32c6/3.1.0/" \
+    "espos-coprocessor-esp32c6-3.1.0-aa9e9742a77c.bin"
