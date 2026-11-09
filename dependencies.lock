@@ -375,7 +375,7 @@ dependencies:
     - name: espressif/esp_hosted
       rules:
       - if: target == esp32p4
-      version: ==3.0.10
+      version: ==3.1.0
     - name: espressif/esp_wifi_remote
       rules:
       - if: target == esp32p4
@@ -414,6 +414,6 @@ direct_dependencies:
 - signalk-espos/espos_sk_flow
 - signalk-espos/espos_time
 - signalk-espos/espos_wifi
-manifest_hash: 1b6249054c23752548961b4c5f4db34a939c509588530ce2e43014d1e2137f46
+manifest_hash: b7f45d4423357cc6b06c5030193bd298dfe4ec979901f8dd414ff3ab17e5f677
 target: esp32s3
 version: 3.0.0
