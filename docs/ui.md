@@ -77,9 +77,11 @@ by `idf.py flash` only, never by OTA: a page served from it stays the one
 flashed over USB however many updates follow, and a page older than the
 API it talks to misbehaves in ways that look like firmware bugs.
 `espos_project_ui_partition()` still packs the bundle into
-`build/storage.bin`; a project that gives it its own `DIR` (a firmware with
-its own pages) is served from storage, and that bundle is updated by USB
-flash only. `GET /system/info` → `ui` says which source is served
+`build/storage.bin`, for files the built-in bundle lacks. A firmware with
+pages of its own embeds its bundle instead of espOS's by naming it before
+`project()` ([Pages from a firmware](#pages-from-a-firmware)); a bundle
+handed only to `espos_project_ui_partition(DIR ...)` is served from storage
+and updated by USB flash only. `GET /system/info` → `ui` says which source is served
 (`embedded`, `storage` or `placeholder`), and the boot log says so too.
 
 ## Serving rules (firmware side)
@@ -151,7 +153,27 @@ mount();
 `order` places the tab (core pages sit on 10–70); registering an existing
 path replaces that page, which is how a firmware puts its own Status screen
 in front. Build it the same way espOS builds its own — `npm run build` to
-its own `dist-gz/`, then point `espos_project_ui_partition(DIR ...)` at it.
+its own `dist-gz/` — and name that directory in the root `CMakeLists.txt`
+before `project()`:
+
+```cmake
+idf_build_set_property(ESPOS_HTTPD_UI_DIR "${CMAKE_CURRENT_LIST_DIR}/ui/dist-gz")
+project(my_firmware)
+espos_project_ui_partition()   # same directory, for builds with the embed off
+```
+
+`espos_httpd` then builds that bundle into the app image in place of its own
+(`CONFIG_ESPOS_HTTPD_UI_EMBED`), so an OTA update brings the firmware's pages
+too, and `espos_project_ui_partition()` defaults to it. With the embed on,
+storage answers only paths the built-in bundle has no file for. A device
+keeps whatever a USB flash last wrote there, so a file a later release
+dropped can still be served from it; the bundle's own pages never are. The
+storage copy is what a build with the embed off serves. A plain file kept beside its `.gz` is not embedded twice. It is a build
+property, not a prologue option, so a firmware that takes espOS from the
+component registry sets it the same way. A bundle that is only passed as
+`espos_project_ui_partition(DIR ...)` is served from `storage`, which OTA
+never writes; the build says so. Your bundle replaces espOS's, so it counts
+against the app slot like any code: espOS's own is about 25 KiB.
 
 ### Pages that are not always there
 
