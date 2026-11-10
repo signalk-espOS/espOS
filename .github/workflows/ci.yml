@@ -662,6 +662,8 @@ jobs:
       - ble-without-wifi
       - variant-defaults
       - host-tests
+    # Reads only the needs results.
+    permissions: {}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
