@@ -118,3 +118,9 @@ CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=16384
 # Usually the router itself, so a boat with no internet route still gets a
 # clock from the network it is already on.
 CONFIG_LWIP_DHCP_GET_NTP_SRV=y
+
+# ---- mDNS: no console commands. espOS registers no esp_console REPL, so the
+# mdns CLI would be dead flash. mdns 1.15 also stopped requiring console itself:
+# with the CLI on, a project that trims its component list (MINIMAL_BUILD,
+# COMPONENTS) fails at configure time because console is not in the build.
+CONFIG_MDNS_ENABLE_CONSOLE_CLI=n
