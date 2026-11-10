@@ -47,6 +47,18 @@ merges it, nothing is released. The release PR can be edited before merging
 code: the notes list a breaking change by its title, not by the
 `BREAKING CHANGE:` line in its description.
 
+Merge it only once **CI passed** is green on its last commit. Every merge to
+`main` that moves a manifest makes the `release-lock` job push a regenerated
+`dependencies.lock` onto the release branch, and until CI has checked that
+commit, the green on the one before it says nothing about the lock that would
+land. **CI passed** is the last job of `ci.yml`: it waits for every other job
+and fails if any of them failed or was cancelled, so a ruleset on `main` can
+require that single check (**Settings → Rules → Rulesets**, "Require status
+checks to pass", check **CI passed**, plus "Require branches to be up to date
+before merging"). A commit whose push started no CI, as one pushed with
+`GITHUB_TOKEN` does, then cannot be merged at all until the pull request is
+closed and reopened.
+
 There are no binaries to attach — espOS is source consumed as a submodule,
 and the tag remains the deliverable; the release is a readable front page
 for it.

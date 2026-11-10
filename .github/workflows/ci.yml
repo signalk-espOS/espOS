@@ -631,3 +631,47 @@ jobs:
             bash -c "
             (apt-get update && apt-get install -y libbsd-dev) &&
             ./test/host/run_all.sh"
+
+  # The one check a ruleset on main requires. Requiring the jobs one by one
+  # does not work: the matrix names change with every example added, and a
+  # job the `changes` gate skips reports no check at all, so a required one
+  # would hold a docs-only PR forever. Skipped counts as passed here; failed
+  # or cancelled does not, so a release PR whose regenerated lock is still
+  # being checked cannot be merged on the green of the commit before it.
+  passed:
+    name: CI passed
+    if: always()
+    needs:
+      - changes
+      - version
+      - generator
+      - workflows
+      - docs
+      - headers
+      - format
+      - reuse
+      - fuzz
+      - secrets
+      - manifests
+      - lock
+      - ui
+      - firmware
+      - examples
+      - examples-more-targets
+      - headless
+      - ble-without-wifi
+      - variant-defaults
+      - host-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: every job passed or was skipped
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          failed=$(jq -r 'to_entries[] | select(.value.result != "success" and .value.result != "skipped") | "\(.key): \(.value.result)"' <<< "$RESULTS")
+          if [ -n "$failed" ]; then
+            while IFS= read -r line; do echo "::error::not passed: $line"; done <<< "$failed"
+            exit 1
+          fi
+          echo "All $(jq length <<< "$RESULTS") jobs passed or were skipped."
