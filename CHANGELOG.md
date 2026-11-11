@@ -15,6 +15,17 @@ pull request. The `[Unreleased]` block below was written by hand before the
 switch; its entries belong to the next feature release and are folded into
 that section when it is cut.
 
+## 0.29.0 (2026-11-11)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Added
+* feat(ui): add a read-only demo build of the web UI by @dirkwa in https://github.com/signalk-espOS/espOS/pull/307
+
+
+**Full Changelog**: https://github.com/signalk-espOS/espOS/compare/v0.28.0...v0.29.0
+
 ## 0.28.0 (2026-11-09)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
