@@ -58,14 +58,41 @@ ESPOS_API=http://192.168.0.118 npm run dev     # proxy /api to a real device…
 ESPOS_API=http://127.0.0.1:<port> npm run dev  # …or to the host harness (test/host/espos_httpd_test)
 ```
 
-`mock/server.ts` (Node runs it as TypeScript directly, zero deps) implements the API contract with a
+`mock/core.ts` implements the API contract and `mock/server.ts` serves it over node:http
+(Node runs both as TypeScript directly, zero deps). The mock has a
 simulated WiFi state machine, discovery + token flow, a log ring, SSE, and
 the authentication (`/auth/*`, `/system/ping`, Bearer and cookie, the
 throttle; set `httpd.api_key` on the Config page to see the login page), and
 regenerates the config schema from the real descriptors via
 `components/espos_config/tools/espos_gen_config.py` when python3 is present. It is the reference
 "device" for UI development; when the API changes, change the mock and the
-docs together.
+docs together. `npm test` runs its tests (`node --test`).
+
+### Demo build
+
+`npm run build:demo` writes `ui/dist-demo/`: the same pages, answered by
+`mock/core.ts` running in the browser instead of a device. It is what the
+espOS Manager shows behind its demo devices, so a visitor can click through
+a device's web UI with no device anywhere. Every release attaches it as
+`espos-ui-demo-<version>.tar.gz`, with a `.sha256` (`ui-demo.yml`).
+
+* `?device=` picks the device: `cockpit`, `ble-gateway` or
+  `zigbee-coordinator` (`src/demo/profiles.ts`). Each has the config schema
+  its firmware builds, generated before the build from the same descriptors
+  (`scripts/demo-schemas.ts`), and only the optional pages its firmware has.
+  `?version=` sets the firmware version shown, so the page agrees with the
+  manager that links to it.
+* Read-only: every `PUT`, `POST` and `DELETE` gets 403 with the message
+  "Demo: view only", which the pages show like any other refusal. The device
+  starts settled (joined, approved, streaming) and keeps moving: uptime, the
+  log ring, the SignalK and BLE counters.
+* Nothing leaves the page. The transport (`src/transport.ts`) and the router
+  (`src/router.ts`) are swapped for `src/demo/` versions at build time, so
+  the device's bundle carries none of this. The demo router keeps the page in
+  `?page=`, because it is published as static files under a path of someone
+  else's server, which answers `/wifi` with 404.
+* Addresses come from the documentation ranges: 192.0.2.0/24 and locally
+  administered MACs.
 
 `npm run build` type-checks (strict, `noUncheckedIndexedAccess`), bundles
 (~18 KiB gzipped in total) and writes `components/espos_httpd/ui-dist/` — every file gzipped as

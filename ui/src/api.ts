@@ -4,6 +4,7 @@
 // helpers, the SSE connection, a tiny subscribable store per event, and the
 // authentication state the shell decides the login page from.
 import { useEffect, useState } from "preact/hooks";
+import { openEvents, request } from "./transport";
 
 // Relative by default: the bundle is served by the device it talks to. A
 // build for another origin sets VITE_ESPOS_BASE to an absolute URL.
@@ -57,7 +58,7 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
   // runs this bundle; the optional chain keeps an ancient webview working
   // (unbounded, as before) rather than throwing.
   init.signal = AbortSignal.timeout?.(REQUEST_TIMEOUT_MS);
-  const r = await fetch(BASE + path, init);
+  const r = await request(BASE + path, init);
   const text = await r.text();
   let js: unknown;
   try { js = text ? JSON.parse(text) : null; } catch { js = null; }
@@ -336,7 +337,7 @@ let retry: ReturnType<typeof setTimeout> | null = null;
 export function connectEvents() {
   if (es) return;
   linkStore.set("connecting");
-  es = new EventSource(BASE + "/events", { withCredentials: ABSOLUTE });
+  es = openEvents(BASE + "/events", { withCredentials: ABSOLUTE });
   const on = <T,>(name: string, store: Store<T>, map?: (d: T) => void) =>
     es!.addEventListener(name, (e: MessageEvent<string>) => {
       const d = JSON.parse(e.data) as T;

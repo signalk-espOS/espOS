@@ -1,0 +1,9 @@
+/* SPDX-FileCopyrightText: 2026 Dirk Wahrheit */
+/* SPDX-License-Identifier: Apache-2.0 */
+.demo-banner {
+  padding: .4rem 1rem;
+  background: #7c5a00;
+  color: #fff;
+  font-size: .9rem;
+  text-align: center;
+}

@@ -4,19 +4,13 @@
 import { useEffect, useState } from "preact/hooks";
 import { authStore, linkStore, logout, useStore, wifiStore, skStore } from "./api";
 import type { Route } from "./routes";
+import { currentPath, hrefFor, navigate, onPathChange } from "./router";
 
-export function navigate(path: string) {
-  history.pushState(null, "", path);
-  dispatchEvent(new PopStateEvent("popstate"));
-}
+export { hrefFor, navigate };
 
 function usePath(): string {
-  const [p, setP] = useState(location.pathname);
-  useEffect(() => {
-    const h = () => setP(location.pathname);
-    addEventListener("popstate", h);
-    return () => removeEventListener("popstate", h);
-  }, []);
+  const [p, setP] = useState(currentPath());
+  useEffect(() => onPathChange(() => setP(currentPath())), []);
   return p;
 }
 
@@ -32,12 +26,12 @@ export function App({ routes }: { routes: Route[] }) {
   return (
     <>
       <header class="top">
-        <a class="brand" href="/" onClick={(e) => { e.preventDefault(); navigate("/"); }}>
+        <a class="brand" href={hrefFor("/")} onClick={(e) => { e.preventDefault(); navigate("/"); }}>
           <span class="logo">◈</span> espOS <small>{wifi?.hostname ?? ""}</small>
         </a>
         <nav>
           {routes.map((r) => (
-            <a key={r.path} href={r.path} class={r === route ? "active" : ""} onClick={(e) => { e.preventDefault(); navigate(r.path); }}>
+            <a key={r.path} href={hrefFor(r.path)} class={r === route ? "active" : ""} onClick={(e) => { e.preventDefault(); navigate(r.path); }}>
               {r.title}
               {r.path === "/wifi" && wifi && <Dot ok={wifi.state === "connected"} warn={wifi.state === "connecting" || wifi.state === "obtaining_ip"} />}
               {r.path === "/signalk" && sk && <Dot ok={sk.token.state === "approved" && !!sk.ws?.connected} warn={sk.token.state === "pending" || sk.token.state === "approved"} />}
