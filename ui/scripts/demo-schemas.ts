@@ -7,6 +7,7 @@
 // espOS's core descriptors (espos_project_prologue() keeps httpd, net, time,
 // wifi, sk and ota) plus the optional components it names.
 import { mkdirSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { generateSchema } from "../mock/server.ts";
 
 const CORE = ["httpd", "net", "time", "wifi", "sk", "ota"].map((c) => `components/espos_${c}/config/${c}.json`);
@@ -17,7 +18,7 @@ const DEVICES: Record<string, string[]> = {
   "zigbee-coordinator": CORE,
 };
 
-const out = new URL("../demo-gen/", import.meta.url).pathname;
+const out = fileURLToPath(new URL("../demo-gen/", import.meta.url));
 mkdirSync(out, { recursive: true });
 for (const [id, descriptors] of Object.entries(DEVICES)) {
   // No fallback: a demo device with the development schema would show

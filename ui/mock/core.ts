@@ -151,11 +151,19 @@ export function createMock(opts: MockOptions): Mock {
   const readOnly = opts.readOnly ?? false;
   const etag = "mock" + Math.abs(hash(JSON.stringify(schema))).toString(16).slice(0, 12);
   // Every timer the mock starts goes through these, so close() can stop them
-  // all, and a stopped one leaves the set.
+  // all, and a stopped one leaves the set. Once closed they start nothing: a
+  // listener may close the mock from inside a handler that schedules more.
   type Timer = ReturnType<typeof setTimeout>;
   const timers = new Set<Timer>();
-  const later = (fn: () => void, ms: number): Timer => { const t = setTimeout(() => { timers.delete(t); fn(); }, ms); timers.add(t); return t; };
-  const every = (fn: () => void, ms: number): Timer => { const t = setInterval(fn, ms); timers.add(t); return t; };
+  let closed = false;
+  const later = (fn: () => void, ms: number): Timer | undefined => {
+    if (closed) return undefined;
+    const t = setTimeout(() => { timers.delete(t); fn(); }, ms); timers.add(t); return t;
+  };
+  const every = (fn: () => void, ms: number): Timer | undefined => {
+    if (closed) return undefined;
+    const t = setInterval(fn, ms); timers.add(t); return t;
+  };
   // clearTimeout and clearInterval share one id pool in Node and browsers alike.
   const stop = (t: Timer | undefined) => { if (t === undefined) return; clearInterval(t); timers.delete(t); };
 
@@ -835,6 +843,7 @@ export function createMock(opts: MockOptions): Mock {
       return () => { listeners.delete(listener); };
     },
     close() {
+      closed = true;
       for (const t of [...timers]) stop(t);
       listeners.clear();
     },

@@ -31,7 +31,13 @@ permissions: {}
 
 jobs:
   attach:
+    name: Attach the demo build
     runs-on: ubuntu-latest
+    # A release's automatic run and a run by hand both replace the same
+    # assets; one at a time, and never cut short mid-upload.
+    concurrency:
+      group: ui-demo-${{ inputs.tag }}
+      cancel-in-progress: false
     timeout-minutes: 10
     permissions:
       contents: write
