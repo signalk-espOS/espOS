@@ -19,6 +19,9 @@ test/host/*/managed_components/
 test/host/*/dependencies.lock
 ui/node_modules/
 ui/dist/
+# npm run build:demo
+ui/dist-demo/
+ui/demo-gen/
 
 # `compote component pack` writes the archive it would upload here.
 components/*/dist/

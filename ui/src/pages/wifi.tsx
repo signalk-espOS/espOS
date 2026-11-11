@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useEffect, useState } from "preact/hooks";
 import { get, put, post, useStore, wifiStore, scanStore, errText, type ScanDoc, type ConfigDoc, type PutResult } from "../api";
-import { Badge, Row, Msg, navigate } from "../app";
+import { Badge, Row, Msg, hrefFor, navigate } from "../app";
 
 const SLOTS = [0, 1, 2, 3] as const;
 
@@ -113,7 +113,7 @@ export function WifiPage() {
               ))}
             </tbody>
           </table>
-          <p class="muted small">Backoff, timeouts and the setup portal are under <a href="/config" onClick={(e) => { e.preventDefault(); navigate("/config"); }}>Config → WiFi</a>.</p>
+          <p class="muted small">Backoff, timeouts and the setup portal are under <a href={hrefFor("/config")} onClick={(e) => { e.preventDefault(); navigate("/config"); }}>Config → WiFi</a>.</p>
         </section>
       </div>
     </>

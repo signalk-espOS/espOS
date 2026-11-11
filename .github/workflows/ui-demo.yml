@@ -1,0 +1,69 @@
+# SPDX-FileCopyrightText: 2026 Dirk Wahrheit
+# SPDX-License-Identifier: Apache-2.0
+#
+# Attach the demo build of the web UI to a release, as
+# espos-ui-demo-<version>.tar.gz plus its .sha256: the device UI answered by a
+# read-only mock in the page, which the espOS Manager serves behind its demo
+# devices (docs/ui.md, "Demo build"). An asset rather than a package, so it
+# needs no registry, no publisher and no name of its own; the manager pins a
+# version and its checksum.
+#
+# Called by release-please.yml once a release exists. Run by hand with a tag
+# to attach it to a release made before this workflow, or to replace an
+# asset a failed run left out.
+name: ui-demo
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "The release tag (v<version>)"
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The release tag (v<version>)"
+        type: string
+        required: true
+
+permissions: {}
+
+jobs:
+  attach:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - run: npm ci
+        working-directory: ui
+      # Needs python3 for espos_gen_config.py; the runner has it.
+      - run: npm run build:demo
+        working-directory: ui
+      - name: pack
+        id: pack
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          name="espos-ui-demo-${TAG#v}.tar.gz"
+          # Byte-for-byte reproducible, so a re-run that replaces the asset
+          # keeps the checksum a manager has already pinned.
+          tar --sort=name --owner=0 --group=0 --numeric-owner --mtime=@0 -cf - -C ui/dist-demo . | gzip -9n > "$name"
+          sha256sum "$name" > "$name.sha256"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+      - name: attach
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          NAME: ${{ steps.pack.outputs.name }}
+        run: gh release upload "$TAG" "$NAME" "$NAME.sha256" --clobber --repo "$GITHUB_REPOSITORY"

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useEffect, useState } from "preact/hooks";
 import { get, put, post, useStore, otaStore, fmtBytes, fmtDuration, errText, type OtaStatus, type ConfigDoc, type PutResult } from "../api";
-import { Badge, Row, Msg, navigate } from "../app";
+import { Badge, Row, Msg, hrefFor, navigate } from "../app";
 
 const STATE_KIND: Record<OtaStatus["state"], "ok" | "warn" | "bad" | "muted"> = {
   idle: "muted", checking: "warn", available: "ok", downloading: "warn", verifying: "warn", ready: "ok", failed: "bad",
@@ -102,7 +102,7 @@ export function OtaPage() {
             <label><input type="checkbox" checked={!!cfg?.["auto_install"]} onChange={(e) => void save({ auto_install: (e.target as HTMLInputElement).checked }, "Saved.")} /> install automatically</label>
             <label><input type="checkbox" checked={!!cfg?.["allow_insecure"]} onChange={(e) => void save({ allow_insecure: (e.target as HTMLInputElement).checked }, "Saved.")} /> skip TLS certificate check</label>
           </div>
-          <p class="muted small">Manifest format and signing: docs/ota.md. Check interval and rollback timeout are under <a href="/config" onClick={(e) => { e.preventDefault(); navigate("/config"); }}>Config → Firmware updates</a>.</p>
+          <p class="muted small">Manifest format and signing: docs/ota.md. Check interval and rollback timeout are under <a href={hrefFor("/config")} onClick={(e) => { e.preventDefault(); navigate("/config"); }}>Config → Firmware updates</a>.</p>
         </section>
       </div>
     </>

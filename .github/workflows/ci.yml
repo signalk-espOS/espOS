@@ -350,7 +350,14 @@ jobs:
       # not worth waiting through a bundle to hear about.
       - run: npm run lint
         working-directory: ui
+      - run: npm test
+        working-directory: ui
       - run: npm run build
+        working-directory: ui
+      # The bundle a release attaches for the espOS Manager's demo devices
+      # (ui-demo.yml): built here too, so a change that breaks it fails on
+      # its pull request rather than at release time.
+      - run: npm run build:demo
         working-directory: ui
       # The bundle is committed so firmware builds need no Node; a UI change
       # that forgets to rebuild it would ship the old page silently.

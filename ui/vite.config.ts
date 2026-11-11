@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Dirk Wahrheit
 // SPDX-License-Identifier: Apache-2.0
+import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vite";
 import preact from "@preact/preset-vite";
 import checker from "vite-plugin-checker";
@@ -40,7 +41,40 @@ function stripCrossorigin() {
   };
 }
 
-export default defineConfig({
+const src = (p: string) => fileURLToPath(new URL(`./src/${p}`, import.meta.url));
+
+/* `--mode demo` (npm run build:demo): the same UI, answered by the read-only
+ * mock in the page instead of a device, for a page that shows what a device
+ * looks like with none behind it. The two modules that reach outside the page
+ * -- the transport and the router -- are swapped for their demo versions here
+ * rather than switched on a flag inside them, so not a byte of the demo ends
+ * up in the bundle a device serves. */
+function demoPlugin(): Plugin {
+  const swap: Record<string, string> = {
+    [src("transport.ts")]: src("demo/transport.ts"),
+    [src("router.ts")]: src("demo/router.ts"),
+  };
+  return {
+    name: "espos-demo",
+    enforce: "pre",
+    async resolveId(source, importer, options) {
+      if (!importer || importer.includes("/src/demo/")) return null;
+      const resolved = await this.resolve(source, importer, { ...options, skipSelf: true });
+      return resolved ? (swap[resolved.id] ?? null) : null;
+    },
+    // "pre", so the entry is swapped before Vite reads the scripts out of
+    // the page; later, the build has already bundled src/main.tsx.
+    transformIndexHtml: {
+      order: "pre",
+      handler: (html: string) => html.replace('src="/src/main.tsx"', 'src="/src/demo/main.tsx"'),
+    },
+  };
+}
+
+export default defineConfig(({ mode }) => ({
+  // Relative, because the demo is published under a path chosen by whoever
+  // serves it; the device bundle is served from its root.
+  base: mode === "demo" ? "./" : "/",
   plugins: [
     preact(),
     /* Type errors in the dev overlay, which `npm run dev` otherwise never
@@ -55,9 +89,10 @@ export default defineConfig({
     checker({ typescript: true, enableBuild: false }),
     mockPlugin(),
     stripCrossorigin(),
+    ...(mode === "demo" ? [demoPlugin()] : []),
   ],
   build: {
-    outDir: "dist",
+    outDir: mode === "demo" ? "dist-demo" : "dist",
     emptyOutDir: true,
     sourcemap: false,
     target: "es2020",
@@ -71,4 +106,4 @@ export default defineConfig({
     port: 4173,
     proxy: { "/api": { target, changeOrigin: true, ws: false } },
   },
-});
+}));

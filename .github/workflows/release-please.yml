@@ -265,6 +265,16 @@ jobs:
       dry_run: false
     secrets: inherit
 
+  # The demo build of the web UI, for the espOS Manager's demo devices.
+  ui-demo:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/ui-demo.yml
+    with:
+      tag: ${{ needs.release-please.outputs.tag_name }}
+
   # Build the example as a newcomer downloads it, from the release just
   # published: the one check that sees what the registry actually serves.
   registry-smoke:
