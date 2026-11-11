@@ -10,7 +10,7 @@
 // available (components/espos_config/tools/espos_gen_config.py); otherwise mock/schema.json is used.
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import { spawnSync } from "node:child_process";
-import { readFileSync, mkdtempSync } from "node:fs";
+import { readFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,20 +24,27 @@ export const DEV_DESCRIPTORS = ["main/config/app.json", "components/espos_httpd/
   "components/espos_wifi/config/wifi.json", "components/espos_sk/config/sk.json",
   "components/espos_ota/config/ota.json"];
 
-/** The schema espos_gen_config.py makes of these descriptors, or null without python3. */
-export function generateSchema(descriptors: string[]): Schema | null {
+/** The schema espos_gen_config.py makes of these descriptors. Throws with the generator's own message. */
+export function generateSchema(descriptors: string[]): Schema {
+  const gen = path.join(root, "components", "espos_config", "tools", "espos_gen_config.py");
+  const out = mkdtempSync(path.join(tmpdir(), "espos-mock-"));
   try {
-    const gen = path.join(root, "components", "espos_config", "tools", "espos_gen_config.py");
-    const out = mkdtempSync(path.join(tmpdir(), "espos-mock-"));
     const r = spawnSync("python3", [gen, "--schema-out", path.join(out, "s.json"), "--c-out", path.join(out, "c.c"),
-      "--h-out", path.join(out, "h.h"), ...descriptors.map((p) => path.resolve(root, p))], { stdio: "ignore" });
-    if (r.status === 0) return JSON.parse(readFileSync(path.join(out, "s.json"), "utf8")) as Schema;
-  } catch { /* fall through */ }
-  return null;
+      "--h-out", path.join(out, "h.h"), ...descriptors.map((p) => path.resolve(root, p))], { encoding: "utf8" });
+    if (r.error) throw new Error(`python3: ${r.error.message}`);
+    if (r.status !== 0) throw new Error(r.stderr.trim() || `espos_gen_config.py exited ${String(r.status)}`);
+    return JSON.parse(readFileSync(path.join(out, "s.json"), "utf8")) as Schema;
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
 }
 
 function loadSchema(): Schema {
-  return generateSchema(DEV_DESCRIPTORS) ?? JSON.parse(readFileSync(path.join(here, "schema.json"), "utf8")) as Schema;
+  try {
+    return generateSchema(DEV_DESCRIPTORS);
+  } catch {
+    return JSON.parse(readFileSync(path.join(here, "schema.json"), "utf8")) as Schema;
+  }
 }
 
 const readBody = (req: IncomingMessage) => new Promise<string>((resolve) => { let b = ""; req.on("data", (c: Buffer) => (b += c.toString())); req.on("end", () => resolve(b)); });

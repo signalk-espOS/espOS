@@ -9,8 +9,8 @@
 # version and its checksum.
 #
 # Called by release-please.yml once a release exists. Run by hand with a tag
-# to attach it to a release made before this workflow, or to replace an
-# asset a failed run left out.
+# to attach an asset a failed run left out; only a tag that has the demo
+# build (npm run build:demo) can make one, so releases before it have none.
 name: ui-demo
 
 on:

@@ -150,8 +150,14 @@ export function createMock(opts: MockOptions): Mock {
   const profile = opts.profile ?? DEV_PROFILE;
   const readOnly = opts.readOnly ?? false;
   const etag = "mock" + Math.abs(hash(JSON.stringify(schema))).toString(16).slice(0, 12);
-  const timers = new Set<ReturnType<typeof setInterval>>();
-  const every = (fn: () => void, ms: number) => { const t = setInterval(fn, ms); timers.add(t); return t; };
+  // Every timer the mock starts goes through these, so close() can stop them
+  // all, and a stopped one leaves the set.
+  type Timer = ReturnType<typeof setTimeout>;
+  const timers = new Set<Timer>();
+  const later = (fn: () => void, ms: number): Timer => { const t = setTimeout(() => { timers.delete(t); fn(); }, ms); timers.add(t); return t; };
+  const every = (fn: () => void, ms: number): Timer => { const t = setInterval(fn, ms); timers.add(t); return t; };
+  // clearTimeout and clearInterval share one id pool in Node and browsers alike.
+  const stop = (t: Timer | undefined) => { if (t === undefined) return; clearInterval(t); timers.delete(t); };
 
   // ---- state
   const defaults: ConfigDoc = {};
@@ -210,7 +216,7 @@ export function createMock(opts: MockOptions): Mock {
     connect_count: 0, disconnect_count: 0, attempt: 0,
     portal: { active: true, ssid: portalSsid, force: "auto", ip: "192.168.4.1", clients: 0 },
   };
-  let wifiTimer: ReturnType<typeof setTimeout> | undefined;
+  let wifiTimer: Timer | undefined;
   const wifiEmit = () => emit("wifi", wifiStatus());
   const wifiStatus = () => ({ ...wifi });
   const scanResults = profile.networks;
@@ -221,7 +227,7 @@ export function createMock(opts: MockOptions): Mock {
     delete wifi.backoff_ms; wifi.portal.active = false;
   };
   function wifiEval() {
-    clearTimeout(wifiTimer);
+    stop(wifiTimer);
     const c = cfg("wifi");
     const nets = [0, 1, 2, 3].map((i) => c[`ssid${i}`]).filter(Boolean);
     if (!c["sta_enabled"]) {
@@ -236,16 +242,16 @@ export function createMock(opts: MockOptions): Mock {
     Object.assign(wifi, { state: "connecting", ssid: nets[Math.max(idx, 0)], network_index: Math.max(idx, 0), attempt: wifi.attempt + 1 });
     delete wifi.ip; wifiEmit();
     logAndMark("I", "espos_wifi", `connecting to ${String(wifi.ssid)}`);
-    wifiTimer = setTimeout(() => {
+    wifiTimer = later(() => {
       if (idx < 0) {
         Object.assign(wifi, { state: "backoff", reason: { code: 201, text: "no AP with that SSID found (NO_AP_FOUND)" }, backoff_ms: 8000, disconnect_count: wifi.disconnect_count + 1 });
         wifi.portal.active = true; wifiEmit();
         logAndMark("W", "espos_wifi", `disconnected: NO_AP_FOUND (201), retry in 8 s`);
-        wifiTimer = setTimeout(wifiEval, 8000);
+        wifiTimer = later(wifiEval, 8000);
         return;
       }
       Object.assign(wifi, { state: "obtaining_ip" }); wifiEmit();
-      wifiTimer = setTimeout(() => {
+      wifiTimer = later(() => {
         wifiJoin(wifi.ssid);
         wifiEmit();
         logAndMark("I", "espos_wifi", `connected: ${String(wifi.ssid)} ip=${String(wifi.ip)} rssi=${String(wifi.rssi)}`);
@@ -320,17 +326,17 @@ export function createMock(opts: MockOptions): Mock {
     skEmit();
     emit("sk_servers", serversDoc());
   }
-  let approveTimer: ReturnType<typeof setTimeout> | undefined;
+  let approveTimer: Timer | undefined;
   function skRequest() {
     if (sk.token.has_token) return;
     Object.assign(sk.token, { state: "requesting", busy: true }); skEmit();
-    setTimeout(() => {
+    later(() => {
       Object.assign(sk.token, { state: "pending", busy: false, last_http_status: 202, pending_href: "/signalk/v1/access/requests/" + sk.client_id });
       sk.token.counts.requests++; pendingAt = Date.now(); skEmit();
       logAndMark("I", "espos_sk", "access request PENDING — approve it in the SignalK admin UI");
       // the "admin" approves after a while unless the UI pastes a token first
-      clearTimeout(approveTimer);
-      approveTimer = setTimeout(() => {
+      stop(approveTimer);
+      approveTimer = later(() => {
         if (sk.token.state !== "pending") return;
         Object.assign(sk.token, { state: "approved", has_token: true, approved_s: 0, last_http_status: 200 });
         delete sk.token.pending_href; sk.token.counts.approved++; skEmit();
@@ -339,10 +345,9 @@ export function createMock(opts: MockOptions): Mock {
       }, 12000);
     }, 800);
   }
-  let wsTimer: ReturnType<typeof setInterval> | undefined;
+  let wsTimer: Timer | undefined;
   function wsConnect() {
-    clearInterval(wsTimer);
-    if (wsTimer) timers.delete(wsTimer);
+    stop(wsTimer);
     if (!sk.token.has_token || !cfg("sk")["ws_enabled"] || wifi.state !== "connected") {
       if (sk.ws.connected) { sk.ws.connected = false; emit("sk_ws", sk.ws); }
       return;
@@ -360,7 +365,7 @@ export function createMock(opts: MockOptions): Mock {
   function skForget() {
     Object.assign(sk.token, { state: "no_server", has_token: false, busy: false, last_http_status: 0, last_error: "" });
     delete sk.token.approved_s; delete sk.token.pending_href;
-    clearInterval(wsTimer); sk.ws.connected = false; emit("sk_ws", sk.ws);
+    stop(wsTimer); sk.ws.connected = false; emit("sk_ws", sk.ws);
     logAndMark("W", "espos_sk", "token forgotten");
     skEmit();
     if (sk.server.source !== "none") skRequest();
@@ -369,7 +374,10 @@ export function createMock(opts: MockOptions): Mock {
   // ---- OTA
   const ota = {
     state: "idle", last_error: "",
-    running: { version: profile.version, project: profile.app, target: profile.chip, slot: "ota_0", image_state: "valid", pending_verify: false, confirmed: true, other_slot: "ota_1", other_version: "0.4.9", rolled_back: false, built: "Aug 18 2026 12:00:00", idf: "v6.0.2", key_fp: "b3381b48b9cc9941" },
+    running: { version: profile.version, project: profile.app, target: profile.chip, slot: "ota_0", image_state: "valid", pending_verify: false, confirmed: true, other_slot: "ota_1",
+      // Empty on a demo device, as after a USB flash: any version there would
+      // be read against the one the visitor was shown, as a rollback or a downgrade.
+      other_version: readOnly ? "" : "0.4.9", rolled_back: false, built: "Aug 18 2026 12:00:00", idf: "v6.0.2", key_fp: "b3381b48b9cc9941" },
     manifest: { url: "" as Scalar | undefined, channel: "stable" as Scalar | undefined, auto_check: true as Scalar | undefined, auto_install: false as Scalar | undefined,
       last_check_s: null as number | null, next_check_s: null as number | null },
     progress: { received: 0, total: 0 },
@@ -382,7 +390,7 @@ export function createMock(opts: MockOptions): Mock {
     const c = cfg("ota");
     if (!c["manifest_url"]) { Object.assign(ota, { state: "failed", last_error: "no manifest URL configured" }); return otaEmit(); }
     Object.assign(ota, { state: "checking", last_error: "" }); otaEmit();
-    setTimeout(() => {
+    later(() => {
       checkAt = Date.now();
       ota.available = { version: "0.5.1", url: new URL("espos-esp32c6-0.5.1.bin", String(c["manifest_url"])).href, size: 1180000, sha256: "", notes: "mock: bug fixes", newer: true };
       ota.state = "available"; otaEmit();
@@ -392,18 +400,18 @@ export function createMock(opts: MockOptions): Mock {
   function otaInstall(url: string) {
     if (url.includes("unsigned")) {
       Object.assign(ota, { state: "downloading", progress: { received: 0, total: 900000 } }); otaEmit();
-      setTimeout(() => { Object.assign(ota, { state: "failed", last_error: "image rejected: bad signature or corrupt (ESP_ERR_OTA_VALIDATE_FAILED)" }); otaEmit(); }, 2500);
+      later(() => { Object.assign(ota, { state: "failed", last_error: "image rejected: bad signature or corrupt (ESP_ERR_OTA_VALIDATE_FAILED)" }); otaEmit(); }, 2500);
       return;
     }
     Object.assign(ota, { state: "downloading", last_error: "", progress: { received: 0, total: 1180000 } }); otaEmit();
-    const t = setInterval(() => {
+    const t = every(() => {
       ota.progress.received = Math.min(ota.progress.total, ota.progress.received + 120000); otaEmit();
       if (ota.progress.received >= ota.progress.total) {
-        clearInterval(t);
+        stop(t);
         ota.state = "ready"; otaEmit();
         logAndMark("W", "espos_ota", "update installed, rebooting");
-        setTimeout(() => { Object.assign(ota, { state: "idle", available: null, progress: { received: 0, total: 0 } }); ota.running.version = "0.5.1"; ota.running.slot = "ota_1"; ota.running.other_slot = "ota_0"; ota.running.other_version = "0.5.0-mock"; ota.running.pending_verify = true; ota.running.confirmed = false; ota.running.image_state = "pending_verify"; otaEmit();
-          setTimeout(() => { ota.running.pending_verify = false; ota.running.confirmed = true; ota.running.image_state = "valid"; otaEmit(); logAndMark("I", "espos_ota", "new image confirmed (network up), rollback cancelled"); }, 5000); }, 2000);
+        later(() => { Object.assign(ota, { state: "idle", available: null, progress: { received: 0, total: 0 } }); ota.running.version = "0.5.1"; ota.running.slot = "ota_1"; ota.running.other_slot = "ota_0"; ota.running.other_version = "0.5.0-mock"; ota.running.pending_verify = true; ota.running.confirmed = false; ota.running.image_state = "pending_verify"; otaEmit();
+          later(() => { ota.running.pending_verify = false; ota.running.confirmed = true; ota.running.image_state = "valid"; otaEmit(); logAndMark("I", "espos_ota", "new image confirmed (network up), rollback cancelled"); }, 5000); }, 2000);
       }
     }, 400);
   }
@@ -644,7 +652,7 @@ export function createMock(opts: MockOptions): Mock {
       const bad = needJson(h); if (bad) return bad;
       if (scan.scanning) return err(409, "busy", "scan in progress");
       scan = { ...scan, scanning: true };
-      setTimeout(() => { scanAt = Date.now(); scan = { scanning: false, age_s: 0, results: scanResults }; emit("wifi_scan", scanDoc()); logAndMark("I", "espos_wifi", `scan done: ${scanResults.length} networks`); }, 1500);
+      later(() => { scanAt = Date.now(); scan = { scanning: false, age_s: 0, results: scanResults }; emit("wifi_scan", scanDoc()); logAndMark("I", "espos_wifi", `scan done: ${scanResults.length} networks`); }, 1500);
       return json(202, { status: "scanning" });
     }
     if (r === "/wifi/scan" && m === "GET") return json(200, scanDoc());
@@ -713,7 +721,7 @@ export function createMock(opts: MockOptions): Mock {
     // ---- signalk
     if (r === "/sk/status" && m === "GET") return json(200, skStatus());
     if (r === "/sk/servers" && m === "GET") return json(200, serversDoc());
-    if (r === "/sk/discover" && m === "POST") { const bad = needJson(h); if (bad) return bad; setTimeout(skDiscover, 600); return json(202, { status: "discovering" }); }
+    if (r === "/sk/discover" && m === "POST") { const bad = needJson(h); if (bad) return bad; later(skDiscover, 600); return json(202, { status: "discovering" }); }
     if (r === "/sk/request" && m === "POST") { const bad = needJson(h); if (bad) return bad; skRequest(); return json(202, { status: "requesting" }); }
     if (r === "/sk/forget" && m === "POST") { const bad = needJson(h); if (bad) return bad; skForget(); return json(202, { status: "forgotten" }); }
     if (r === "/sk/token" && m === "POST") {
@@ -722,7 +730,7 @@ export function createMock(opts: MockOptions): Mock {
       const token = field(doc, "token");
       if (!doc || typeof token !== "string" || !token) return err(400, "validation", "expected {\"token\": \"...\"}");
       Object.assign(sk.token, { state: "verifying", busy: true }); skEmit();
-      setTimeout(() => { Object.assign(sk.token, { state: "approved", has_token: true, busy: false, approved_s: 0, last_http_status: 200 }); skEmit(); wsConnect(); }, 900);
+      later(() => { Object.assign(sk.token, { state: "approved", has_token: true, busy: false, approved_s: 0, last_http_status: 200 }); skEmit(); wsConnect(); }, 900);
       return json(202, { status: "verifying" });
     }
     if (r === "/sk/publish" && m === "POST") { const bad = needJson(h); if (bad) return bad; sk.ws.pending++; return json(202, { status: "queued" }); }
@@ -827,10 +835,7 @@ export function createMock(opts: MockOptions): Mock {
       return () => { listeners.delete(listener); };
     },
     close() {
-      for (const t of timers) clearInterval(t);
-      timers.clear();
-      clearTimeout(wifiTimer);
-      clearTimeout(approveTimer);
+      for (const t of [...timers]) stop(t);
       listeners.clear();
     },
   };

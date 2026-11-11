@@ -1,10 +1,12 @@
 // SPDX-FileCopyrightText: 2026 Dirk Wahrheit
 // SPDX-License-Identifier: Apache-2.0
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vite";
 import preact from "@preact/preset-vite";
 import checker from "vite-plugin-checker";
 import { startMock } from "./mock/server.ts";
+import { PROFILES } from "./src/demo/profiles.ts";
 
 // `npm run dev` talks to ESPOS_API (a device or the host harness) when set,
 // otherwise to the in-process mock so no ESP32 is needed to work on the UI.
@@ -57,8 +59,19 @@ function demoPlugin(): Plugin {
   return {
     name: "espos-demo",
     enforce: "pre",
+    // The demo falls back to an empty schema at run time; at build time a
+    // missing one is a mistake, made by running vite without build:demo.
+    buildStart() {
+      for (const id of Object.keys(PROFILES)) {
+        if (!existsSync(fileURLToPath(new URL(`./demo-gen/${id}.schema.json`, import.meta.url)))) {
+          this.error(`demo-gen/${id}.schema.json is missing: build with npm run build:demo`);
+        }
+      }
+    },
     async resolveId(source, importer, options) {
-      if (!importer || importer.includes("/src/demo/")) return null;
+      // Only the two specifiers that can name a swapped module are resolved
+      // again; everything else is left to Vite.
+      if (!importer || importer.includes("/src/demo/") || !/\/(transport|router)$/.test(source)) return null;
       const resolved = await this.resolve(source, importer, { ...options, skipSelf: true });
       return resolved ? (swap[resolved.id] ?? null) : null;
     },

@@ -20,10 +20,14 @@ const DEVICES: Record<string, string[]> = {
 const out = new URL("../demo-gen/", import.meta.url).pathname;
 mkdirSync(out, { recursive: true });
 for (const [id, descriptors] of Object.entries(DEVICES)) {
-  const schema = generateSchema(descriptors);
   // No fallback: a demo device with the development schema would show
   // settings its firmware does not have.
-  if (!schema) throw new Error(`demo-schemas: espos_gen_config.py failed for ${id} (is python3 installed?)`);
+  let schema;
+  try {
+    schema = generateSchema(descriptors);
+  } catch (e) {
+    throw new Error(`demo-schemas: ${id}: ${e instanceof Error ? e.message : String(e)}`, { cause: e });
+  }
   writeFileSync(`${out}${id}.schema.json`, JSON.stringify(schema) + "\n");
   console.log(`${id}: ${Object.keys(schema.properties).join(", ")}`);
 }
