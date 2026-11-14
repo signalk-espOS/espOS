@@ -1112,27 +1112,19 @@ static void ws_task(void *arg)
                     break;
                 }
                 if (r == 0) {
-                    /* A data frame's header with its payload still owed:
-                     * the read timed out in the middle of a payload. IDF
-                     * before 6.0.3 forgets the frame then and would take
-                     * the rest of the payload for the next header, so the
-                     * stream cannot be trusted past this point. */
                     ws_transport_opcodes_t op = esp_transport_ws_get_read_opcode(ws);
-                    if ((op == WS_TRANSPORT_OPCODES_TEXT || op == WS_TRANSPORT_OPCODES_CONT ||
-                         op == WS_TRANSPORT_OPCODES_BINARY) &&
-                        esp_transport_ws_get_read_payload_len(ws) > 0) {
+                    espos_sk_ws_zero_t z = espos_sk_ws_zero_read(
+                        op == WS_TRANSPORT_OPCODES_TEXT || op == WS_TRANSPORT_OPCODES_CONT ||
+                            op == WS_TRANSPORT_OPCODES_BINARY,
+                        op == WS_TRANSPORT_OPCODES_CONT, esp_transport_ws_get_read_payload_len(ws),
+                        esp_transport_ws_get_fin_flag(ws), have || dropping);
+                    if (z == ESPOS_SK_WS_ZERO_CUT) {
                         stalled = true;
                         broken = true;
+                    } else if (z == ESPOS_SK_WS_ZERO_IDLE) {
                         break;
-                    }
-                    if (have == 0 && !dropping) {
-                        break;      /* control frame (ping/pong) handled by the transport */
-                    }
-                    /* A 0-byte read inside a message is a timeout or a
-                     * control frame, unless the frame just read is an empty
-                     * continuation: that one may carry the message's fin. */
-                    if (op == WS_TRANSPORT_OPCODES_CONT && esp_transport_ws_get_read_payload_len(ws) == 0) {
-                        complete = esp_transport_ws_get_fin_flag(ws);
+                    } else if (z == ESPOS_SK_WS_ZERO_DONE) {
+                        complete = true;
                     }
                     continue;
                 }

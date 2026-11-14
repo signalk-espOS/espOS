@@ -298,6 +298,34 @@ static inline bool espos_sk_ws_gather_step(espos_sk_ws_gather_t *g, size_t r, si
     return fin;
 }
 
+/* What a 0-byte read means, from the transport's view of the frame it last
+ * read a header for. A data frame with payload still owed is a read that
+ * timed out mid-payload (IDF before 6.0.3 forgets the frame then, so the
+ * stream is lost). Outside a message it is a control frame or a quiet line;
+ * inside one, an empty continuation carrying fin ends the message and
+ * anything else is waiting. */
+typedef enum {
+    ESPOS_SK_WS_ZERO_IDLE,  /* nothing started: back to the send path */
+    ESPOS_SK_WS_ZERO_WAIT,  /* inside a message: read again */
+    ESPOS_SK_WS_ZERO_DONE,  /* the message is complete */
+    ESPOS_SK_WS_ZERO_CUT,   /* payload cut off: reconnect */
+} espos_sk_ws_zero_t;
+
+static inline espos_sk_ws_zero_t espos_sk_ws_zero_read(bool data_frame, bool continuation, int payload_len,
+                                                       bool fin, bool in_message)
+{
+    if (data_frame && payload_len > 0) {
+        return ESPOS_SK_WS_ZERO_CUT;
+    }
+    if (!in_message) {
+        return ESPOS_SK_WS_ZERO_IDLE;
+    }
+    if (continuation && payload_len == 0 && fin) {
+        return ESPOS_SK_WS_ZERO_DONE;
+    }
+    return ESPOS_SK_WS_ZERO_WAIT;
+}
+
 #ifdef __cplusplus
 }
 #endif

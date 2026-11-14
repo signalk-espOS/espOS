@@ -297,8 +297,9 @@ espos_sk_send_raw("{\"context\":\"vessels.self\",\"updates\":[…]}");
   also meta items, with `meta_json` set and no value. A message is put back
   together, from the pieces the transport reads and from the frames a server
   may split it into, up to `CONFIG_ESPOS_SK_RX_FRAME_MAX` (16 KiB); a larger
-  one is read to its end and dropped with a log line. A message that has not
-  arrived whole 5 s after its first byte, or a frame whose payload stops part way
+  one is read to its end and dropped with a log line. A message still
+  incomplete 5 s after its first byte (checked before each read, so a read
+  already under way may finish it), or a frame whose payload stops part way
   through a read, means the stream is out of step with the server: the client
   reconnects, and `last_error` reads "message incomplete".
 * **The callback runs on the stream task.** Copy what you need and return. A
