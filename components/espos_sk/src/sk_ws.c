@@ -1076,6 +1076,7 @@ static void ws_task(void *arg)
             size_t have = 0;
             espos_sk_ws_gather_t gather = { 0 };
             bool broken = false, complete = false, dropping = false, stalled = false;
+            char probe[64];
             const uint32_t msg_start = now_ms();
             while (!complete && !broken) {
                 if (have || dropping) {
@@ -1087,14 +1088,22 @@ static void ws_task(void *arg)
                         break;
                     }
                 }
+                char *dst = buf + have;
+                size_t room = cap - have - 1;
                 if (have + 1 >= cap) {
                     if (cap >= CONFIG_ESPOS_SK_RX_FRAME_MAX) {
-                        if (!dropping) {
-                            ESP_LOGW(TAG, "message larger than %d bytes dropped", CONFIG_ESPOS_SK_RX_FRAME_MAX);
+                        if (dropping) {
+                            /* read the rest of the message into the void */
+                            have = 0;
+                            dst = buf;
+                            room = cap - 1;
+                        } else {
+                            /* Full, but the message may already be whole
+                             * but for an empty final frame: probe for more
+                             * payload before giving up on it. */
+                            dst = probe;
+                            room = sizeof(probe);
                         }
-                        /* read the rest of the message into the void */
-                        dropping = true;
-                        have = 0;
                     } else {
                         size_t ncap = cap * 2 > (size_t)CONFIG_ESPOS_SK_RX_FRAME_MAX ? (size_t)CONFIG_ESPOS_SK_RX_FRAME_MAX : cap * 2;
                         char *nb = realloc(buf, ncap);
@@ -1104,9 +1113,11 @@ static void ws_task(void *arg)
                         }
                         buf = nb;
                         cap = ncap;
+                        dst = buf + have;
+                        room = cap - have - 1;
                     }
                 }
-                int r = esp_transport_read(ws, buf + have, (int)(cap - have - 1), (have || dropping) ? 1000 : 100);
+                int r = esp_transport_read(ws, dst, (int)room, (have || dropping) ? 1000 : 100);
                 if (r < 0) {
                     broken = true;
                     break;
@@ -1128,7 +1139,13 @@ static void ws_task(void *arg)
                     }
                     continue;
                 }
-                have += (size_t)r;
+                if (dst == probe) {
+                    ESP_LOGW(TAG, "message larger than %d bytes dropped", CONFIG_ESPOS_SK_RX_FRAME_MAX);
+                    dropping = true;
+                    have = 0;
+                } else {
+                    have += (size_t)r;
+                }
                 int total = esp_transport_ws_get_read_payload_len(ws);
                 complete = espos_sk_ws_gather_step(&gather, (size_t)r, total > 0 ? (size_t)total : 0,
                                                    esp_transport_ws_get_fin_flag(ws));
