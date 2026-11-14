@@ -277,6 +277,27 @@ bool espos_sk_stream_allowed(void);
 void espos_sk_time_start(void);
 void espos_sk_time_stop(void);
 
+/* Message boundaries on the stream (sk_ws.c, pure). esp_transport_ws hands a
+ * frame's payload back in pieces and reports only the CURRENT frame's length
+ * and fin flag, so a message split into frames must be counted per frame:
+ * bytes of earlier fragments, compared with a later fragment's length, would
+ * end the message before that fragment has arrived. Feed every payload read;
+ * true once the read that finished a frame carrying fin has been fed, which
+ * is the end of a message. */
+typedef struct {
+    size_t frame_have;
+} espos_sk_ws_gather_t;
+
+static inline bool espos_sk_ws_gather_step(espos_sk_ws_gather_t *g, size_t r, size_t payload_len, bool fin)
+{
+    g->frame_have += r;
+    if (g->frame_have < payload_len) {
+        return false;
+    }
+    g->frame_have = 0; /* the next read starts a new frame */
+    return fin;
+}
+
 #ifdef __cplusplus
 }
 #endif
