@@ -80,6 +80,15 @@ espos_sk_tls_decision_t espos_sk_tls_decide(const espos_sk_tls_facts_t *f)
     return d;
 }
 
+bool espos_sk_tls_ca_anchor_current(espos_sk_tls_anchor_kind_t kind, const uint8_t *anchor_ca_fp,
+                                    const uint8_t *ca_fp)
+{
+    if (kind != ESPOS_SK_TLS_ANCHOR_CA || !anchor_ca_fp || !ca_fp) {
+        return false;
+    }
+    return memcmp(anchor_ca_fp, ca_fp, ESPOS_SK_TLS_FP_LEN) == 0;
+}
+
 const char *espos_sk_tls_reason_str(espos_sk_tls_reason_t r)
 {
     switch (r) {

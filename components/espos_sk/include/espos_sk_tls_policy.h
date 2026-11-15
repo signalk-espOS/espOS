@@ -123,6 +123,17 @@ espos_sk_tls_decision_t espos_sk_tls_decide(const espos_sk_tls_facts_t *f);
 const char *espos_sk_tls_reason_str(espos_sk_tls_reason_t r);
 
 /**
+ * Whether the stored anchor already stands for the CA the configuration
+ * supplies, so loading sk.ca_pem again (at every boot) must keep it rather
+ * than start a fresh, unbound one. True only for a CA anchor with the same
+ * fingerprint; the SAN set and leaf it has bound since are part of what it
+ * stands for, and dropping them would let the next leaf the CA signed for any
+ * name bind again.
+ */
+bool espos_sk_tls_ca_anchor_current(espos_sk_tls_anchor_kind_t kind, const uint8_t *anchor_ca_fp,
+                                    const uint8_t *ca_fp);
+
+/**
  * Normalise a SAN set into the stored form: each name lower-cased, the set
  * sorted and de-duplicated, entries joined with a single ',' and no spaces —
  * so that two certificates naming the same hosts in a different order compare

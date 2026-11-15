@@ -640,8 +640,11 @@ mode.**
   recording it. Put the issuing CA in `sk.ca_pem` (a blob, base64 over the
   REST API), or send `PUT /api/v1/sk/tls/ca {"pem": "-----BEGIN CERTIFICATE-----…"}`.
   The device trusts it immediately, so a fleet set up in advance connects on
-  the first try with nothing to record. An invalid PEM is answered `400`,
-  rather than leaving a device that quietly stops connecting.
+  the first try with nothing to record. That first connection binds the
+  server's names to the CA, and they stay bound across reboots: later
+  certificates from the same CA must name the same hosts. Supplying a
+  different CA starts over. An invalid PEM is answered `400`, rather than
+  leaving a device that quietly stops connecting.
 * **`bundle`** uses the public Mozilla roots and records nothing, for a
   server with a certificate from a real certificate authority.
 

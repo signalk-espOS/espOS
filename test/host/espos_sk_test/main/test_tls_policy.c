@@ -495,3 +495,21 @@ TEST_CASE("over TLS one 401 clears the token immediately", "[sk_tok]")
     TEST_ASSERT_EQUAL_STRING("", TSM.store.token);
     TEST_ASSERT_EQUAL(1, G.requests);
 }
+
+TEST_CASE("reloading the configured CA keeps an anchor already on that CA", "[sk_tls]")
+{
+    /* sk.ca_pem is loaded again at every boot. Re-creating the anchor then
+     * would drop the SAN set the first connection bound, and the next leaf
+     * the CA signed, for any name, would bind afresh. */
+    uint8_t ca[ESPOS_SK_TLS_FP_LEN], other[ESPOS_SK_TLS_FP_LEN];
+    memset(ca, 0xA5, sizeof(ca));
+    memset(other, 0xA5, sizeof(other));
+    other[ESPOS_SK_TLS_FP_LEN - 1] ^= 1;
+
+    TEST_ASSERT_TRUE(espos_sk_tls_ca_anchor_current(ESPOS_SK_TLS_ANCHOR_CA, ca, ca));
+    TEST_ASSERT_FALSE(espos_sk_tls_ca_anchor_current(ESPOS_SK_TLS_ANCHOR_CA, other, ca));
+    TEST_ASSERT_FALSE(espos_sk_tls_ca_anchor_current(ESPOS_SK_TLS_ANCHOR_LEAF, ca, ca));
+    TEST_ASSERT_FALSE(espos_sk_tls_ca_anchor_current(ESPOS_SK_TLS_ANCHOR_NONE, ca, ca));
+    TEST_ASSERT_FALSE(espos_sk_tls_ca_anchor_current(ESPOS_SK_TLS_ANCHOR_CA, NULL, ca));
+    TEST_ASSERT_FALSE(espos_sk_tls_ca_anchor_current(ESPOS_SK_TLS_ANCHOR_CA, ca, NULL));
+}

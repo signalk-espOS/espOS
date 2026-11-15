@@ -499,6 +499,13 @@ void espos_sk_tls_set_trust(espos_sk_tls_trust_t trust, const char *ca_pem)
              * the first try instead of pinning whatever answered first. */
             anchor_t a = { .kind = ESPOS_SK_TLS_ANCHOR_CA, .pinned_unix = pinned_now_unix() };
             crt_fingerprint(&s.ca_crt, a.ca_fp);
+            /* s.ca_pem lives in RAM, so every boot reaches this point. When
+             * NVS already holds an anchor on this CA, keep it: its SAN set is
+             * what holds later connections to the server it first met. */
+            if (espos_sk_tls_ca_anchor_current(s.anchor.kind, s.anchor.ca_fp, a.ca_fp)) {
+                unlock();
+                return;
+            }
             crt_cn(&s.ca_crt, a.cn, sizeof(a.cn));
             /* No SAN yet: the CA does not name the server. The first
              * successful connect binds the leaf's set (commit below). */
