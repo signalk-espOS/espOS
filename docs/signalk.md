@@ -633,7 +633,8 @@ mode.**
     a server cannot hang a copy of the CA's public certificate over a leaf
     it made itself; such a chain is refused as "not signed by the pinned CA".
   * **A leaf record**: the SHA-256 of the server's certificate itself, used
-    when the chain has no CA or the certificate lists no names.
+    when the chain has no CA, or the certificate lists no names or more than
+    the device can record whole (eight, each up to 63 characters).
     signalk-server's own self-signed certificate ends up here, and a renewal
     then needs one deliberate press of "Trust the new certificate".
 * **`ca`** works the same way, but you supply the CA instead of the device

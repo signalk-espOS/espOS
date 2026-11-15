@@ -317,14 +317,25 @@ static void crt_san_set(const mbedtls_x509_crt *crt, char *out, size_t out_size,
          * 16 raw bytes). Everything else -- e-mail, URI, directoryName -- says
          * nothing about which host this is and is skipped. */
         unsigned tag = cur->buf.tag & MBEDTLS_ASN1_TAG_VALUE_MASK;
+        bool is_name = tag == MBEDTLS_X509_SAN_DNS_NAME ||
+                       (tag == MBEDTLS_X509_SAN_IP_ADDRESS && (cur->buf.len == 4 || cur->buf.len == 16));
+        if (!is_name) {
+            continue;
+        }
         if (n >= SAN_ENTRY_MAX) {
             overflow = true;
             break;
         }
         if (tag == MBEDTLS_X509_SAN_DNS_NAME) {
-            size_t len = cur->buf.len < SAN_NAME_MAX - 1 ? cur->buf.len : SAN_NAME_MAX - 1;
-            memcpy(names[n], cur->buf.p, len);
-            names[n][len] = '\0';
+            /* A name cut at 63 bytes, or at an embedded NUL, would compare
+             * equal to a different name that shares the part we kept, so
+             * either marks the set as one we could not read whole. */
+            if (cur->buf.len > SAN_NAME_MAX - 1 || memchr(cur->buf.p, '\0', cur->buf.len)) {
+                overflow = true;
+                break;
+            }
+            memcpy(names[n], cur->buf.p, cur->buf.len);
+            names[n][cur->buf.len] = '\0';
         } else if (tag == MBEDTLS_X509_SAN_IP_ADDRESS && cur->buf.len == 4) {
             snprintf(names[n], SAN_NAME_MAX, "%u.%u.%u.%u", cur->buf.p[0], cur->buf.p[1], cur->buf.p[2], cur->buf.p[3]);
         } else if (tag == MBEDTLS_X509_SAN_IP_ADDRESS && cur->buf.len == 16) {
@@ -333,8 +344,6 @@ static void crt_san_set(const mbedtls_x509_crt *crt, char *out, size_t out_size,
                 w += snprintf(w, (size_t)(names[n] + SAN_NAME_MAX - w), "%s%02x%02x", i ? ":" : "", cur->buf.p[i],
                               cur->buf.p[i + 1]);
             }
-        } else {
-            continue;
         }
         ptrs[n] = names[n];
         n++;
