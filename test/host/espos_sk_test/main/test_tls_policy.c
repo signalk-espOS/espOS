@@ -506,12 +506,15 @@ TEST_CASE("reloading the configured CA keeps an anchor already on that CA", "[sk
     memset(other, 0xA5, sizeof(other));
     other[ESPOS_SK_TLS_FP_LEN - 1] ^= 1;
 
-    TEST_ASSERT_TRUE(espos_sk_tls_ca_anchor_current(ESPOS_SK_TLS_ANCHOR_CA, ca, ca));
-    TEST_ASSERT_FALSE(espos_sk_tls_ca_anchor_current(ESPOS_SK_TLS_ANCHOR_CA, other, ca));
-    TEST_ASSERT_FALSE(espos_sk_tls_ca_anchor_current(ESPOS_SK_TLS_ANCHOR_LEAF, ca, ca));
-    TEST_ASSERT_FALSE(espos_sk_tls_ca_anchor_current(ESPOS_SK_TLS_ANCHOR_NONE, ca, ca));
-    TEST_ASSERT_FALSE(espos_sk_tls_ca_anchor_current(ESPOS_SK_TLS_ANCHOR_CA, NULL, ca));
-    TEST_ASSERT_FALSE(espos_sk_tls_ca_anchor_current(ESPOS_SK_TLS_ANCHOR_CA, ca, NULL));
+    /* The boot reload: the anchor the first connection bound stays. */
+    TEST_ASSERT_EQUAL(ESPOS_SK_TLS_CA_KEEP, espos_sk_tls_ca_load(ESPOS_SK_TLS_ANCHOR_CA, ca, ca));
+    /* A different CA, a TOFU leaf pin, nothing stored, or nothing to compare:
+     * the configured CA becomes a fresh anchor. */
+    TEST_ASSERT_EQUAL(ESPOS_SK_TLS_CA_REANCHOR, espos_sk_tls_ca_load(ESPOS_SK_TLS_ANCHOR_CA, other, ca));
+    TEST_ASSERT_EQUAL(ESPOS_SK_TLS_CA_REANCHOR, espos_sk_tls_ca_load(ESPOS_SK_TLS_ANCHOR_LEAF, ca, ca));
+    TEST_ASSERT_EQUAL(ESPOS_SK_TLS_CA_REANCHOR, espos_sk_tls_ca_load(ESPOS_SK_TLS_ANCHOR_NONE, ca, ca));
+    TEST_ASSERT_EQUAL(ESPOS_SK_TLS_CA_REANCHOR, espos_sk_tls_ca_load(ESPOS_SK_TLS_ANCHOR_CA, NULL, ca));
+    TEST_ASSERT_EQUAL(ESPOS_SK_TLS_CA_REANCHOR, espos_sk_tls_ca_load(ESPOS_SK_TLS_ANCHOR_CA, ca, NULL));
 }
 
 /* ------------------------------------------------------ SAN collection */

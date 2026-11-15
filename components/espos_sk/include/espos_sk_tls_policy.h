@@ -122,16 +122,22 @@ espos_sk_tls_decision_t espos_sk_tls_decide(const espos_sk_tls_facts_t *f);
 /** A human sentence for a reason code; never NULL, never empty. */
 const char *espos_sk_tls_reason_str(espos_sk_tls_reason_t r);
 
+/* What loading the configured CA (sk.ca_pem) does to the stored anchor. */
+typedef enum {
+    ESPOS_SK_TLS_CA_KEEP = 0,     /* the stored anchor already is this CA: keep it, bound names and all */
+    ESPOS_SK_TLS_CA_REANCHOR = 1, /* replace it with a fresh, unbound anchor on this CA */
+} espos_sk_tls_ca_load_t;
+
 /**
- * Whether the stored anchor already stands for the CA the configuration
- * supplies, so loading sk.ca_pem again (at every boot) must keep it rather
- * than start a fresh, unbound one. True only for a CA anchor with the same
- * fingerprint; the SAN set and leaf it has bound since are part of what it
- * stands for, and dropping them would let the next leaf the CA signed for any
- * name bind again.
+ * Decide what loading the configured CA does, given the stored anchor's kind
+ * and CA fingerprint and the configured CA's fingerprint. The PEM is loaded
+ * again at every boot, so KEEP is the normal answer: the SAN set and leaf a
+ * CA anchor has bound are part of what it stands for, and a fresh anchor
+ * would let the next leaf the CA signed, for any name, bind again. Anything
+ * but a CA anchor on the same fingerprint is REANCHOR.
  */
-bool espos_sk_tls_ca_anchor_current(espos_sk_tls_anchor_kind_t kind, const uint8_t *anchor_ca_fp,
-                                    const uint8_t *ca_fp);
+espos_sk_tls_ca_load_t espos_sk_tls_ca_load(espos_sk_tls_anchor_kind_t kind, const uint8_t *anchor_ca_fp,
+                                            const uint8_t *ca_fp);
 
 /**
  * Normalise a SAN set into the stored form: each name lower-cased, the set
