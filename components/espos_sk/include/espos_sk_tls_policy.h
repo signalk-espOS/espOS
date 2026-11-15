@@ -149,6 +149,40 @@ bool espos_sk_tls_ca_anchor_current(espos_sk_tls_anchor_kind_t kind, const uint8
 esp_err_t espos_sk_tls_san_normalise(const char *const *in, size_t n, char *out, size_t out_size,
                                      bool *truncated);
 
+/* How many names, and how long each, a SAN set can hold while being built.
+ * A certificate past either limit gives a cut set, which never matches. */
+#define ESPOS_SK_TLS_SAN_ENTRY_MAX 8
+#define ESPOS_SK_TLS_SAN_NAME_MAX  64
+
+/* The SAN entry types that name a host (the context-specific tag numbers of
+ * RFC 5280 GeneralName); every other type is skipped. */
+#define ESPOS_SK_TLS_SAN_TAG_DNS 2
+#define ESPOS_SK_TLS_SAN_TAG_IP  7
+
+/* Collects a leaf's SAN entries into a set, one entry at a time, so the
+ * caller can walk mbedTLS's sequence without allocating. Zero it to start. */
+typedef struct {
+    char names[ESPOS_SK_TLS_SAN_ENTRY_MAX][ESPOS_SK_TLS_SAN_NAME_MAX];
+    const char *ptrs[ESPOS_SK_TLS_SAN_ENTRY_MAX];
+    size_t n;
+    bool cut; /* a name did not fit, could not be read whole, or there were too many */
+} espos_sk_tls_san_builder_t;
+
+/**
+ * Add one raw SAN entry: a dNSName (string) or an iPAddress (4 or 16 bytes).
+ * Other tags and other IP lengths are skipped. A dNSName longer than 63 bytes
+ * or holding a NUL marks the set cut instead of being stored as its prefix,
+ * which would compare equal to a different name sharing that prefix.
+ */
+void espos_sk_tls_san_add(espos_sk_tls_san_builder_t *b, unsigned tag, const uint8_t *p, size_t len);
+
+/**
+ * Write the collected set in the stored form (espos_sk_tls_san_normalise).
+ * A cut set is written with a leading '!', so it never compares equal, and
+ * *truncated is set.
+ */
+void espos_sk_tls_san_finish(espos_sk_tls_san_builder_t *b, char *out, size_t out_size, bool *truncated);
+
 /**
  * Compare two normalised SAN sets. False when either is empty or either was
  * truncated (marked by a leading '!'): "we could not see the whole set" must

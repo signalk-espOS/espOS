@@ -299,73 +299,19 @@ static void crt_cn(const mbedtls_x509_crt *crt, char *out, size_t n)
  * policy compares. Walks the raw sequence rather than
  * mbedtls_x509_parse_subject_alt_name(), which allocates per entry: this runs
  * inside a handshake, on a stack we do not own, in the memory situation the
- * pre-flight check exists to protect. */
-#define SAN_ENTRY_MAX 8
-#define SAN_NAME_MAX  64
+ * pre-flight check exists to protect. The rules for each entry are the
+ * policy's (espos_sk_tls_san_add), where the host test reaches them. */
+_Static_assert(ESPOS_SK_TLS_SAN_TAG_DNS == MBEDTLS_X509_SAN_DNS_NAME, "dNSName tag");
+_Static_assert(ESPOS_SK_TLS_SAN_TAG_IP == MBEDTLS_X509_SAN_IP_ADDRESS, "iPAddress tag");
 
 static void crt_san_set(const mbedtls_x509_crt *crt, char *out, size_t out_size, bool *truncated)
 {
-    char names[SAN_ENTRY_MAX][SAN_NAME_MAX];
-    const char *ptrs[SAN_ENTRY_MAX];
-    size_t n = 0;
-    bool overflow = false;
+    espos_sk_tls_san_builder_t b;
+    memset(&b, 0, sizeof(b));
     for (const mbedtls_x509_sequence *cur = &crt->subject_alt_names; cur; cur = cur->next) {
-        if (cur->buf.len == 0 || !cur->buf.p) {
-            continue;
-        }
-        /* Context-specific tag: 2 = dNSName (a string), 7 = iPAddress (4 or
-         * 16 raw bytes). Everything else -- e-mail, URI, directoryName -- says
-         * nothing about which host this is and is skipped. */
-        unsigned tag = cur->buf.tag & MBEDTLS_ASN1_TAG_VALUE_MASK;
-        bool is_name = tag == MBEDTLS_X509_SAN_DNS_NAME ||
-                       (tag == MBEDTLS_X509_SAN_IP_ADDRESS && (cur->buf.len == 4 || cur->buf.len == 16));
-        if (!is_name) {
-            continue;
-        }
-        if (n >= SAN_ENTRY_MAX) {
-            overflow = true;
-            break;
-        }
-        if (tag == MBEDTLS_X509_SAN_DNS_NAME) {
-            /* A name cut at 63 bytes, or at an embedded NUL, would compare
-             * equal to a different name that shares the part we kept, so
-             * either marks the set as one we could not read whole. */
-            if (cur->buf.len > SAN_NAME_MAX - 1 || memchr(cur->buf.p, '\0', cur->buf.len)) {
-                overflow = true;
-                break;
-            }
-            memcpy(names[n], cur->buf.p, cur->buf.len);
-            names[n][cur->buf.len] = '\0';
-        } else if (tag == MBEDTLS_X509_SAN_IP_ADDRESS && cur->buf.len == 4) {
-            snprintf(names[n], SAN_NAME_MAX, "%u.%u.%u.%u", cur->buf.p[0], cur->buf.p[1], cur->buf.p[2], cur->buf.p[3]);
-        } else if (tag == MBEDTLS_X509_SAN_IP_ADDRESS && cur->buf.len == 16) {
-            char *w = names[n];
-            for (int i = 0; i < 16; i += 2) {
-                w += snprintf(w, (size_t)(names[n] + SAN_NAME_MAX - w), "%s%02x%02x", i ? ":" : "", cur->buf.p[i],
-                              cur->buf.p[i + 1]);
-            }
-        }
-        ptrs[n] = names[n];
-        n++;
+        espos_sk_tls_san_add(&b, cur->buf.tag & MBEDTLS_ASN1_TAG_VALUE_MASK, cur->buf.p, cur->buf.len);
     }
-    bool cut = false;
-    if (espos_sk_tls_san_normalise(ptrs, n, out, out_size, &cut) != ESP_OK || cut || overflow) {
-        /* A set we could not record whole is marked, and a marked set never
-         * compares equal (espos_sk_tls_san_equal), so it can only ever refuse
-         * -- never accept a certificate on the strength of the part we saw. */
-        if (out_size > 1) {
-            memmove(out + 1, out, out_size - 2);
-            out[0] = '!';
-            out[out_size - 1] = '\0';
-        }
-        if (truncated) {
-            *truncated = true;
-        }
-        return;
-    }
-    if (truncated) {
-        *truncated = false;
-    }
+    espos_sk_tls_san_finish(&b, out, out_size, truncated);
 }
 
 /* ---------------------------------------------------------- verify callback */
