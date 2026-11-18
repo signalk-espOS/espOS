@@ -159,6 +159,13 @@ TEST_CASE("a callback can unsubscribe itself without waiting on itself", "[inbou
     TEST_ASSERT_EQUAL(ESP_OK, s_self_err);
 }
 
+TEST_CASE("unsubscribe of handle 0 returns at once while nothing runs", "[inbound]")
+{
+    /* 0 is what cb_handle reads when no callback runs; it is never a valid
+     * handle and must not be mistaken for a running one. */
+    TEST_ASSERT_EQUAL(ESP_ERR_NOT_FOUND, espos_sk_unsubscribe(0));
+}
+
 static int s_first_calls, s_second_calls;
 static int s_second_handle;
 static esp_err_t s_second_err;

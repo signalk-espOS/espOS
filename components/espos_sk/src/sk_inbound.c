@@ -7,6 +7,7 @@
  * stream task needs is behind espos_sk_inbound_* (sk_ws.c calls those);
  * the public espos_sk_subscribe/put/send_raw are thread-safe.
  */
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -90,7 +91,10 @@ static void ensure_init(void)
 {
     if (!s.lock) {
         s.subs = calloc(ESPOS_SK_SUBS_CAP, sizeof(sub_t));
-        s.cb_done = xSemaphoreCreateCounting(ESPOS_SK_SUBS_CAP, 0);
+        /* One token per registered waiter, each taken by exactly that
+         * waiter, so the bank never holds more than the number of waiting
+         * tasks; the maximum only has to exceed that, not the table size. */
+        s.cb_done = xSemaphoreCreateCounting(UINT16_MAX, 0);
         s.lock = xSemaphoreCreateMutex();
         s.next_handle = 1;
     }
@@ -154,7 +158,7 @@ esp_err_t espos_sk_unsubscribe(int handle)
      * unsubscribes runs on the dispatching task and must not wait for its
      * own return. */
     TaskHandle_t self = xTaskGetCurrentTaskHandle();
-    while (s.cb_handle == handle && s.cb_task != self) {
+    while (handle > 0 && s.cb_handle == handle && s.cb_task != self) {
         s.cb_waiters++;
         unlock();
         xSemaphoreTake(s.cb_done, portMAX_DELAY);
