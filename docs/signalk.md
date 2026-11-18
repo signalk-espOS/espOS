@@ -290,6 +290,13 @@ espos_sk_send_raw("{\"context\":\"vessels.self\",\"updates\":[…]}");
   A new subscription while connected goes out on its own, and
   `espos_sk_unsubscribe` sends `unsubscribe` once nothing else covers the
   pattern.
+* **After `espos_sk_unsubscribe` returns, the callback is not called again**,
+  so its `arg` may be freed and the path bound anew. A callback already
+  running on the stream task finishes first: unsubscribe waits for it. Called
+  from inside a callback it does not wait, since that is the stream task
+  itself. The wait means a callback must never block on the task that
+  unsubscribes, or both stop: post to a queue that task drains without
+  waiting for space (a zero timeout), never with `portMAX_DELAY`.
 * **What your callback gets.** `sk_parse.c` (plain C, cJSON) turns each frame
   into items: `path`, `value_json` (the JSON text as it came: a number,
   string, object or `null`), `timestamp`, the source (`$source` or
