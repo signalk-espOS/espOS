@@ -241,6 +241,14 @@ static bool run_once(void)
 static void flow_task(void *ignored)
 {
     (void)ignored;
+
+    /* Claim ownership before the first run_once(). xTaskCreate() starts the
+     * new task immediately and it can preempt the caller before the caller's
+     * post-create `s.owner = s.task` line runs. A timer due at t=0 then emits
+     * through PulseCounter/Linear and trips the task assertion even though it
+     * is the flow task. */
+    s.owner = xTaskGetCurrentTaskHandle();
+
     ESP_LOGI(TAG, "flow loop up (stack %d, prio %d, mailbox %d, timers %d)", CONFIG_ESPOS_FLOW_TASK_STACK,
              CONFIG_ESPOS_FLOW_TASK_PRIO, MAILBOX_DEPTH, MAX_TIMERS);
 
@@ -282,13 +290,20 @@ esp_err_t espos_flow_start(void)
         if (!s.mailbox) return ESP_ERR_NO_MEM;
     }
 
+    /* An espos_flow_adopt_loop() borrow is only valid until the real loop
+     * exists. Revoke it before xTaskCreate() so the adopter cannot emit
+     * alongside the new task between its creation and its first pass; the
+     * flow task claims ownership itself before run_once(). */
+    TaskHandle_t borrowed_owner = s.owner;
+    s.owner = NULL;
+
     s.running = true;
     if (xTaskCreate(flow_task, "espos_flow", CONFIG_ESPOS_FLOW_TASK_STACK, NULL, CONFIG_ESPOS_FLOW_TASK_PRIO,
                     &s.task) != pdPASS) {
         s.running = false;
+        s.owner = borrowed_owner; /* start failed: the borrow is still valid */
         return ESP_ERR_NO_MEM;
     }
-    s.owner = s.task;
     return ESP_OK;
 }
 
