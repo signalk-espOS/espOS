@@ -13,6 +13,7 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_random.h"
 
@@ -34,6 +35,16 @@ typedef struct {
     void *arg;
     bool sent;                 /* included in a subscribe frame on the live connection */
 } sub_t;
+
+/* An unsubscribe waiting for the running callback of its handle. It lives
+ * on the waiting task's stack and is woken only by the end of that one
+ * callback, so a completion can never release a waiter of another handle. */
+struct cb_waiter {
+    int handle;
+    StaticSemaphore_t buf;
+    SemaphoreHandle_t done;
+    struct cb_waiter *next;
+};
 
 typedef struct {
     char id[40];
@@ -60,6 +71,13 @@ typedef struct {
 static struct {
     SemaphoreHandle_t lock;
     sub_t *subs;
+    /* The subscription callback running now, if any. dispatch() calls
+     * callbacks without the lock, so espos_sk_unsubscribe() reads these to
+     * wait for a callback already under way instead of returning while it
+     * still runs with the caller's arg. */
+    int cb_handle;
+    TaskHandle_t cb_task;
+    struct cb_waiter *cb_waiters; /* unsubscribe calls waiting on cb_handle */
     size_t n_subs;
     int next_handle;
     bool dirty;                /* subs changed: (re)send subscribe frame */
@@ -80,7 +98,6 @@ static void unlock(void) { xSemaphoreGive(s.lock); }
 static void ensure_init(void)
 {
     if (!s.lock) {
-        s.subs = calloc(ESPOS_SK_SUBS_CAP, sizeof(sub_t));
         s.lock = xSemaphoreCreateMutex();
         s.next_handle = 1;
     }
@@ -95,6 +112,11 @@ int espos_sk_subscribe(const char *pattern, uint32_t period_ms, espos_sk_sub_cb_
     }
     ensure_init();
     lock();
+    /* Allocated here, under the lock, so a failed allocation is retried by
+     * the next subscribe rather than refusing every later one. */
+    if (!s.subs) {
+        s.subs = calloc(ESPOS_SK_SUBS_CAP, sizeof(sub_t));
+    }
     if (!s.subs || s.n_subs >= ESPOS_SK_SUBS_CAP) {
         unlock();
         return -ESP_ERR_NO_MEM;
@@ -116,6 +138,7 @@ esp_err_t espos_sk_unsubscribe(int handle)
 {
     ensure_init();
     lock();
+    esp_err_t err = ESP_ERR_NOT_FOUND;
     for (size_t i = 0; i < s.n_subs; i++) {
         if (s.subs[i].handle == handle) {
             /* only tell the server if no other sub covers the same pattern */
@@ -131,12 +154,33 @@ esp_err_t espos_sk_unsubscribe(int handle)
             }
             memmove(&s.subs[i], &s.subs[i + 1], (s.n_subs - i - 1) * sizeof(sub_t));
             s.n_subs--;
-            unlock();
-            return ESP_OK;
+            err = ESP_OK;
+            break;
         }
     }
+    /* With the entry gone dispatch() starts no new call for it, but one
+     * already running finishes first: once this returns the caller may free
+     * arg or bind the path anew, and a late value from the old subscription
+     * must not land after that. A second unsubscribe of the same handle
+     * waits too, as its caller may free arg just the same. A callback that
+     * unsubscribes runs on the dispatching task and must not wait for its
+     * own return. */
+    TaskHandle_t self = xTaskGetCurrentTaskHandle();
+    if (handle > 0 && s.cb_handle == handle && s.cb_task != self) {
+        struct cb_waiter w = { .handle = handle };
+        w.done = xSemaphoreCreateBinaryStatic(&w.buf);
+        w.next = s.cb_waiters;
+        s.cb_waiters = &w;
+        unlock();
+        /* dispatch() unlinks w before giving, so once this returns nothing
+         * refers to it; no later call for the handle can start, as its
+         * entry is gone. */
+        xSemaphoreTake(w.done, portMAX_DELAY);
+        vSemaphoreDelete(w.done);
+        return err;
+    }
     unlock();
-    return ESP_ERR_NOT_FOUND;
+    return err;
 }
 
 static void uuid4(char out[40])
@@ -418,27 +462,54 @@ char *espos_sk_inbound_take_frame(void)
 static bool dispatch(const espos_sk_update_t *u, void *arg)
 {
     (void)arg;
-    /* Copy matching subscribers out under the lock, call them without it. */
-    struct {
-        espos_sk_sub_cb_t cb;
-        void *arg;
-    } hit[8];
+    /* Collect the matching handles under the lock, call them without it.
+     * One slot per table entry, so no match is ever left out. */
+    int hit[ESPOS_SK_SUBS_CAP];
     size_t n = 0;
     lock();
-    for (size_t i = 0; i < s.n_subs && n < 8; i++) {
+    for (size_t i = 0; i < s.n_subs; i++) {
         if (espos_sk_path_matches(s.subs[i].pattern, u->path)) {
-            hit[n].cb = s.subs[i].cb;
-            hit[n].arg = s.subs[i].arg;
-            n++;
+            hit[n++] = s.subs[i].handle;
         }
     }
     if (n) {
         s.received++;
     }
-    unlock();
     for (size_t i = 0; i < n; i++) {
-        hit[i].cb(u, hit[i].arg);
+        /* Look the handle up again: an earlier callback, or another task,
+         * may have unsubscribed it since it was collected, and a caller
+         * whose espos_sk_unsubscribe() has returned gets no further call.
+         * Still under the lock taken for the previous step. */
+        espos_sk_sub_cb_t cb = NULL;
+        void *cb_arg = NULL;
+        for (size_t j = 0; j < s.n_subs; j++) {
+            if (s.subs[j].handle == hit[i]) {
+                cb = s.subs[j].cb;
+                cb_arg = s.subs[j].arg;
+                break;
+            }
+        }
+        if (!cb) {
+            continue;
+        }
+        s.cb_handle = hit[i];
+        s.cb_task = xTaskGetCurrentTaskHandle();
+        unlock();
+        cb(u, cb_arg);
+        lock();
+        for (struct cb_waiter **pp = &s.cb_waiters; *pp;) {
+            struct cb_waiter *w = *pp;
+            if (w->handle == s.cb_handle) {
+                *pp = w->next;
+                xSemaphoreGive(w->done);
+            } else {
+                pp = &w->next;
+            }
+        }
+        s.cb_handle = 0;
+        s.cb_task = NULL;
     }
+    unlock();
     return true;
 }
 
