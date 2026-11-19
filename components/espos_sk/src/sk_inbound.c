@@ -7,7 +7,6 @@
  * stream task needs is behind espos_sk_inbound_* (sk_ws.c calls those);
  * the public espos_sk_subscribe/put/send_raw are thread-safe.
  */
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -36,6 +35,16 @@ typedef struct {
     void *arg;
     bool sent;                 /* included in a subscribe frame on the live connection */
 } sub_t;
+
+/* An unsubscribe waiting for the running callback of its handle. It lives
+ * on the waiting task's stack and is woken only by the end of that one
+ * callback, so a completion can never release a waiter of another handle. */
+struct cb_waiter {
+    int handle;
+    StaticSemaphore_t buf;
+    SemaphoreHandle_t done;
+    struct cb_waiter *next;
+};
 
 typedef struct {
     char id[40];
@@ -68,8 +77,7 @@ static struct {
      * still runs with the caller's arg. */
     int cb_handle;
     TaskHandle_t cb_task;
-    SemaphoreHandle_t cb_done;   /* given once per waiter when a callback ends */
-    size_t cb_waiters;
+    struct cb_waiter *cb_waiters; /* unsubscribe calls waiting on cb_handle */
     size_t n_subs;
     int next_handle;
     bool dirty;                /* subs changed: (re)send subscribe frame */
@@ -90,11 +98,6 @@ static void unlock(void) { xSemaphoreGive(s.lock); }
 static void ensure_init(void)
 {
     if (!s.lock) {
-        s.subs = calloc(ESPOS_SK_SUBS_CAP, sizeof(sub_t));
-        /* One token per registered waiter, each taken by exactly that
-         * waiter, so the bank never holds more than the number of waiting
-         * tasks; the maximum only has to exceed that, not the table size. */
-        s.cb_done = xSemaphoreCreateCounting(UINT16_MAX, 0);
         s.lock = xSemaphoreCreateMutex();
         s.next_handle = 1;
     }
@@ -109,7 +112,12 @@ int espos_sk_subscribe(const char *pattern, uint32_t period_ms, espos_sk_sub_cb_
     }
     ensure_init();
     lock();
-    if (!s.subs || !s.cb_done || s.n_subs >= ESPOS_SK_SUBS_CAP) {
+    /* Allocated here, under the lock, so a failed allocation is retried by
+     * the next subscribe rather than refusing every later one. */
+    if (!s.subs) {
+        s.subs = calloc(ESPOS_SK_SUBS_CAP, sizeof(sub_t));
+    }
+    if (!s.subs || s.n_subs >= ESPOS_SK_SUBS_CAP) {
         unlock();
         return -ESP_ERR_NO_MEM;
     }
@@ -158,11 +166,18 @@ esp_err_t espos_sk_unsubscribe(int handle)
      * unsubscribes runs on the dispatching task and must not wait for its
      * own return. */
     TaskHandle_t self = xTaskGetCurrentTaskHandle();
-    while (handle > 0 && s.cb_handle == handle && s.cb_task != self) {
-        s.cb_waiters++;
+    if (handle > 0 && s.cb_handle == handle && s.cb_task != self) {
+        struct cb_waiter w = { .handle = handle };
+        w.done = xSemaphoreCreateBinaryStatic(&w.buf);
+        w.next = s.cb_waiters;
+        s.cb_waiters = &w;
         unlock();
-        xSemaphoreTake(s.cb_done, portMAX_DELAY);
-        lock();
+        /* dispatch() unlinks w before giving, so once this returns nothing
+         * refers to it; no later call for the handle can start, as its
+         * entry is gone. */
+        xSemaphoreTake(w.done, portMAX_DELAY);
+        vSemaphoreDelete(w.done);
+        return err;
     }
     unlock();
     return err;
@@ -482,11 +497,17 @@ static bool dispatch(const espos_sk_update_t *u, void *arg)
         unlock();
         cb(u, cb_arg);
         lock();
+        for (struct cb_waiter **pp = &s.cb_waiters; *pp;) {
+            struct cb_waiter *w = *pp;
+            if (w->handle == s.cb_handle) {
+                *pp = w->next;
+                xSemaphoreGive(w->done);
+            } else {
+                pp = &w->next;
+            }
+        }
         s.cb_handle = 0;
         s.cb_task = NULL;
-        for (; s.cb_waiters; s.cb_waiters--) {
-            xSemaphoreGive(s.cb_done);
-        }
     }
     unlock();
     return true;
