@@ -144,10 +144,11 @@ set:
 #endif
 ```
 
-That commit reached the releases with v6.1 (`d744e88589`); `release/v6.0`,
-`release/v5.5` and `release/v5.4` do not carry it. espOS builds on 6.1, so
-the 4.2 setting above is no longer forced by the IDF. It stays until
-provisioning over BLE 5 has been tried on a board.
+That commit first ships in v6.1.1 (`d744e88589`); v6.1, `release/v6.0`,
+`release/v5.5` and `release/v5.4` do not carry it. On v6.1.1, the release
+espOS is tested on, the 4.2 setting above is no longer forced by the IDF;
+on v6.1 it still is. It stays until provisioning over BLE 5 has been tried
+on a board.
 
 ### The portal does the same job without any of this
 

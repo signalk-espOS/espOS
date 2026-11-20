@@ -104,8 +104,8 @@ was retired.
   ESP32-C5: provisioning declines with `ESP_ERR_INVALID_STATE` on stock
   v6.0.3 and starts on the patched tree, same board and firmware. The BLE 4.2
   constraint turned out to be fixed upstream already (`16f9e082dd` on master,
-  released in v6.1 as `d744e88589`), and espOS builds on 6.1 since
-  2026-11-20; dropping the 4.2 settings waits for a bench test. The
+  first released in v6.1.1 as `d744e88589`), and espOS is tested on v6.1.1
+  since 2026-11-20; dropping the 4.2 settings waits for a bench test. The
   double-init fix lands whenever a release carrying it appears, so the
   custom GATT server stays the option that would fix that sooner, and stays
   unbuilt.
