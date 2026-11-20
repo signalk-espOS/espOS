@@ -210,6 +210,11 @@ esp_err_t espos_sk_declare_meta(const char *path, const char *meta_json, uint32_
  * with meta_json set (stream opened with sendMeta=all). Subscriptions
  * survive reconnects and are (re)sent after every hello. Returns a
  * handle > 0, or <0 (-ESP_ERR_NO_MEM style) when the table is full.
+ *
+ * Once espos_sk_unsubscribe() returns, cb is not called again for that
+ * handle; a call already running on the stream task is waited for. From
+ * inside a callback it returns without waiting. So a callback must never
+ * wait on a task that may unsubscribe, or the two deadlock.
  */
 typedef void (*espos_sk_sub_cb_t)(const espos_sk_update_t *u, void *arg);
 /* The compile-time cap. CONFIG_ESPOS_SK_MAX_SUBS tunes the table the

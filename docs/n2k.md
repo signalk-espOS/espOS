@@ -199,6 +199,53 @@ Settings, namespace `n2k` (the "NMEA 2000" page; only with the node built):
 | `device_instance` | 0 | tells this device from others of the same type (0–255) |
 | `system_instance` | 0 | which of several separate systems on one bus (0–15) |
 
+### Several devices on one bus
+
+A physical device sometimes has to look like several N2K devices: three tank
+senders in one enclosure, or a bank of channels with independent identities.
+`espos_n2k::MultiNode` (`espos_n2k/multi_node.h`) is the multi-device
+counterpart of `Node`. It shares one receiver, transmitter and task, but
+claims a NAME, product information and PGN lists for each `DeviceConfig`.
+Device `i` first claims `preferred_address + i`. A device with a
+higher-priority NAME can win that address; the library then moves the
+device to a free one, so the addresses need not stay consecutive.
+`address(i)` returns the source a device uses now. While a contest is
+still open that can be a candidate the claim has not settled yet, and it
+is 254 while the device has no address.
+
+```cpp
+#include "espos_n2k/multi_node.h"
+#include "N2kMessages.h"
+
+static const unsigned long kTx[] = {127505, 0};
+static const espos_n2k::DeviceConfig kDevices[] = {
+    {.device_class = 75, .device_function = 150,
+     .unique_number = 2093736, .device_instance = 0,
+     .model_id = "Starboard Blackwater", .model_version = "1.0.0",
+     .serial_code = "8", .product_code = 104, .load_equivalency = 0xff,
+     .transmit_pgns = kTx},
+    {.device_class = 75, .device_function = 150,
+     .unique_number = 2093745, .device_instance = 1,
+     .model_id = "Starboard Aft Freshwater", .model_version = "1.0.0",
+     .serial_code = "5", .product_code = 104, .load_equivalency = 0xff,
+     .transmit_pgns = kTx},
+};
+static const espos_n2k::MultiNodeConfig kMulti{
+    .devices = kDevices, .device_count = 2, .preferred_address = 85};
+static espos_n2k::MultiNode multi(&rx, &tx, kMulti);
+ESP_ERROR_CHECK(multi.start());
+
+tN2kMsg msg;
+SetN2kFluidLevel(msg, /*instance=*/0, N2kft_BlackWater,
+                 /*level percent=*/50.0, /*capacity litres=*/80.0);
+multi.send(0, msg);          // device 0, source 85 unless it lost it (address(0))
+```
+
+Unlike `Node`, `MultiNode` does not persist addresses or expose the settings
+page; the identities are fixed by the firmware. It has no listener API,
+and the stock NMEA2000 library has no per-device configuration
+information, so installation descriptions are left at the library default.
+
 ### Node and bridge on one bus
 
 A node and a candump server can share the receiver and transmitter: two
