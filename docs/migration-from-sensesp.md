@@ -14,7 +14,7 @@ The tutorials start with [Your first sensor](tutorials/first-sensor.md), and
 ### The toolchain: ESP-IDF instead of PlatformIO and Arduino
 
 SensESP builds with PlatformIO on the Arduino core. espOS is plain ESP-IDF
-6.0, the release named in `.idf-version`. You get CMake projects, Kconfig and
+6.1, the release named in `.idf-version`. You get CMake projects, Kconfig and
 `idf.py`, and you use the ESP-IDF drivers directly:
 
 | Arduino | ESP-IDF |

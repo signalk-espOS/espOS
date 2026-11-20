@@ -103,10 +103,12 @@ was retired.
   unwinding only what `simple_ble_start()` itself brought up. Verified on an
   ESP32-C5: provisioning declines with `ESP_ERR_INVALID_STATE` on stock
   v6.0.3 and starts on the patched tree, same board and firmware. The BLE 4.2
-  constraint turned out to be fixed upstream already (`16f9e082dd`, master
-  only). Both land for espOS whenever a release carrying them appears and the
-  `[6.0.0, 6.1.0)` pin moves -- so the custom GATT server stays the option
-  that would fix things sooner, and stays unbuilt.
+  constraint turned out to be fixed upstream already (`16f9e082dd` on master,
+  released in v6.1 as `d744e88589`), and espOS builds on 6.1 since
+  2026-11-20; dropping the 4.2 settings waits for a bench test. The
+  double-init fix lands whenever a release carrying it appears, so the
+  custom GATT server stays the option that would fix that sooner, and stays
+  unbuilt.
 
 * **The setup portal is no longer exempt from the API key once one is set**
   (2026-10-01, espOS #154, reported against a third-party relay board). The

@@ -144,12 +144,10 @@ set:
 #endif
 ```
 
-That commit is on `master` only. `release/v6.0`, `release/v5.5` and
-`release/v5.4` do not carry it, so espOS -- which pins
-`idf: ">=6.0.0,<6.1.0"` -- still needs the 4.2 setting above. The constraint
-is on the releases espOS builds against, not on protocomm as such, and it
-lifts by itself once a release containing that commit lands and espOS moves
-to it.
+That commit reached the releases with v6.1 (`d744e88589`); `release/v6.0`,
+`release/v5.5` and `release/v5.4` do not carry it. espOS builds on 6.1, so
+the 4.2 setting above is no longer forced by the IDF. It stays until
+provisioning over BLE 5 has been tried on a board.
 
 ### The portal does the same job without any of this
 

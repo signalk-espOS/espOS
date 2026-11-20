@@ -24,8 +24,8 @@ CONFIG_BT_GATTS_ENABLE=y
 # references to esp_ble_gap_start_advertising and esp_ble_gap_config_adv_data.
 # The two are mutually exclusive. The ESP32-C5 this was verified on declares
 # SOC_BLE_50_SUPPORTED -- the radio is 5.0 and is being asked to speak 4.2.
-# Upstream has since added BLE 5 support to protocomm; when that reaches a
-# released IDF these two lines go away (docs/provisioning.md).
+# IDF 6.1 adds BLE 5 support to protocomm; these two lines go once
+# provisioning over BLE 5 has been tried on a board (docs/provisioning.md).
 CONFIG_BT_BLE_42_FEATURES_SUPPORTED=y
 CONFIG_BT_BLE_50_FEATURES_SUPPORTED=n
 

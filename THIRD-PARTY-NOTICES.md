@@ -7,7 +7,7 @@ writing; the lock files are authoritative.
 
 | Component | Used by | License |
 |---|---|---|
-| [ESP-IDF](https://github.com/espressif/esp-idf) 6.0.x | everything | Apache-2.0 |
+| [ESP-IDF](https://github.com/espressif/esp-idf) 6.1.x | everything | Apache-2.0 |
 | [espressif/cjson](https://components.espressif.com/components/espressif/cjson) (cJSON) | config, httpd, sk, ota, ble, voice | MIT |
 | [espressif/mdns](https://components.espressif.com/components/espressif/mdns) | wifi (responder, `espos_mdns.h`), sk (discovery), n2k | Apache-2.0 |
 | [NMEA2000](https://github.com/ttlappalainen/NMEA2000) (Timo Lappalainen, vendored in `components/espos_n2k/third_party/NMEA2000`) | n2k, only with `CONFIG_ESPOS_N2K_NODE` | MIT |

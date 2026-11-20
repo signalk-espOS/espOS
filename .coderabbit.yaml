@@ -433,7 +433,7 @@ reviews:
         `x-release-please-end` markers and is bumped only by
         release-please; sibling espOS dependencies are `^<version>` with
         `override_path: "../espos_x"`; third-party dependencies are
-        exact-pinned; `idf: ">=6.0.0,<6.1.0"`; `esp_hosted` and
+        exact-pinned; `idf: ">=6.1.0,<6.2.0"`; `esp_hosted` and
         `esp_wifi_remote` are gated `rules: target == esp32p4`;
         `espressif/mdns` appears only in espos_net and espos_n2k; every
         dependency has a comment saying why it exists. `files.exclude` is
@@ -522,8 +522,8 @@ reviews:
         the sdkconfig layering, picks the partition table, fingerprints
         the signing key and forces a re-link (IDF would otherwise keep the
         old signature), generates a dev key only when none exists, and
-        enforces the `.idf-version` policy (another 6.0.x builds with a
-        warning; outside `[6.0.0, 6.1.0)` is refused unless
+        enforces the `.idf-version` policy (another 6.1.x builds with a
+        warning; outside `[6.1.0, 6.2.0)` is refused unless
         `-DESPOS_ALLOW_IDF_MISMATCH=1`). `cmake/` ships in no component,
         so registry consumers depend on `espos_core/project_include.cmake`
         alone; a rule that matters for them belongs there.

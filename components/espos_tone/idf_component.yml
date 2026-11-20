@@ -40,7 +40,7 @@ files:
     - "examples/*/sdkconfig.old"
     - "examples/*/*.pem"
 dependencies:
-  idf: ">=6.0.0,<6.1.0"
+  idf: ">=6.1.0,<6.2.0"
   # The tone library is a JSON table (an espOS table-format config value).
   # Same pin as espos_config, so a consumer gets no second cJSON.
   espressif/cjson: "==1.7.19~2"

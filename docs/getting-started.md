@@ -6,9 +6,9 @@ espOS part is a few commands and two clicks in the server.
 
 ## What you need
 
-* **ESP-IDF 6.0.x.** espOS is tested on the release named in
-  `.idf-version`. Another 6.0.x release builds with a warning, and anything
-  outside 6.0 is refused ([Troubleshooting](troubleshooting.md#build)).
+* **ESP-IDF 6.1.x.** espOS is tested on the release named in
+  `.idf-version`. Another 6.1.x release builds with a warning, and anything
+  outside 6.1 is refused ([Troubleshooting](troubleshooting.md#build)).
   Install it with the [Espressif Installation Manager](https://docs.espressif.com/projects/idf-im-ui/en/latest/)
   or the [classic guide](https://docs.espressif.com/projects/esp-idf/en/latest/esp32c6/get-started/index.html).
   Then export it in every shell you build from. The installer prints the

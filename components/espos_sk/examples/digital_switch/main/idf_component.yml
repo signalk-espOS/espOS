@@ -4,4 +4,4 @@
 ## over SDIO, reached through the esp_wifi_remote shim (same esp_wifi_* API);
 ## both it and esp_hosted are espos_wifi's dependencies, pinned there.
 dependencies:
-  idf: ">=6.0.0,<6.1.0"
+  idf: ">=6.1.0,<6.2.0"

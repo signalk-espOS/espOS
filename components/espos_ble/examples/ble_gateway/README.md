@@ -95,7 +95,7 @@ idf.py set-target esp32p4      # or esp32c6, esp32, esp32c3, esp32s3, esp32c5
 idf.py build flash monitor
 ```
 
-Needs ESP-IDF 6.0.x and nothing else — the espOS web UI is a committed bundle,
+Needs ESP-IDF 6.1.x and nothing else — the espOS web UI is a committed bundle,
 so there is no Node step.
 
 This example uses `components/espos_core/partitions/16mb.csv` from espOS rather than a table of its
