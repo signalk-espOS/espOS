@@ -46,7 +46,7 @@ files:
     - "examples/*/sdkconfig.old"
     - "examples/*/*.pem"
 dependencies:
-  idf: ">=6.0.0,<6.1.0"
+  idf: ">=6.1.0,<6.2.0"
   # The settings behind espos_n2k::Node (CONFIG_ESPOS_N2K_NODE): the device
   # and system instance. Declared unconditionally because a manifest cannot
   # follow Kconfig; without the node nothing here links it. override_path

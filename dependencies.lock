@@ -157,7 +157,7 @@ dependencies:
   idf:
     source:
       type: idf
-    version: 6.0.3
+    version: 6.1.1
   joltwallet/littlefs:
     component_hash: e1a0f4a6adf821759cb34703a91107bbdce5d7ff6f4728f40ab012bb87842974
     dependencies:
@@ -171,7 +171,7 @@ dependencies:
   signalk-espos/espos_audio:
     dependencies:
     - name: idf
-      version: '>=6.0.0,<6.1.0'
+      version: '>=6.1.0,<6.2.0'
     source:
       path: components/espos_audio
       type: local
@@ -179,7 +179,7 @@ dependencies:
   signalk-espos/espos_config:
     dependencies:
     - name: idf
-      version: '>=6.0.0,<6.1.0'
+      version: '>=6.1.0,<6.2.0'
     - name: espressif/cjson
       version: ==1.7.19~2
     - name: signalk-espos/espos_health
@@ -192,7 +192,7 @@ dependencies:
   signalk-espos/espos_event:
     dependencies:
     - name: idf
-      version: '>=6.0.0,<6.1.0'
+      version: '>=6.1.0,<6.2.0'
     source:
       path: components/espos_event
       type: local
@@ -200,7 +200,7 @@ dependencies:
   signalk-espos/espos_flow:
     dependencies:
     - name: idf
-      version: '>=6.0.0,<6.1.0'
+      version: '>=6.1.0,<6.2.0'
     - name: signalk-espos/espos_formulas
       override_path: ../espos_formulas
       version: ^0.30.0
@@ -211,7 +211,7 @@ dependencies:
   signalk-espos/espos_formulas:
     dependencies:
     - name: idf
-      version: '>=6.0.0,<6.1.0'
+      version: '>=6.1.0,<6.2.0'
     source:
       path: components/espos_formulas
       type: local
@@ -219,7 +219,7 @@ dependencies:
   signalk-espos/espos_health:
     dependencies:
     - name: idf
-      version: '>=6.0.0,<6.1.0'
+      version: '>=6.1.0,<6.2.0'
     source:
       path: components/espos_health
       type: local
@@ -227,7 +227,7 @@ dependencies:
   signalk-espos/espos_httpd:
     dependencies:
     - name: idf
-      version: '>=6.0.0,<6.1.0'
+      version: '>=6.1.0,<6.2.0'
     - name: signalk-espos/espos_config
       override_path: ../espos_config
       version: ^0.30.0
@@ -253,7 +253,7 @@ dependencies:
   signalk-espos/espos_log:
     dependencies:
     - name: idf
-      version: '>=6.0.0,<6.1.0'
+      version: '>=6.1.0,<6.2.0'
     source:
       path: components/espos_log
       type: local
@@ -261,7 +261,7 @@ dependencies:
   signalk-espos/espos_net:
     dependencies:
     - name: idf
-      version: '>=6.0.0,<6.1.0'
+      version: '>=6.1.0,<6.2.0'
     - name: signalk-espos/espos_config
       override_path: ../espos_config
       version: ^0.30.0
@@ -284,7 +284,7 @@ dependencies:
   signalk-espos/espos_sensors:
     dependencies:
     - name: idf
-      version: '>=6.0.0,<6.1.0'
+      version: '>=6.1.0,<6.2.0'
     - name: signalk-espos/espos_flow
       override_path: ../espos_flow
       version: ^0.30.0
@@ -295,7 +295,7 @@ dependencies:
   signalk-espos/espos_sk:
     dependencies:
     - name: idf
-      version: '>=6.0.0,<6.1.0'
+      version: '>=6.1.0,<6.2.0'
     - name: signalk-espos/espos_config
       override_path: ../espos_config
       version: ^0.30.0
@@ -323,7 +323,7 @@ dependencies:
   signalk-espos/espos_sk_flow:
     dependencies:
     - name: idf
-      version: '>=6.0.0,<6.1.0'
+      version: '>=6.1.0,<6.2.0'
     - name: signalk-espos/espos_flow
       override_path: ../espos_flow
       version: ^0.30.0
@@ -343,7 +343,7 @@ dependencies:
   signalk-espos/espos_time:
     dependencies:
     - name: idf
-      version: '>=6.0.0,<6.1.0'
+      version: '>=6.1.0,<6.2.0'
     - name: signalk-espos/espos_config
       override_path: ../espos_config
       version: ^0.30.0
@@ -360,7 +360,7 @@ dependencies:
   signalk-espos/espos_wifi:
     dependencies:
     - name: idf
-      version: '>=6.0.0,<6.1.0'
+      version: '>=6.1.0,<6.2.0'
     - name: signalk-espos/espos_config
       override_path: ../espos_config
       version: ^0.30.0
@@ -414,6 +414,6 @@ direct_dependencies:
 - signalk-espos/espos_sk_flow
 - signalk-espos/espos_time
 - signalk-espos/espos_wifi
-manifest_hash: 07a4300a5c95862ce1429a45e59df8201adf8c4729606f7e9b060f884d3ea43c
+manifest_hash: 8c18e7bf29faca733fc99af9edba5dfd7e7b9d78540ac3def91d6288112f1f5f
 target: esp32s3
 version: 3.0.0

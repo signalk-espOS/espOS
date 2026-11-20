@@ -40,4 +40,4 @@ files:
     - "examples/*/sdkconfig.old"
     - "examples/*/*.pem"
 dependencies:
-  idf: ">=6.0.0,<6.1.0"
+  idf: ">=6.1.0,<6.2.0"

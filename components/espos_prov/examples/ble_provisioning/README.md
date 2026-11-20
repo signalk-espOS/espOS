@@ -58,8 +58,8 @@ compiles under `BLE_42_ADV_EN`; configure the radio for 5.0 extended
 advertising and the link fails with undefined references to
 `esp_ble_gap_start_advertising`. The two are mutually exclusive. The ESP32-C5
 this was verified on declares `SOC_BLE_50_SUPPORTED` — a 5.0 radio being asked
-to speak 4.2. Upstream has since added BLE 5 support to protocomm, so these two
-lines go away when that reaches a released IDF.
+to speak 4.2. IDF v6.1.1 adds BLE 5 support to protocomm (v6.1 does not), so
+these two lines go away once provisioning over BLE 5 has been tried on a board.
 
 ## It does not fit a 4 MB board
 

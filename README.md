@@ -39,7 +39,7 @@ walks through it.
 
 ## If you write firmware
 
-You need ESP-IDF 6.0, the release named in [`.idf-version`](.idf-version),
+You need ESP-IDF 6.1, the release named in [`.idf-version`](.idf-version),
 and a board with an ESP32, ESP32-S3, ESP32-C3, ESP32-C5, ESP32-C6 or
 ESP32-P4.
 

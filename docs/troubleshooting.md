@@ -16,12 +16,12 @@ Three places answer most questions before you get here:
 
 ## Build
 
-**`IDF_PATH is ESP-IDF vX.Y.Z; espOS builds with v6.0.0 up to (not including) v6.1.0`**
+**`IDF_PATH is ESP-IDF vX.Y.Z; espOS builds with v6.1.0 up to (not including) v6.2.0`**
 :   Your ESP-IDF is outside the range espOS supports
     (`cmake/espos_version.cmake`). espOS is tested on the release in
-    `.idf-version`. Any other 6.0.x builds with a warning. Another minor
+    `.idf-version`. Any other 6.1.x builds with a warning. Another minor
     version is refused, because those move APIs that espOS uses (esp_hosted,
-    TWAI, the linux target). Install a 6.0.x release and source its
+    TWAI, the linux target). Install a 6.1.x release and source its
     `export.sh`. To try anyway, add `-DESPOS_ALLOW_IDF_MISMATCH=1`, and say so
     when you report a problem.
 

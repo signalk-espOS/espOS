@@ -25,7 +25,7 @@ under the Apache-2.0 license.
 
 ## Try it
 
-You need ESP-IDF 6.0, the release named in `.idf-version`, a board with an
+You need ESP-IDF 6.1, the release named in `.idf-version`, a board with an
 ESP32, -S3, -C3, -C5, -C6 or -P4, and a Signal K server on the same network.
 
 ```sh

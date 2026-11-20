@@ -25,9 +25,9 @@
 #define ESPOS_COPROC_FW_VERSION_MAJOR 3
 #define ESPOS_COPROC_FW_VERSION_MINOR 1
 #define ESPOS_COPROC_FW_VERSION_PATCH 0
-#define ESPOS_COPROC_FW_SHA256        "db7d3d90491d05baa85e4322f351fb9bb4e9b377e3e5bff255650f14f9adc37e"
+#define ESPOS_COPROC_FW_SHA256        "9f0355aeb8c484e242c82b4e342fe51ed2950313967938b4a07ff6358df201ad"
 /* Used when the update request names no URL; a client such as the Signal K
  * manager may pass its own mirror instead. */
 #define ESPOS_COPROC_FW_URL                                                                   \
     "https://raw.githubusercontent.com/signalk-espOS/espOS/coprocessor-assets/esp32c6/3.1.0/" \
-    "espos-coprocessor-esp32c6-3.1.0-db7d3d90491d.bin"
+    "espos-coprocessor-esp32c6-3.1.0-9f0355aeb8c4.bin"

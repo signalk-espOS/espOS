@@ -23,7 +23,7 @@ also on `esp32`); main adds the other targets each example supports.
 | `esp32c61` | later | Same shape as the C6; waiting for hardware on the bench and a CI slot. |
 | `esp32h2`, `esp32h4` | not planned as such | No WiFi radio (BLE + 802.15.4 only). The runtime no longer assumes WiFi -- [`espos_net`](net.md) is the seam and a headless esp32h2 build is a CI gate -- so what these still need is a transport (Thread, or Ethernet on a board that has it). |
 
-The toolchain is one ESP-IDF for all of them: 6.0.x, tested on the release in
+The toolchain is one ESP-IDF for all of them: 6.1.x, tested on the release in
 `.idf-version` ([Development](development.md)).
 
 ## The ESP32-C5 as a BLE gateway

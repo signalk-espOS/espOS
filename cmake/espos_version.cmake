@@ -28,8 +28,8 @@ include_guard(GLOBAL)
 # APIs (esp_hosted, the TWAI driver, the linux target) under the code, and
 # -DESPOS_ALLOW_IDF_MISMATCH=1 is the deliberate way past it, not a habit.
 # Bump ESPOS_IDF_MAX_EXCL together with the pin, never ahead of it.
-set(ESPOS_IDF_MIN "6.0.0")
-set(ESPOS_IDF_MAX_EXCL "6.1.0")
+set(ESPOS_IDF_MIN "6.1.0")
+set(ESPOS_IDF_MAX_EXCL "6.2.0")
 
 macro(espos_project_version)
     # The project being built, which for a firmware is its own repository and
