@@ -40,7 +40,7 @@ files:
     - "examples/*/sdkconfig.old"
     - "examples/*/*.pem"
 dependencies:
-  idf: ">=6.0.0,<6.1.0"
+  idf: ">=6.1.0,<6.2.0"
   # espos_sk and espos_time are optional and deliberately absent: with
   # espos_sk in the build espos_nmea0183_sk_publish() sends the values, with
   # espos_time a GPS fix sets the clock. A firmware that only logs sentences

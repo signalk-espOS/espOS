@@ -39,7 +39,7 @@ files:
     - "examples/*/sdkconfig.old"
     - "examples/*/*.pem"
 dependencies:
-  idf: ">=6.0.0,<6.1.0"
+  idf: ">=6.1.0,<6.2.0"
   # Exact, like every other registry dependency in espOS: TinyUSB sits between
   # a chartplotter and its recordings, and a minor arriving on its own would
   # change that with nobody looking.

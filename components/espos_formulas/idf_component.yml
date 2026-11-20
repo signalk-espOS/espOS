@@ -28,4 +28,4 @@ files:
     - "managed_components/**/*"
     - "dependencies.lock"
 dependencies:
-  idf: ">=6.0.0,<6.1.0"
+  idf: ">=6.1.0,<6.2.0"
