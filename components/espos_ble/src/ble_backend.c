@@ -90,6 +90,13 @@ static bool s_coded;
 static espos_ble_reasm_t s_reasm;
 /* A stop issued to restart the scan for the reassembler (BTC task only). */
 static bool s_restarting;
+/* Starts left to try after such a stop, 0 when no restart is pending. A
+ * failed start is retried from a timer, so a busy stack cannot leave the
+ * gateway deaf until the next deliberate start. */
+#define RESTART_ATTEMPTS 5
+#define RESTART_RETRY_MS 500
+static int s_restart_left;
+static esp_timer_handle_t s_restart_timer;
 #else
 static esp_ble_scan_params_t s_scan_params;
 #endif
@@ -160,6 +167,53 @@ static void on_ext_report(const esp_ble_gap_ext_adv_report_t *r)
 }
 #endif
 
+#if ESPOS_BLE_EXT_SCAN
+static void restart_failed(void);
+
+/* One attempt to start the scan again after a restart stop. A suspension
+ * meanwhile cancels the restart; the next deliberate start takes over. */
+static void restart_scan(void)
+{
+    taskENTER_CRITICAL(&s_scan_mux);
+    bool go = s_restart_left > 0 && !s_scan_inhibited;
+    if (!go) s_restart_left = 0;
+    taskEXIT_CRITICAL(&s_scan_mux);
+    if (!go) return;
+    if (esp_ble_gap_start_ext_scan(0, 0) == ESP_OK) return; /* START_COMPLETE decides */
+    restart_failed();
+}
+
+static void restart_retry_cb(void *arg)
+{
+    (void)arg;
+    restart_scan();
+}
+
+/* Counts a failed restart attempt and schedules the next, if any remain. */
+static void restart_failed(void)
+{
+    taskENTER_CRITICAL(&s_scan_mux);
+    if (s_restart_left > 0) s_restart_left--;
+    int left = s_restart_left;
+    taskEXIT_CRITICAL(&s_scan_mux);
+    if (left == 0) {
+        ESP_LOGE(TAG, "scan restart failed %d times; scanning stays off until the next start",
+                 RESTART_ATTEMPTS);
+        return;
+    }
+    if (!s_restart_timer) {
+        const esp_timer_create_args_t args = { .callback = restart_retry_cb,
+                                               .name = "ble_rescan" };
+        if (esp_timer_create(&args, &s_restart_timer) != ESP_OK) {
+            ESP_LOGE(TAG, "scan restart failed and no retry timer; scanning stays off");
+            return;
+        }
+    }
+    ESP_LOGW(TAG, "scan restart failed; retrying in %d ms", RESTART_RETRY_MS);
+    esp_timer_start_once(s_restart_timer, RESTART_RETRY_MS * 1000ULL);
+}
+#endif
+
 /* Marks the scan running and returns whether it was suspended meanwhile,
  * as one step against espos_ble_scan_stop(). */
 static bool scan_mark_running(void)
@@ -202,8 +256,15 @@ static void gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param)
         if (param->ext_scan_start.status != ESP_BT_STATUS_SUCCESS) {
             ESP_LOGE(TAG, "ext scan start failed: %d", param->ext_scan_start.status);
             s_scanning = false;
+            taskENTER_CRITICAL(&s_scan_mux);
+            bool restarting = s_restart_left > 0;
+            taskEXIT_CRITICAL(&s_scan_mux);
+            if (restarting) restart_failed();
             break;
         }
+        taskENTER_CRITICAL(&s_scan_mux);
+        s_restart_left = 0;
+        taskEXIT_CRITICAL(&s_scan_mux);
         bool inhibited = scan_mark_running();
         if (inhibited) {
             /* Suspended while the start was in flight; scan_stop() saw no
@@ -216,17 +277,22 @@ static void gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param)
     }
 
     case ESP_GAP_BLE_EXT_SCAN_STOP_COMPLETE_EVT: {
+        if (param->ext_scan_stop.status != ESP_BT_STATUS_SUCCESS) {
+            /* Still scanning: keep the state, so a suspension stops it again
+             * and a pending restart is asked for again by the next report. */
+            ESP_LOGE(TAG, "ext scan stop failed: %d", param->ext_scan_stop.status);
+            s_restarting = false;
+            break;
+        }
         espos_ble_reasm_reset(&s_reasm);
         taskENTER_CRITICAL(&s_scan_mux);
         s_scanning = false;
-        bool restart = s_restarting && !s_scan_inhibited;
+        if (s_restarting) s_restart_left = RESTART_ATTEMPTS;
         taskEXIT_CRITICAL(&s_scan_mux);
         s_restarting = false;
         /* The parameters are still set; a suspension arriving after this
          * point is caught by START_COMPLETE as above. */
-        if (restart && esp_ble_gap_start_ext_scan(0, 0) != ESP_OK) {
-            ESP_LOGE(TAG, "scan restart failed; scanning stays off until the next start");
-        }
+        restart_scan();
         break;
     }
 
@@ -446,7 +512,13 @@ esp_err_t espos_ble_scan_start(bool active, bool coded, uint16_t interval_ms, ui
 {
     taskENTER_CRITICAL(&s_scan_mux);
     s_scan_inhibited = false;
+#if ESPOS_BLE_EXT_SCAN
+    s_restart_left = 0; /* a deliberate start supersedes a pending restart */
+#endif
     taskEXIT_CRITICAL(&s_scan_mux);
+#if ESPOS_BLE_EXT_SCAN
+    if (s_restart_timer) esp_timer_stop(s_restart_timer);
+#endif
     if (window_ms > interval_ms) window_ms = interval_ms;
 
 #if ESPOS_BLE_EXT_SCAN
