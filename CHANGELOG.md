@@ -15,6 +15,17 @@ pull request. The `[Unreleased]` block below was written by hand before the
 switch; its entries belong to the next feature release and are folded into
 that section when it is cut.
 
+## 0.31.0 (2026-11-21)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### ⚠ Breaking changes
+* build(deps)!: move espOS to ESP-IDF v6.1.1 by @dirkwa in https://github.com/signalk-espOS/espOS/pull/324
+
+
+**Full Changelog**: https://github.com/signalk-espOS/espOS/compare/v0.30.0...v0.31.0
+
 ## 0.30.0 (2026-11-19)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
