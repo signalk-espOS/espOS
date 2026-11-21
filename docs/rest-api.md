@@ -941,8 +941,10 @@ what a device *is* remains a server-side concern.
   ([ble.md](ble.md#targets)).
 * `scan_hits` counts advertisements seen by the radio, `adv_received` those
   handed to the gateway. A gap between them means the intake callback is being
-  starved, or, on the extended scanner, advertisements the reassembly dropped:
-  subtract `ext_adv_dropped` first.
+  starved, or, on the extended scanner, advertisements the reassembly dropped.
+  An unfinished chain counts in `ext_adv_dropped` but never in `scan_hits`
+  (the radio never finished it), so a gap no larger than `ext_adv_dropped`
+  can be reassembly alone; only a larger one points at the callback.
 * `adv_pending` is the ring buffer's depth and `adv_dropped` the running total
   lost before posting: shed once the buffer is full (oldest first), or
   arriving while it was locked. Sustained growth in `adv_dropped` means

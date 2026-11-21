@@ -293,7 +293,8 @@ and that example puts TLS buffers there; hardware.md says why and what to weigh.
 `GET /api/v1/ble/status` (and the `ble` SSE event) report the counters
 described in [rest-api.md](rest-api.md). Reading them:
 
-* `scan_hits` == `adv_received` — intake is keeping up.
+* `scan_hits` == `adv_received` — intake is keeping up. On the extended
+  scanner a gap up to `ext_adv_dropped` is reassembly, not intake.
 * `adv_dropped` rising — advertisements are lost before they are posted. It
   counts both the ones the full buffer sheds and the few that arrive while
   the buffer is locked (the Bluetooth task never waits for it), so a small
