@@ -44,7 +44,10 @@ int espos_ble_hex_decode(const char *hex, uint8_t *out, size_t out_max);
  * parse -- one cut short would end mid structure and the server would read
  * the stub as data. Everything not handed out (too long, TRUNCATED by the
  * controller, evicted, aged out, malformed) counts in `dropped`, and the
- * remaining reports of a chain evicted for a newer one are discarded with it. Pure logic so
+ * remaining reports of a chain given up early are discarded with it. A final
+ * report that finds its own chain overdue is taken for that chain's tail and
+ * dropped too, at the cost of one advertisement when it was in fact a new
+ * single-report event. Pure logic so
  * the host suite can drive it; the BTC task is the only caller on the device. */
 typedef enum {
     ESPOS_BLE_EXT_DATA_COMPLETE = 0,   /* HCI Data_Status values */
@@ -77,6 +80,12 @@ typedef struct {
 typedef struct {
     espos_ble_reasm_slot_t slot[ESPOS_BLE_REASM_SLOTS];
     espos_ble_reasm_skip_t skip[ESPOS_BLE_REASM_SLOTS];
+    /* Set when a chain had to be given up with the skip list full: until
+     * then, a lone final report could be its untracked tail, so none is
+     * forwarded. Only reached with more chains in flight than both arrays
+     * hold. */
+    bool resync;
+    uint32_t resync_until_ms;
     uint32_t dropped;
 } espos_ble_reasm_t;
 

@@ -293,21 +293,24 @@ static void reasm_drop(espos_ble_reasm_t *r, espos_ble_reasm_slot_t *s)
 }
 
 /* Gives up a chain before its last report: count it, and remember it so the
- * reports still to come are discarded too. A full skip list overwrites its
- * oldest entry. */
+ * reports still to come are discarded too. With the skip list full nothing
+ * is overwritten; the reassembler resynchronises instead (see `resync`). */
 static void reasm_abandon(espos_ble_reasm_t *r, espos_ble_reasm_slot_t *s, uint32_t now_ms)
 {
     if (!s->active) return;
     espos_ble_reasm_skip_t *k = NULL;
-    for (size_t i = 0; i < ESPOS_BLE_REASM_SLOTS; i++) {
-        espos_ble_reasm_skip_t *c = &r->skip[i];
-        if (!c->active) { k = c; break; }
-        if (!k || (int32_t)(c->since_ms - k->since_ms) < 0) k = c;
+    for (size_t i = 0; i < ESPOS_BLE_REASM_SLOTS && !k; i++) {
+        if (!r->skip[i].active) k = &r->skip[i];
     }
-    k->active = true;
-    memcpy(k->addr, s->addr, sizeof(k->addr));
-    k->sid = s->sid;
-    k->since_ms = now_ms;
+    if (k) {
+        k->active = true;
+        memcpy(k->addr, s->addr, sizeof(k->addr));
+        k->sid = s->sid;
+        k->since_ms = now_ms;
+    } else {
+        r->resync = true;
+        r->resync_until_ms = now_ms + ESPOS_BLE_REASM_MAX_AGE_MS;
+    }
     reasm_drop(r, s);
 }
 
@@ -342,10 +345,14 @@ bool espos_ble_reasm_feed(espos_ble_reasm_t *r, uint32_t now_ms, const uint8_t a
     for (size_t i = 0; i < ESPOS_BLE_REASM_SLOTS; i++) {
         espos_ble_reasm_slot_t *c = &r->slot[i];
         if (c->active && (uint32_t)(now_ms - c->started_ms) > ESPOS_BLE_REASM_MAX_AGE_MS) {
-            /* An AUX chain spans a few ms, so its tail is lost, and the next
-             * report from that set opens a new event: not remembered as a
-             * chain to discard. */
-            reasm_drop(r, c);
+            if (c->sid == sid && memcmp(c->addr, addr, sizeof(c->addr)) == 0) {
+                /* Its own overdue chain: a final report is taken for the late
+                 * tail and dropped with it; an INCOMPLETE one starts afresh. */
+                reasm_drop(r, c);
+                if (status != ESPOS_BLE_EXT_DATA_INCOMPLETE) return false;
+            } else {
+                reasm_abandon(r, c, now_ms);
+            }
         }
         if (!c->active) {
             if (!free_slot) free_slot = c;
@@ -355,8 +362,14 @@ bool espos_ble_reasm_feed(espos_ble_reasm_t *r, uint32_t now_ms, const uint8_t a
         if (!oldest || (int32_t)(c->started_ms - oldest->started_ms) < 0) oldest = c;
     }
 
+    if (r->resync && (int32_t)(now_ms - r->resync_until_ms) > 0) r->resync = false;
+
     /* The common case: the whole payload in one report, nothing pending. */
     if (!s && status == ESPOS_BLE_EXT_DATA_COMPLETE) {
+        if (r->resync) {
+            r->dropped++;
+            return false;
+        }
         return reasm_emit(r, data, len, out, out_len);
     }
     if (!s && status == ESPOS_BLE_EXT_DATA_TRUNCATED) {
@@ -401,4 +414,5 @@ void espos_ble_reasm_reset(espos_ble_reasm_t *r)
         r->slot[i].active = false;
         r->skip[i].active = false;
     }
+    r->resync = false;
 }

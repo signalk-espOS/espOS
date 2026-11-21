@@ -78,12 +78,13 @@ TEST_CASE("a stale head is not glued to the next event", "[reasm]")
     const uint8_t *out = NULL;
     uint16_t len = 0;
     TEST_ASSERT_FALSE(feed(&r, 0, kA, 0, ESPOS_BLE_EXT_DATA_INCOMPLETE, kHead, 2, &out, &len));
-    /* Its tail was lost; the next event arrives whole a second later. */
-    TEST_ASSERT_TRUE(feed(&r, 1000, kA, 0, ESPOS_BLE_EXT_DATA_COMPLETE, kWhole, 3, &out, &len));
-    TEST_ASSERT_EQUAL_PTR(kWhole, out);
+    /* A final report after the age limit, even one that parses on its own,
+     * is taken for the late tail: dropped, never forwarded as a whole. */
+    TEST_ASSERT_FALSE(feed(&r, 101 + 1, kA, 0, ESPOS_BLE_EXT_DATA_COMPLETE, kWhole, 3, &out, &len));
     TEST_ASSERT_EQUAL_UINT32(1, r.dropped);
-    /* And the event after that is not mistaken for a discarded tail. */
-    TEST_ASSERT_TRUE(feed(&r, 1010, kA, 0, ESPOS_BLE_EXT_DATA_COMPLETE, kWhole, 3, &out, &len));
+    /* The event after that goes through. */
+    TEST_ASSERT_TRUE(feed(&r, 120, kA, 0, ESPOS_BLE_EXT_DATA_COMPLETE, kWhole, 3, &out, &len));
+    TEST_ASSERT_EQUAL_PTR(kWhole, out);
 }
 
 TEST_CASE("a joined payload that does not parse is dropped", "[reasm]")
@@ -154,6 +155,29 @@ TEST_CASE("a fifth chain evicts the oldest", "[reasm]")
     TEST_ASSERT_TRUE(feed(&r, 10, addr, 0, ESPOS_BLE_EXT_DATA_COMPLETE, kWhole, 3, &out, &len));
     addr[5] = ESPOS_BLE_REASM_SLOTS;
     TEST_ASSERT_TRUE(feed(&r, 9, addr, 0, ESPOS_BLE_EXT_DATA_COMPLETE, kTail, 1, &out, &len));
+}
+
+TEST_CASE("more chains than both arrays hold resynchronise", "[reasm]")
+{
+    espos_ble_reasm_t r = { 0 };
+    const uint8_t *out = NULL;
+    uint16_t len = 0;
+    uint8_t addr[6] = { 0 };
+    /* Slots fill with 0..3, then 4..7 evict them into the skip list, and 8
+     * evicts 4 with the skip list full. */
+    for (uint8_t i = 0; i < 3 * ESPOS_BLE_REASM_SLOTS + 1; i++) {
+        addr[5] = i;
+        TEST_ASSERT_FALSE(feed(&r, 0, addr, 0, ESPOS_BLE_EXT_DATA_INCOMPLETE, kHead, 2, &out, &len));
+    }
+    /* 4's tail is untracked, so no lone final report goes out for now ... */
+    addr[5] = 4;
+    TEST_ASSERT_FALSE(feed(&r, 1, addr, 0, ESPOS_BLE_EXT_DATA_COMPLETE, kWhole, 3, &out, &len));
+    /* ... while chains still being followed complete normally ... */
+    addr[5] = 3 * ESPOS_BLE_REASM_SLOTS;
+    TEST_ASSERT_TRUE(feed(&r, 2, addr, 0, ESPOS_BLE_EXT_DATA_COMPLETE, kTail, 1, &out, &len));
+    /* ... and once the age limit has passed, singles flow again. */
+    addr[5] = 200;
+    TEST_ASSERT_TRUE(feed(&r, 500, addr, 0, ESPOS_BLE_EXT_DATA_COMPLETE, kWhole, 3, &out, &len));
 }
 
 TEST_CASE("reset forgets pending chains without counting them", "[reasm]")
