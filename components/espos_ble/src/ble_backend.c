@@ -148,17 +148,17 @@ static void on_ext_report(const esp_ble_gap_ext_adv_report_t *r)
 static void gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param)
 {
     switch (event) {
-    /* Setting scan parameters only arms the scan; it starts here, once the
-     * controller acknowledges them.
-     *
-     * Which makes starting a two-step, asynchronous affair, and leaves a
-     * window: a suspension that arrives between espos_ble_scan_start() and
-     * this event would be ignored, because espos_ble_scan_stop() sees
-     * s_scanning still false and returns without doing anything -- and then
-     * the scan starts here anyway. On an unconfigured device that window is
-     * where the setup portal lives: the scanner took half the airtime for the
-     * whole session while the log said "scanning suspended". Observed as
-     * "scanning suspended" at 4450 ms followed by "scanning" at 4458 ms. */
+        /* Setting scan parameters only arms the scan; it starts here, once the
+         * controller acknowledges them.
+         *
+         * Which makes starting a two-step, asynchronous affair, and leaves a
+         * window: a suspension that arrives between espos_ble_scan_start() and
+         * this event would be ignored, because espos_ble_scan_stop() sees
+         * s_scanning still false and returns without doing anything -- and then
+         * the scan starts here anyway. On an unconfigured device that window is
+         * where the setup portal lives: the scanner took half the airtime for the
+         * whole session while the log said "scanning suspended". Observed as
+         * "scanning suspended" at 4450 ms followed by "scanning" at 4458 ms. */
 #if ESPOS_BLE_EXT_SCAN
     case ESP_GAP_BLE_SET_EXT_SCAN_PARAMS_COMPLETE_EVT:
         if (param->set_ext_scan_params.status != ESP_BT_STATUS_SUCCESS) {

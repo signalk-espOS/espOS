@@ -28,8 +28,8 @@ extern "C" {
 #else
 #define ESPOS_BLE_ADV_DATA_MAX 62
 #endif
-#define ESPOS_BLE_NAME_MAX     32
-#define ESPOS_BLE_ADDR_LEN     18 /* "AA:BB:CC:DD:EE:FF" + NUL */
+#define ESPOS_BLE_NAME_MAX 32
+#define ESPOS_BLE_ADDR_LEN 18 /* "AA:BB:CC:DD:EE:FF" + NUL */
 
 /* One advertisement, copied out of the stack callback. Values only - no
  * pointers into stack-owned buffers, because these are queued. */
