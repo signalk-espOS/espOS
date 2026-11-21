@@ -935,13 +935,14 @@ what a device *is* remains a server-side concern.
 
 * `scan_mode` is `"extended"` on a BLE 5 build (extended scanning, optionally
   on the Coded PHY) and `"legacy"` on a BLE 4.2 one (the classic ESP32 and the
-  ESP32-P4). `ext_adv_dropped`, present only with `"extended"`, counts chained
-  extended advertisements not forwarded: too long for the payload buffer,
-  truncated by the controller, unfinished or malformed
+  ESP32-P4). `ext_adv_dropped`, present only with `"extended"`, counts
+  extended advertisements, single reports or chains, not forwarded: too long
+  for the payload buffer, truncated by the controller, unfinished or malformed
   ([ble.md](ble.md#targets)).
 * `scan_hits` counts advertisements seen by the radio, `adv_received` those
-  handed to the gateway; a gap between them means the intake callback is being
-  starved.
+  handed to the gateway. A gap between them means the intake callback is being
+  starved, or, on the extended scanner, advertisements the reassembly dropped:
+  subtract `ext_adv_dropped` first.
 * `adv_pending` is the ring buffer's depth and `adv_dropped` the running total
   lost before posting: shed once the buffer is full (oldest first), or
   arriving while it was locked. Sustained growth in `adv_dropped` means

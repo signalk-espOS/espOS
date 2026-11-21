@@ -46,10 +46,10 @@ int espos_ble_hex_decode(const char *hex, uint8_t *out, size_t out_max);
  * controller, evicted, aged out, malformed) counts in `dropped`, and the
  * remaining reports of a chain given up early (evicted or overdue) are
  * discarded with it, through its next terminal report -- at the cost of one
- * advertisement when that was in fact a new event. The limit is a trade-off:
- * the spec lets AUX offsets reach seconds, and a chain whose reports are
- * further apart than the limit plus the discard window can still have its
- * tail taken for a whole advertisement when that tail parses on its own. Pure logic so
+ * advertisement when that was in fact a new event. One gap remains: with more
+ * abandoned chains than the skip list holds, the reassembler resynchronises
+ * for ESPOS_BLE_REASM_MAX_AGE_MS, and a tail later than that which parses on
+ * its own can still be taken for a whole advertisement. Pure logic so
  * the host suite can drive it; the BTC task is the only caller on the device. */
 typedef enum {
     ESPOS_BLE_EXT_DATA_COMPLETE = 0,   /* HCI Data_Status values */
@@ -76,7 +76,6 @@ typedef struct {
     bool active;
     uint8_t addr[6];
     uint8_t sid;
-    uint32_t since_ms;
 } espos_ble_reasm_skip_t;
 
 typedef struct {

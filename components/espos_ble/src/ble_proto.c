@@ -299,6 +299,9 @@ static void reasm_abandon(espos_ble_reasm_t *r, espos_ble_reasm_slot_t *s, uint3
 {
     if (!s->active) return;
     espos_ble_reasm_skip_t *k = NULL;
+    /* A record never expires by time: only the chain's terminal report (or
+     * the next one from that set, which costs one advertisement when the
+     * tail was lost) or a scan reset ends it. */
     for (size_t i = 0; i < ESPOS_BLE_REASM_SLOTS && !k; i++) {
         if (!r->skip[i].active) k = &r->skip[i];
     }
@@ -306,7 +309,6 @@ static void reasm_abandon(espos_ble_reasm_t *r, espos_ble_reasm_slot_t *s, uint3
         k->active = true;
         memcpy(k->addr, s->addr, sizeof(k->addr));
         k->sid = s->sid;
-        k->since_ms = now_ms;
     } else {
         r->resync = true;
         r->resync_until_ms = now_ms + ESPOS_BLE_REASM_MAX_AGE_MS;
@@ -330,15 +332,6 @@ bool espos_ble_reasm_feed(espos_ble_reasm_t *r, uint32_t now_ms, const uint8_t a
                           uint8_t sid, int status, const uint8_t *data, uint16_t len,
                           const uint8_t **out, uint16_t *out_len)
 {
-    /* Expired discard records go first, so they free room for the chains
-     * that age out below. */
-    for (size_t i = 0; i < ESPOS_BLE_REASM_SLOTS; i++) {
-        espos_ble_reasm_skip_t *k = &r->skip[i];
-        if (k->active && (uint32_t)(now_ms - k->since_ms) > ESPOS_BLE_REASM_MAX_AGE_MS) {
-            k->active = false;
-        }
-    }
-
     /* Then overdue chains: an AUX chain spans a few ms, so one older than the
      * limit has lost reports. Its identity is discarded through its next
      * terminal report, because HCI cannot tell a late continuation from the

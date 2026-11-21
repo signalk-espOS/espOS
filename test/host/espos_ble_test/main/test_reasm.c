@@ -192,9 +192,29 @@ TEST_CASE("more chains than both arrays hold resynchronise", "[reasm]")
     /* ... while chains still being followed complete normally ... */
     addr[5] = 3;
     TEST_ASSERT_TRUE(feed(&r, 2, addr, 0, ESPOS_BLE_EXT_DATA_COMPLETE, kTail, 1, &out, &len));
-    /* ... and once the age limit has passed, singles flow again. */
+    /* ... and once the given-up chains have ended and the resync window has
+     * passed, singles flow again. */
+    for (uint8_t i = 4; i < 8; i++) {
+        addr[5] = i;
+        feed(&r, 50, addr, 0, ESPOS_BLE_EXT_DATA_COMPLETE, kTail, 1, &out, &len);
+    }
+    addr[5] = 8;
+    TEST_ASSERT_TRUE(feed(&r, 50, addr, 0, ESPOS_BLE_EXT_DATA_COMPLETE, kTail, 1, &out, &len));
     addr[5] = 200;
     TEST_ASSERT_TRUE(feed(&r, 500, addr, 0, ESPOS_BLE_EXT_DATA_COMPLETE, kWhole, 3, &out, &len));
+}
+
+TEST_CASE("a discard record outlives the age limit", "[reasm]")
+{
+    espos_ble_reasm_t r = { 0 };
+    const uint8_t *out = NULL;
+    uint16_t len = 0;
+    TEST_ASSERT_FALSE(feed(&r, 0, kA, 0, ESPOS_BLE_EXT_DATA_INCOMPLETE, kHead, 2, &out, &len));
+    /* Another advertiser's report ages A out; A's tail is much later still. */
+    TEST_ASSERT_TRUE(feed(&r, 101 + 1, kB, 0, ESPOS_BLE_EXT_DATA_COMPLETE, kWhole, 3, &out, &len));
+    TEST_ASSERT_FALSE(feed(&r, 1000, kA, 0, ESPOS_BLE_EXT_DATA_COMPLETE, kWhole, 3, &out, &len));
+    TEST_ASSERT_EQUAL_UINT32(1, r.dropped);
+    TEST_ASSERT_TRUE(feed(&r, 1001, kA, 0, ESPOS_BLE_EXT_DATA_COMPLETE, kWhole, 3, &out, &len));
 }
 
 TEST_CASE("reset forgets pending chains without counting them", "[reasm]")
