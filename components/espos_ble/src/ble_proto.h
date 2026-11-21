@@ -46,11 +46,12 @@ int espos_ble_hex_decode(const char *hex, uint8_t *out, size_t out_max);
  * controller, evicted, aged out, malformed) counts in `dropped`, and the
  * remaining reports of a chain given up early (evicted or overdue) are
  * discarded with it, through its next terminal report -- at the cost of one
- * advertisement when that was in fact a new event. One gap remains: with more
- * abandoned chains than the skip list holds, the reassembler resynchronises
- * for ESPOS_BLE_REASM_MAX_AGE_MS, and a tail later than that which parses on
- * its own can still be taken for a whole advertisement. Pure logic so
- * the host suite can drive it; the BTC task is the only caller on the device. */
+ * advertisement when that was in fact a new event. With more abandoned
+ * chains than the skip list holds, no time limit can tell a late tail from a
+ * new advertisement, so the reassembler asks for a scan restart (`restart`)
+ * and forwards nothing untracked until the caller has restarted the scan and
+ * called espos_ble_reasm_reset(). Pure logic so the host suite can drive it;
+ * the BTC task is the only caller on the device. */
 typedef enum {
     ESPOS_BLE_EXT_DATA_COMPLETE = 0,   /* HCI Data_Status values */
     ESPOS_BLE_EXT_DATA_INCOMPLETE = 1,
@@ -81,12 +82,12 @@ typedef struct {
 typedef struct {
     espos_ble_reasm_slot_t slot[ESPOS_BLE_REASM_SLOTS];
     espos_ble_reasm_skip_t skip[ESPOS_BLE_REASM_SLOTS];
-    /* Set when a chain had to be given up with the skip list full: until
-     * resync_until_ms, a report outside the chains being followed could be
-     * its untracked rest, so none is forwarded or starts a chain. Only reached with more chains in flight than both arrays
-     * hold. */
-    bool resync;
-    uint32_t resync_until_ms;
+    /* Set when a chain had to be given up with the skip list full: any report
+     * outside the chains being followed could be its untracked rest, so none
+     * is forwarded or starts a chain until the scan is restarted -- the one
+     * boundary no report of an earlier chain crosses -- and reset clears it.
+     * Also what heals skip records of advertisers that never came back. */
+    bool restart;
     uint32_t dropped;
 } espos_ble_reasm_t;
 

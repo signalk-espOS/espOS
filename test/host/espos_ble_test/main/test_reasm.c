@@ -170,7 +170,7 @@ TEST_CASE("a fifth chain evicts the oldest", "[reasm]")
     TEST_ASSERT_TRUE(feed(&r, 9, addr, 0, ESPOS_BLE_EXT_DATA_COMPLETE, kTail, 1, &out, &len));
 }
 
-TEST_CASE("more chains than both arrays hold resynchronise", "[reasm]")
+TEST_CASE("more chains than both arrays hold ask for a scan restart", "[reasm]")
 {
     espos_ble_reasm_t r = { 0 };
     const uint8_t *out = NULL;
@@ -178,12 +178,13 @@ TEST_CASE("more chains than both arrays hold resynchronise", "[reasm]")
     uint8_t addr[6] = { 0 };
     /* 0..3 fill the slots; each later chain evicts the one in slot 0 (all
      * started at once), the first four into the skip list, the fifth with it
-     * full, which starts a resync; from then on no new chain starts. */
+     * full, which asks for a restart; from then on no new chain starts. */
     for (uint8_t i = 0; i < 3 * ESPOS_BLE_REASM_SLOTS + 1; i++) {
         addr[5] = i;
         TEST_ASSERT_FALSE(feed(&r, 0, addr, 0, ESPOS_BLE_EXT_DATA_INCOMPLETE, kHead, 2, &out, &len));
     }
-    /* An untracked tail: no lone final report goes out for now ... */
+    TEST_ASSERT_TRUE(r.restart);
+    /* An untracked tail: no lone final report goes out ... */
     addr[5] = 7; /* evicted with the skip list full */
     TEST_ASSERT_FALSE(feed(&r, 1, addr, 0, ESPOS_BLE_EXT_DATA_COMPLETE, kWhole, 3, &out, &len));
     /* ... nor does it start a chain whose tail would go out ... */
@@ -192,16 +193,20 @@ TEST_CASE("more chains than both arrays hold resynchronise", "[reasm]")
     /* ... while chains still being followed complete normally ... */
     addr[5] = 3;
     TEST_ASSERT_TRUE(feed(&r, 2, addr, 0, ESPOS_BLE_EXT_DATA_COMPLETE, kTail, 1, &out, &len));
-    /* ... and once the given-up chains have ended and the resync window has
-     * passed, singles flow again. */
-    for (uint8_t i = 4; i < 8; i++) {
-        addr[5] = i;
-        feed(&r, 50, addr, 0, ESPOS_BLE_EXT_DATA_COMPLETE, kTail, 1, &out, &len);
-    }
-    addr[5] = 8;
-    TEST_ASSERT_TRUE(feed(&r, 50, addr, 0, ESPOS_BLE_EXT_DATA_COMPLETE, kTail, 1, &out, &len));
+    /* ... and no amount of time makes an untracked report whole: a head just
+     * before any deadline and its tail just after stay refused ... */
+    addr[5] = 100;
+    TEST_ASSERT_FALSE(feed(&r, 99, addr, 0, ESPOS_BLE_EXT_DATA_INCOMPLETE, kHead, 2, &out, &len));
+    TEST_ASSERT_FALSE(feed(&r, 101, addr, 0, ESPOS_BLE_EXT_DATA_COMPLETE, kWhole, 3, &out, &len));
     addr[5] = 200;
-    TEST_ASSERT_TRUE(feed(&r, 500, addr, 0, ESPOS_BLE_EXT_DATA_COMPLETE, kWhole, 3, &out, &len));
+    TEST_ASSERT_FALSE(feed(&r, 100000, addr, 0, ESPOS_BLE_EXT_DATA_COMPLETE, kWhole, 3, &out, &len));
+    /* ... until the scan has been restarted, which clears the skip records
+     * of advertisers that never came back as well. */
+    espos_ble_reasm_reset(&r);
+    TEST_ASSERT_FALSE(r.restart);
+    TEST_ASSERT_TRUE(feed(&r, 100001, addr, 0, ESPOS_BLE_EXT_DATA_COMPLETE, kWhole, 3, &out, &len));
+    addr[5] = 0; /* was in the skip list */
+    TEST_ASSERT_TRUE(feed(&r, 100001, addr, 0, ESPOS_BLE_EXT_DATA_COMPLETE, kWhole, 3, &out, &len));
 }
 
 TEST_CASE("a discard record outlives the age limit", "[reasm]")

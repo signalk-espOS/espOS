@@ -294,8 +294,8 @@ static void reasm_drop(espos_ble_reasm_t *r, espos_ble_reasm_slot_t *s)
 
 /* Gives up a chain before its last report: count it, and remember it so the
  * reports still to come are discarded too. With the skip list full nothing
- * is overwritten; the reassembler resynchronises instead (see `resync`). */
-static void reasm_abandon(espos_ble_reasm_t *r, espos_ble_reasm_slot_t *s, uint32_t now_ms)
+ * is overwritten; the reassembler asks for a scan restart instead. */
+static void reasm_abandon(espos_ble_reasm_t *r, espos_ble_reasm_slot_t *s)
 {
     if (!s->active) return;
     espos_ble_reasm_skip_t *k = NULL;
@@ -310,8 +310,7 @@ static void reasm_abandon(espos_ble_reasm_t *r, espos_ble_reasm_slot_t *s, uint3
         memcpy(k->addr, s->addr, sizeof(k->addr));
         k->sid = s->sid;
     } else {
-        r->resync = true;
-        r->resync_until_ms = now_ms + ESPOS_BLE_REASM_MAX_AGE_MS;
+        r->restart = true;
     }
     reasm_drop(r, s);
 }
@@ -340,7 +339,7 @@ bool espos_ble_reasm_feed(espos_ble_reasm_t *r, uint32_t now_ms, const uint8_t a
     for (size_t i = 0; i < ESPOS_BLE_REASM_SLOTS; i++) {
         espos_ble_reasm_slot_t *c = &r->slot[i];
         if (c->active && (uint32_t)(now_ms - c->started_ms) > ESPOS_BLE_REASM_MAX_AGE_MS) {
-            reasm_abandon(r, c, now_ms);
+            reasm_abandon(r, c);
         }
     }
 
@@ -351,8 +350,6 @@ bool espos_ble_reasm_feed(espos_ble_reasm_t *r, uint32_t now_ms, const uint8_t a
             return false; /* already counted when the chain was given up */
         }
     }
-
-    if (r->resync && (int32_t)(now_ms - r->resync_until_ms) > 0) r->resync = false;
 
     espos_ble_reasm_slot_t *s = NULL, *free_slot = NULL, *oldest = NULL;
     for (size_t i = 0; i < ESPOS_BLE_REASM_SLOTS; i++) {
@@ -365,9 +362,10 @@ bool espos_ble_reasm_feed(espos_ble_reasm_t *r, uint32_t now_ms, const uint8_t a
         if (!oldest || (int32_t)(c->started_ms - oldest->started_ms) < 0) oldest = c;
     }
 
-    /* Resynchronising: a report that belongs to no chain being followed could
-     * be the untracked rest of one given up, so it starts nothing. */
-    if (!s && r->resync) {
+    /* Waiting for a scan restart: a report that belongs to no chain being
+     * followed could be the untracked rest of one given up, so it starts
+     * nothing. */
+    if (!s && r->restart) {
         if (status != ESPOS_BLE_EXT_DATA_INCOMPLETE) r->dropped++;
         return false;
     }
@@ -385,7 +383,7 @@ bool espos_ble_reasm_feed(espos_ble_reasm_t *r, uint32_t now_ms, const uint8_t a
         s = free_slot;
         if (!s) {
             s = oldest;
-            reasm_abandon(r, s, now_ms);
+            reasm_abandon(r, s);
         }
         s->active = true;
         s->overflow = false;
@@ -418,5 +416,5 @@ void espos_ble_reasm_reset(espos_ble_reasm_t *r)
         r->slot[i].active = false;
         r->skip[i].active = false;
     }
-    r->resync = false;
+    r->restart = false;
 }

@@ -156,7 +156,9 @@ sensors use. Two differences to know:
   without), that the controller truncated, whose chain was not finished
   within 100 ms, or whose AD structures do not parse is dropped whole and
   counted in `ext_adv_dropped`, never forwarded cut in the middle of an AD
-  structure.
+  structure. When more chains are lost at once than it can keep track of,
+  the backend restarts the scan (logged as a warning): only then can no
+  leftover report of a lost chain be taken for a whole advertisement.
 * GATT connections use the extended create connection on the default PHY, so
   a sensor heard only on the Coded PHY shows up in scans but cannot be
   connected to yet.
