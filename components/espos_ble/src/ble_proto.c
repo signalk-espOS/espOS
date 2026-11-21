@@ -330,30 +330,40 @@ bool espos_ble_reasm_feed(espos_ble_reasm_t *r, uint32_t now_ms, const uint8_t a
                           uint8_t sid, int status, const uint8_t *data, uint16_t len,
                           const uint8_t **out, uint16_t *out_len)
 {
+    /* Expired discard records go first, so they free room for the chains
+     * that age out below. */
     for (size_t i = 0; i < ESPOS_BLE_REASM_SLOTS; i++) {
         espos_ble_reasm_skip_t *k = &r->skip[i];
-        if (!k->active) continue;
-        if ((uint32_t)(now_ms - k->since_ms) > ESPOS_BLE_REASM_MAX_AGE_MS) {
+        if (k->active && (uint32_t)(now_ms - k->since_ms) > ESPOS_BLE_REASM_MAX_AGE_MS) {
             k->active = false;
-        } else if (k->sid == sid && memcmp(k->addr, addr, sizeof(k->addr)) == 0) {
+        }
+    }
+
+    /* Then overdue chains: an AUX chain spans a few ms, so one older than the
+     * limit has lost reports. Its identity is discarded through its next
+     * terminal report, because HCI cannot tell a late continuation from the
+     * start of a new event -- the price is one lost advertisement when it
+     * was the latter. */
+    for (size_t i = 0; i < ESPOS_BLE_REASM_SLOTS; i++) {
+        espos_ble_reasm_slot_t *c = &r->slot[i];
+        if (c->active && (uint32_t)(now_ms - c->started_ms) > ESPOS_BLE_REASM_MAX_AGE_MS) {
+            reasm_abandon(r, c, now_ms);
+        }
+    }
+
+    for (size_t i = 0; i < ESPOS_BLE_REASM_SLOTS; i++) {
+        espos_ble_reasm_skip_t *k = &r->skip[i];
+        if (k->active && k->sid == sid && memcmp(k->addr, addr, sizeof(k->addr)) == 0) {
             if (status != ESPOS_BLE_EXT_DATA_INCOMPLETE) k->active = false;
             return false; /* already counted when the chain was given up */
         }
     }
 
+    if (r->resync && (int32_t)(now_ms - r->resync_until_ms) > 0) r->resync = false;
+
     espos_ble_reasm_slot_t *s = NULL, *free_slot = NULL, *oldest = NULL;
     for (size_t i = 0; i < ESPOS_BLE_REASM_SLOTS; i++) {
         espos_ble_reasm_slot_t *c = &r->slot[i];
-        if (c->active && (uint32_t)(now_ms - c->started_ms) > ESPOS_BLE_REASM_MAX_AGE_MS) {
-            if (c->sid == sid && memcmp(c->addr, addr, sizeof(c->addr)) == 0) {
-                /* Its own overdue chain: a final report is taken for the late
-                 * tail and dropped with it; an INCOMPLETE one starts afresh. */
-                reasm_drop(r, c);
-                if (status != ESPOS_BLE_EXT_DATA_INCOMPLETE) return false;
-            } else {
-                reasm_abandon(r, c, now_ms);
-            }
-        }
         if (!c->active) {
             if (!free_slot) free_slot = c;
             continue;
@@ -362,14 +372,15 @@ bool espos_ble_reasm_feed(espos_ble_reasm_t *r, uint32_t now_ms, const uint8_t a
         if (!oldest || (int32_t)(c->started_ms - oldest->started_ms) < 0) oldest = c;
     }
 
-    if (r->resync && (int32_t)(now_ms - r->resync_until_ms) > 0) r->resync = false;
+    /* Resynchronising: a report that belongs to no chain being followed could
+     * be the untracked rest of one given up, so it starts nothing. */
+    if (!s && r->resync) {
+        if (status != ESPOS_BLE_EXT_DATA_INCOMPLETE) r->dropped++;
+        return false;
+    }
 
     /* The common case: the whole payload in one report, nothing pending. */
     if (!s && status == ESPOS_BLE_EXT_DATA_COMPLETE) {
-        if (r->resync) {
-            r->dropped++;
-            return false;
-        }
         return reasm_emit(r, data, len, out, out_len);
     }
     if (!s && status == ESPOS_BLE_EXT_DATA_TRUNCATED) {
