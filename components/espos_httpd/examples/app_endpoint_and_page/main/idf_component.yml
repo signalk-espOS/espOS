@@ -7,4 +7,4 @@
 ## esp_wifi_* API. Both are espos_wifi's dependencies and are pinned there,
 ## so an app never has to agree with espOS about a version.
 dependencies:
-  idf: ">=6.0.0,<6.1.0"
+  idf: ">=6.1.0,<6.2.0"

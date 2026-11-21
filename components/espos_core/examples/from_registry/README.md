@@ -31,7 +31,7 @@ would have set is written out where you can read it.
 ## Building it
 
 ```sh
-. $IDF_PATH/export.sh                 # ESP-IDF 6.0.x
+. $IDF_PATH/export.sh                 # ESP-IDF 6.1.x
 espsecure generate-signing-key --version 2 --scheme rsa3072 secure_boot_signing_key.pem
 idf.py set-target esp32c6             # or esp32; CI builds both
 idf.py build flash monitor
@@ -87,7 +87,7 @@ gives you all of this. What each part is for, in case you start elsewhere:
 
    ```yaml
    dependencies:
-     idf: ">=6.0.0,<6.1.0"
+     idf: ">=6.1.0,<6.2.0"
      signalk-espos/espos_core: "^0.30.0"  # x-release-please-version
      signalk-espos/espos_sk: "^0.30.0"  # x-release-please-version
      signalk-espos/espos_ota: "^0.30.0"  # x-release-please-version
@@ -135,7 +135,7 @@ gives you all of this. What each part is for, in case you start elsewhere:
    to `1` outside a repository. release-please's `simple` release type keeps it
    current if you let it.
 
-6. **`.idf-version`** — the ESP-IDF version you build with (`v6.0.3`), one line.
+6. **`.idf-version`** — the ESP-IDF version you build with (`v6.1.1`), one line.
    espOS's reusable firmware workflow reads it to pick the build image.
 
 7. **`.gitignore`** — keeps the build output, `managed_components/` and, above

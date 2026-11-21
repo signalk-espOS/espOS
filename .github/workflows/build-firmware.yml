@@ -203,7 +203,7 @@ jobs:
           v="$(cat .idf-version 2>/dev/null || cat espos/.idf-version 2>/dev/null || true)"
           if [ -z "$v" ]; then
             echo "::error::No .idf-version. Add one at the project root naming the" \
-                 "ESP-IDF release you build with, e.g. v6.0.3 (the from_registry" \
+                 "ESP-IDF release you build with, e.g. v6.1.1 (the from_registry" \
                  "example ships one)."
             exit 1
           fi
