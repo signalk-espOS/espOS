@@ -787,6 +787,7 @@ export function createMock(opts: MockOptions): Mock {
   const ble = { scan_hits: 2766, adv_received: 2766, adv_posted: 1840, post_success: 46 };
   const bleStatus = () => ({
     enabled: true, scanning: true, scan_suspended: false, mac: profile.mac.toUpperCase(),
+    scan_mode: "extended", ext_adv_dropped: 0,
     ...ble, adv_dropped: 0, adv_pending: ble.adv_received - ble.adv_posted > 200 ? 126 : ble.adv_received - ble.adv_posted, post_fail: 0, ws_connected: sk.ws.connected,
     gatt_sessions: 0, gatt_max: 3, gatt_dropped: 0, gatt_pending: 0,
   });
