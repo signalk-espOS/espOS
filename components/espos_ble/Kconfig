@@ -1,5 +1,22 @@
 menu "espOS BLE gateway"
 
+    config ESPOS_BLE_ADV_DATA_MAX
+        int "Largest advertisement payload forwarded (bytes)"
+        range 62 251
+        default 251 if BT_BLE_50_EXTEND_SCAN_EN
+        default 62
+        help
+            Advertisement bytes kept per buffered advertisement. A legacy
+            advertisement and its scan response are 31 bytes each, so 62
+            covers the BLE 4.2 scanner. The BLE 5 extended scanner sees
+            payloads up to 1650 bytes split across reports; one up to this
+            size is reassembled and forwarded, a larger one is dropped and
+            counted in ext_adv_dropped (GET /api/v1/ble/status) rather than
+            cut in the middle of an AD structure. Every ring slot and the
+            POST batch carry this many bytes, so 251 makes a slot about 320
+            bytes instead of 128; the ring is sized from free memory and
+            holds correspondingly fewer.
+
     config ESPOS_BLE_POST_BATCH_MAX
         int "Advertisements per POST"
         default 40

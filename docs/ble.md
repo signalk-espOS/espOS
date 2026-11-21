@@ -125,6 +125,7 @@ save. Note NVS caps key names at 15 characters, which is why they read
 |-----|---------|-------|
 | `enabled` | `true` | master switch |
 | `active_scan` | `false` | see the P4 warning below |
+| `coded_phy` | `false` | also scan the LE Coded PHY (long range); BLE 5 builds only, each PHY gets half the window |
 | `scan_int_ms` / `scan_win_ms` | 320 / 160 | window ≤ interval; the ratio is the duty cycle |
 | `post_int_ms` | 2000 | the longest a partial batch waits, and the wait after a failed POST; a full batch goes out at once |
 | `status_int_ms` | 30000 | status frame cadence on the control WS |
@@ -137,6 +138,29 @@ save. Note NVS caps key names at 15 characters, which is why they read
 One backend covers both cases; only the controller bring-up differs.
 
 **Native Bluedroid** (ESP32, C3, S3, C6): the chip's own radio.
+
+**BLE 5 extended scanning where the build has BLE 5.0.** Bluedroid builds
+either the BLE 4.2 legacy scanner or the BLE 5.0 extended one, never both
+(IDF refuses `BT_BLE_42_FEATURES_SUPPORTED` and `BT_BLE_50_FEATURES_SUPPORTED`
+together), and `espos_ble` follows whichever sdkconfig selected. IDF picks 4.2
+on the classic ESP32 and 5.0 on every other chip; the example forces 4.2 on the
+P4 only (below). The extended scanner hears legacy advertisements too, as
+extended reports, so nothing a 4.2 build saw goes missing; on top it hears
+devices that advertise only with extended PDUs, which a 4.2 build cannot see at
+all, and with `coded_phy` it also listens on the LE Coded PHY that long-range
+sensors use. Two differences to know:
+
+* A long extended advertisement arrives as a chain of reports, which the
+  backend reassembles. One that does not fit `CONFIG_ESPOS_BLE_ADV_DATA_MAX`
+  (251 bytes on a BLE 5 build), that the controller truncated, or whose chain
+  another advertiser interrupted is dropped whole and counted in
+  `ext_adv_dropped`, never forwarded cut in the middle of an AD structure.
+* With `active_scan` on, a scan response arrives as its own report and is
+  forwarded as a separate advertisement from the same address; the legacy
+  scanner delivers it appended to the advertisement.
+
+`GET /api/v1/ble/status` says which scanner is running in `scan_mode`.
+`scan_mode: "extended"` on a board has not yet been run on hardware.
 
 **The ESP32-C5 only with PSRAM.** BLE plus WiFi plus the SignalK client does not
 fit in its internal RAM alone. With its 8 MB of PSRAM in use it does: the gateway
@@ -193,8 +217,10 @@ are easy to get wrong:
    through 0.13.x; `esp_hosted_bt_host_stack_setup()` now owns it and adds the
    bounded wait for the co-processor's controller that the hand-rolled version
    never had.
-2. **BLE 4.2, not 5.0.** The C6 slave's HCI bridge does not correctly forward
+2. **BLE 4.2, not 5.0.** The C6 slave's HCI bridge did not correctly forward
    BLE 5.0 extended HCI commands over SDIO; legacy scan is the working path.
+   Not retried since esp_hosted 3.1 and IDF 6.1.1, so the P4 keeps 4.2 until
+   a bench test shows the extended scanner works over the bridge.
 3. **Passive scan.** Active scan needs the C6 to transmit SCAN_REQ over SDIO,
    which is unreliable and can silence advertisements entirely
    (esp-hosted-mcu#180). `active_scan` defaults to false for this reason.

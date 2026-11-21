@@ -273,3 +273,59 @@ bool espos_ble_uuid_equal(const uint8_t a[16], const uint8_t b[16])
 {
     return memcmp(a, b, 16) == 0;
 }
+
+static void reasm_abandon(espos_ble_reasm_t *r)
+{
+    if (r->active) r->dropped++;
+    r->active = false;
+}
+
+bool espos_ble_reasm_feed(espos_ble_reasm_t *r, const uint8_t addr[6], uint8_t sid,
+                          int status, const uint8_t *data, uint16_t len,
+                          const uint8_t **out, uint16_t *out_len)
+{
+    bool same = r->active && r->sid == sid && memcmp(r->addr, addr, sizeof(r->addr)) == 0;
+    if (r->active && !same) reasm_abandon(r);
+
+    /* The common case: the whole payload in one report, nothing pending. */
+    if (!r->active && status == ESPOS_BLE_EXT_DATA_COMPLETE) {
+        if (len > sizeof(r->data)) {
+            r->dropped++;
+            return false;
+        }
+        *out = data;
+        *out_len = len;
+        return true;
+    }
+
+    if (!r->active) {
+        r->active = true;
+        r->overflow = false;
+        memcpy(r->addr, addr, sizeof(r->addr));
+        r->sid = sid;
+        r->len = 0;
+    }
+    if (!r->overflow) {
+        if ((size_t)r->len + len > sizeof(r->data)) {
+            r->overflow = true;
+        } else if (len) {
+            memcpy(r->data + r->len, data, len);
+            r->len = (uint16_t)(r->len + len);
+        }
+    }
+
+    if (status == ESPOS_BLE_EXT_DATA_INCOMPLETE) return false;
+    if (status == ESPOS_BLE_EXT_DATA_COMPLETE && !r->overflow) {
+        r->active = false;
+        *out = r->data;
+        *out_len = r->len;
+        return true;
+    }
+    reasm_abandon(r);
+    return false;
+}
+
+void espos_ble_reasm_reset(espos_ble_reasm_t *r)
+{
+    r->active = false;
+}

@@ -5,6 +5,14 @@
  * Bluedroid backend: controller bring-up, GAP scanning, advertisement
  * extraction.
  *
+ * Two scanners, chosen by sdkconfig because Bluedroid builds only one of them:
+ * BLE 4.2 legacy scan (CONFIG_BT_BLE_42_SCAN_EN) and BLE 5.0 extended scan
+ * (CONFIG_BT_BLE_50_EXTEND_SCAN_EN). IDF refuses both at once. The extended
+ * scanner hears everything the legacy one does -- legacy PDUs arrive as
+ * extended reports -- plus devices that advertise only with extended PDUs,
+ * and it can listen on the LE Coded PHY. Classic ESP32 has no BLE 5.0 and the
+ * P4 keeps 4.2 (docs/ble.md, "Targets"), so the legacy path stays.
+ *
  * One file covers both targets because only the controller differs. On the
  * ESP32-P4 there is no local radio at all: Bluedroid's HCI is routed at an
  * ESP32-C6 co-processor over esp_hosted's SDIO transport. Everything above
@@ -40,6 +48,14 @@
 #include "esp_bt.h"
 #endif
 
+#if defined(CONFIG_BT_BLE_50_EXTEND_SCAN_EN)
+#define ESPOS_BLE_EXT_SCAN 1
+#elif defined(CONFIG_BT_BLE_42_SCAN_EN)
+#define ESPOS_BLE_EXT_SCAN 0
+#else
+#error "espos_ble needs a scanner: enable CONFIG_BT_BLE_50_EXTEND_SCAN_EN or CONFIG_BT_BLE_42_SCAN_EN"
+#endif
+
 static const char *TAG = "espos_ble_backend";
 
 static espos_ble_callbacks_t s_cb;
@@ -61,7 +77,65 @@ static bool s_controller_up;
 static bool s_scan_inhibited;
 static uint32_t s_scan_hits;
 static char s_mac[ESPOS_BLE_ADDR_LEN];
+#if ESPOS_BLE_EXT_SCAN
+static esp_ble_ext_scan_params_t s_scan_params;
+static bool s_coded;
+/* Only touched from gap_cb, on the one BTC task. */
+static espos_ble_reasm_t s_reasm;
+#else
 static esp_ble_scan_params_t s_scan_params;
+#endif
+
+/* Copies one advertisement out of the stack's buffers and hands it to the
+ * gateway. Runs on the BT stack task, so the callback must not block. */
+static void emit_adv(const uint8_t *bda, int8_t rssi, const uint8_t *data, uint16_t len)
+{
+    s_scan_hits++;
+    if (!s_cb.on_advertisement) return;
+
+    espos_ble_adv_t adv;
+    memset(&adv, 0, sizeof(adv));
+    snprintf(adv.address, sizeof(adv.address), "%02X:%02X:%02X:%02X:%02X:%02X",
+             bda[0], bda[1], bda[2], bda[3], bda[4], bda[5]);
+    adv.rssi = rssi;
+    adv.received_us = esp_timer_get_time();
+
+    if (len > ESPOS_BLE_ADV_DATA_MAX) len = ESPOS_BLE_ADV_DATA_MAX;
+    memcpy(adv.adv_data, data, len);
+    adv.adv_data_len = (uint8_t)len;
+
+    /* The bounded variant: the unbounded esp_ble_resolve_adv_data() walks
+     * the payload with no length to stop at, and IDF 6 deprecates it for
+     * exactly that reason. Fall back to the shortened name, which is what
+     * a device advertises when the full one does not fit. Resolved on the
+     * copy, which the stack does not own and the API wants non-const. */
+    uint8_t name_len = 0;
+    uint8_t *name = esp_ble_resolve_adv_data_by_type(adv.adv_data, len,
+                                                     ESP_BLE_AD_TYPE_NAME_CMPL, &name_len);
+    if (!name || !name_len) {
+        name = esp_ble_resolve_adv_data_by_type(adv.adv_data, len,
+                                                ESP_BLE_AD_TYPE_NAME_SHORT, &name_len);
+    }
+    if (name && name_len) {
+        if (name_len >= ESPOS_BLE_NAME_MAX) name_len = ESPOS_BLE_NAME_MAX - 1;
+        memcpy(adv.name, name, name_len);
+        adv.name[name_len] = '\0';
+    }
+
+    s_cb.on_advertisement(&adv, s_cb.arg);
+}
+
+#if ESPOS_BLE_EXT_SCAN
+static void on_ext_report(const esp_ble_gap_ext_adv_report_t *r)
+{
+    const uint8_t *data;
+    uint16_t len;
+    if (espos_ble_reasm_feed(&s_reasm, r->addr, r->sid, r->data_status, r->adv_data,
+                             r->adv_data_len, &data, &len)) {
+        emit_adv(r->addr, r->rssi, data, len);
+    }
+}
+#endif
 
 static void gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param)
 {
@@ -77,6 +151,38 @@ static void gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param)
      * where the setup portal lives: the scanner took half the airtime for the
      * whole session while the log said "scanning suspended". Observed as
      * "scanning suspended" at 4450 ms followed by "scanning" at 4458 ms. */
+#if ESPOS_BLE_EXT_SCAN
+    case ESP_GAP_BLE_SET_EXT_SCAN_PARAMS_COMPLETE_EVT:
+        if (param->set_ext_scan_params.status != ESP_BT_STATUS_SUCCESS) {
+            ESP_LOGE(TAG, "ext scan param set failed: %d", param->set_ext_scan_params.status);
+            break;
+        }
+        if (s_scan_inhibited) {
+            ESP_LOGI(TAG, "scan armed but suspended meanwhile; not starting");
+            break;
+        }
+        esp_ble_gap_start_ext_scan(0, 0); /* until stopped, no period */
+        break;
+
+    case ESP_GAP_BLE_EXT_SCAN_START_COMPLETE_EVT:
+        if (param->ext_scan_start.status != ESP_BT_STATUS_SUCCESS) {
+            ESP_LOGE(TAG, "ext scan start failed: %d", param->ext_scan_start.status);
+            s_scanning = false;
+        } else {
+            s_scanning = true;
+            ESP_LOGI(TAG, "scanning (BLE 5 extended, %s)", s_coded ? "1M + Coded PHY" : "1M PHY");
+        }
+        break;
+
+    case ESP_GAP_BLE_EXT_SCAN_STOP_COMPLETE_EVT:
+        s_scanning = false;
+        espos_ble_reasm_reset(&s_reasm);
+        break;
+
+    case ESP_GAP_BLE_EXT_ADV_REPORT_EVT:
+        on_ext_report(&param->ext_adv_report.params);
+        break;
+#else
     case ESP_GAP_BLE_SCAN_PARAM_SET_COMPLETE_EVT:
         if (param->scan_param_cmpl.status != ESP_BT_STATUS_SUCCESS) {
             ESP_LOGE(TAG, "scan param set failed: %d", param->scan_param_cmpl.status);
@@ -95,7 +201,7 @@ static void gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param)
             s_scanning = false;
         } else {
             s_scanning = true;
-            ESP_LOGI(TAG, "scanning");
+            ESP_LOGI(TAG, "scanning (BLE 4.2 legacy)");
         }
         break;
 
@@ -105,51 +211,15 @@ static void gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param)
 
     case ESP_GAP_BLE_SCAN_RESULT_EVT: {
         if (param->scan_rst.search_evt != ESP_GAP_SEARCH_INQ_RES_EVT) break;
-        s_scan_hits++;
-        if (!s_cb.on_advertisement) break;
-
-        espos_ble_adv_t adv;
-        memset(&adv, 0, sizeof(adv));
-        snprintf(adv.address, sizeof(adv.address),
-                 "%02X:%02X:%02X:%02X:%02X:%02X",
-                 param->scan_rst.bda[0], param->scan_rst.bda[1],
-                 param->scan_rst.bda[2], param->scan_rst.bda[3],
-                 param->scan_rst.bda[4], param->scan_rst.bda[5]);
-        adv.rssi = param->scan_rst.rssi;
-        adv.received_us = esp_timer_get_time();
-
-        /* Sum in a wider type before clamping: each field is at most 31, so
-         * the total fits today, but adding them in a uint8_t would wrap
-         * silently if either ever grew. */
+        /* Legacy reports carry the scan response behind the advertisement in
+         * one buffer. Sum in a wider type: each part is at most 31. */
         uint16_t total = (uint16_t)param->scan_rst.adv_data_len +
                          (uint16_t)param->scan_rst.scan_rsp_len;
-        if (total > ESPOS_BLE_ADV_DATA_MAX) total = ESPOS_BLE_ADV_DATA_MAX;
-        memcpy(adv.adv_data, param->scan_rst.ble_adv, total);
-        adv.adv_data_len = (uint8_t)total;
-
-        /* The bounded variant: the unbounded esp_ble_resolve_adv_data() walks
-         * the payload with no length to stop at, and IDF 6 deprecates it for
-         * exactly that reason. Fall back to the shortened name, which is what
-         * a device advertises when the full one does not fit in 31 bytes. */
-        uint8_t name_len = 0;
-        uint16_t adv_len = total;
-        uint8_t *name = esp_ble_resolve_adv_data_by_type(
-            param->scan_rst.ble_adv, adv_len, ESP_BLE_AD_TYPE_NAME_CMPL, &name_len);
-        if (!name || !name_len) {
-            name = esp_ble_resolve_adv_data_by_type(
-                param->scan_rst.ble_adv, adv_len, ESP_BLE_AD_TYPE_NAME_SHORT,
-                &name_len);
-        }
-        if (name && name_len) {
-            if (name_len >= ESPOS_BLE_NAME_MAX) name_len = ESPOS_BLE_NAME_MAX - 1;
-            memcpy(adv.name, name, name_len);
-            adv.name[name_len] = '\0';
-        }
-
-        /* Runs on the BT stack task: the callback must not block. */
-        s_cb.on_advertisement(&adv, s_cb.arg);
+        emit_adv(param->scan_rst.bda, (int8_t)param->scan_rst.rssi,
+                 param->scan_rst.ble_adv, total);
         break;
     }
+#endif
 
     default:
         break;
@@ -313,11 +383,39 @@ static uint16_t ms_to_units(uint32_t ms)
     return (uint16_t)units;
 }
 
-esp_err_t espos_ble_scan_start(bool active, uint16_t interval_ms, uint16_t window_ms)
+esp_err_t espos_ble_scan_start(bool active, bool coded, uint16_t interval_ms, uint16_t window_ms)
 {
     s_scan_inhibited = false;
     if (window_ms > interval_ms) window_ms = interval_ms;
 
+#if ESPOS_BLE_EXT_SCAN
+    s_coded = coded;
+    /* With two PHYs the controller listens on each in turn within one
+     * interval, so the windows have to share it: halving keeps the duty
+     * cycle the user configured instead of asking for more than 100%. */
+    if (coded && window_ms > interval_ms / 2) window_ms = interval_ms / 2;
+    esp_ble_ext_scan_cfg_t cfg = {
+        .scan_type = active ? BLE_SCAN_TYPE_ACTIVE : BLE_SCAN_TYPE_PASSIVE,
+        .scan_interval = ms_to_units(interval_ms),
+        .scan_window = ms_to_units(window_ms),
+    };
+    memset(&s_scan_params, 0, sizeof(s_scan_params));
+    s_scan_params.own_addr_type = BLE_ADDR_TYPE_PUBLIC;
+    s_scan_params.filter_policy = BLE_SCAN_FILTER_ALLOW_ALL;
+    /* Duplicates are wanted: the server times devices out on silence, so a
+     * beacon that never changes must keep being reported. */
+    s_scan_params.scan_duplicate = BLE_SCAN_DUPLICATE_DISABLE;
+    s_scan_params.cfg_mask = ESP_BLE_GAP_EXT_SCAN_CFG_UNCODE_MASK;
+    s_scan_params.uncoded_cfg = cfg;
+    if (coded) {
+        s_scan_params.cfg_mask |= ESP_BLE_GAP_EXT_SCAN_CFG_CODE_MASK;
+        s_scan_params.coded_cfg = cfg;
+    }
+    return esp_ble_gap_set_ext_scan_params(&s_scan_params);
+#else
+    if (coded) {
+        ESP_LOGW(TAG, "coded_phy needs the BLE 5 extended scanner; this build scans BLE 4.2 legacy only");
+    }
     s_scan_params.scan_type = active ? BLE_SCAN_TYPE_ACTIVE : BLE_SCAN_TYPE_PASSIVE;
     s_scan_params.own_addr_type = BLE_ADDR_TYPE_PUBLIC;
     s_scan_params.scan_filter_policy = BLE_SCAN_FILTER_ALLOW_ALL;
@@ -326,8 +424,8 @@ esp_err_t espos_ble_scan_start(bool active, uint16_t interval_ms, uint16_t windo
     /* Duplicates are wanted: the server times devices out on silence, so a
      * beacon that never changes must keep being reported. */
     s_scan_params.scan_duplicate = BLE_SCAN_DUPLICATE_DISABLE;
-
     return esp_ble_gap_set_scan_params(&s_scan_params);
+#endif
 }
 
 esp_err_t espos_ble_scan_stop(void)
@@ -337,7 +435,11 @@ esp_err_t espos_ble_scan_stop(void)
      * flag the pending start would run on regardless of having been stopped. */
     s_scan_inhibited = true;
     if (!s_scanning) return ESP_OK;
+#if ESPOS_BLE_EXT_SCAN
+    return esp_ble_gap_stop_ext_scan();
+#else
     return esp_ble_gap_stop_scanning();
+#endif
 }
 
 esp_err_t espos_ble_gap_reclaim(void)
@@ -354,6 +456,12 @@ esp_err_t espos_ble_gap_reclaim(void)
 
 bool espos_ble_is_scanning(void) { return s_scanning; }
 uint32_t espos_ble_scan_hits(void) { return s_scan_hits; }
+bool espos_ble_scan_extended(void) { return ESPOS_BLE_EXT_SCAN; }
+#if ESPOS_BLE_EXT_SCAN
+uint32_t espos_ble_ext_adv_dropped(void) { return s_reasm.dropped; }
+#else
+uint32_t espos_ble_ext_adv_dropped(void) { return 0; }
+#endif
 const char *espos_ble_mac(void) { return s_mac; }
 
 #endif /* CONFIG_BT_BLUEDROID_ENABLED */

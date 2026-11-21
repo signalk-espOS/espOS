@@ -137,7 +137,7 @@ static struct {
     session_t sessions[MAX_SESSIONS];
 
     /* config */
-    bool active_scan, control_ws;
+    bool active_scan, coded_phy, control_ws;
     uint32_t scan_int, scan_win, post_int, status_int, max_gatt;
 
     /* Set by gateway_task just before it deletes itself, so stop() can wait
@@ -1288,6 +1288,8 @@ esp_err_t espos_ble_start(void)
     int32_t v;
     g.active_scan = false;
     espos_config_get_bool(ESPOS_CFG_NS_BLE, ESPOS_CFG_BLE_ACTIVE_SCAN, &g.active_scan);
+    g.coded_phy = false;
+    espos_config_get_bool(ESPOS_CFG_NS_BLE, ESPOS_CFG_BLE_CODED_PHY, &g.coded_phy);
     v = 320;
     espos_config_get_i32(ESPOS_CFG_NS_BLE, ESPOS_CFG_BLE_SCAN_INT_MS, &v);
     g.scan_int = (uint32_t)v;
@@ -1484,7 +1486,7 @@ esp_err_t espos_ble_start(void)
     xSemaphoreTakeRecursive(scan_mutex(), portMAX_DELAY);
     g.running = true;
     if (g.scan_suspend_count == 0) {
-        espos_ble_scan_start(g.active_scan, (uint16_t)g.scan_int, (uint16_t)g.scan_win);
+        espos_ble_scan_start(g.active_scan, g.coded_phy, (uint16_t)g.scan_int, (uint16_t)g.scan_win);
     } else {
         ESP_LOGI(TAG, "not scanning yet: %s", "suspended before the gateway started");
     }
@@ -1746,7 +1748,7 @@ static esp_err_t scan_resume_locked(void)
         return err;
     }
     ESP_LOGI(TAG, "scanning resumed");
-    return espos_ble_scan_start(g.active_scan, (uint16_t)g.scan_int, (uint16_t)g.scan_win);
+    return espos_ble_scan_start(g.active_scan, g.coded_phy, (uint16_t)g.scan_int, (uint16_t)g.scan_win);
 }
 
 bool espos_ble_scan_is_suspended(void) { return g.scan_suspend_count > 0; }

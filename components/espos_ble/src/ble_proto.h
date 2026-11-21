@@ -32,6 +32,41 @@ void espos_ble_hex_encode_lower(const uint8_t *data, size_t len, char *out);
  * a non-hex digit or odd length. */
 int espos_ble_hex_decode(const char *hex, uint8_t *out, size_t out_max);
 
+/* Reassembly of one chained BLE 5 extended advertisement.
+ *
+ * The controller splits a payload longer than one HCI report (up to 1650
+ * bytes) into INCOMPLETE reports ending in a COMPLETE one, and reports of one
+ * chain come back to back, so one slot is enough: a report from another
+ * advertiser (address or SID) in the middle abandons the pending chain rather
+ * than mixing the two. A payload is handed out whole or not at all -- one cut
+ * at the buffer size would end mid AD structure -- and everything not handed
+ * out (too long, TRUNCATED by the controller, interrupted) counts in
+ * `dropped`. Pure logic so the host suite can drive it; the BTC task is the
+ * only caller on the device. */
+typedef enum {
+    ESPOS_BLE_EXT_DATA_COMPLETE = 0,   /* HCI Data_Status values */
+    ESPOS_BLE_EXT_DATA_INCOMPLETE = 1,
+    ESPOS_BLE_EXT_DATA_TRUNCATED = 2,
+} espos_ble_ext_data_status_t;
+
+typedef struct {
+    bool active;
+    bool overflow;
+    uint8_t addr[6];
+    uint8_t sid;
+    uint16_t len;
+    uint8_t data[ESPOS_BLE_ADV_DATA_MAX];
+    uint32_t dropped;
+} espos_ble_reasm_t;
+
+/* Feeds one report. Returns true when a whole payload is ready: *out points
+ * at it (into `data` or into r) and stays valid until the next call. */
+bool espos_ble_reasm_feed(espos_ble_reasm_t *r, const uint8_t addr[6], uint8_t sid,
+                          int status, const uint8_t *data, uint16_t len,
+                          const uint8_t **out, uint16_t *out_len);
+/* Forget a pending chain without counting it (the scan stopped). */
+void espos_ble_reasm_reset(espos_ble_reasm_t *r);
+
 /* Ring buffer of pending advertisements.
  *
  * Fixed capacity with drop-oldest: a server that is slow, unreachable or

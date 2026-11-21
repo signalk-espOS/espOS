@@ -21,6 +21,14 @@
       "description": "Request scan responses (more data per device, more airtime). Leave off on the ESP32-P4: active scan needs the C6 co-processor to transmit SCAN_REQ over SDIO, which is unreliable and can silence advertisements entirely."
     },
     {
+      "name": "coded_phy",
+      "type": "bool",
+      "default": false,
+      "title": "Long range (Coded PHY)",
+      "restart_required": true,
+      "description": "Also listen on the BLE 5 LE Coded PHY, which long-range sensors use. Each PHY gets half the scan window. Needs a BLE 5 build (ESP32-C5, C6, S3); ignored on the ESP32 and the ESP32-P4, which scan BLE 4.2."
+    },
+    {
       "name": "scan_int_ms",
       "type": "int",
       "default": 320,

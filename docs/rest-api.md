@@ -923,7 +923,8 @@ what a device *is* remains a server-side concern.
 ```json
 {
   "enabled": true, "scanning": true, "mac": "D8:85:AC:FA:2C:46",
-  "scan_hits": 2766, "adv_received": 2766, "adv_posted": 1840,
+  "scan_mode": "extended", "scan_hits": 2766, "ext_adv_dropped": 0,
+  "adv_received": 2766, "adv_posted": 1840,
   "adv_dropped": 0, "adv_pending": 126,
   "post_success": 46, "post_fail": 0,
   "ws_connected": true,
@@ -932,6 +933,12 @@ what a device *is* remains a server-side concern.
 }
 ```
 
+* `scan_mode` is `"extended"` on a BLE 5 build (extended scanning, optionally
+  on the Coded PHY) and `"legacy"` on a BLE 4.2 one (the classic ESP32 and the
+  ESP32-P4). `ext_adv_dropped`, present only with `"extended"`, counts chained
+  extended advertisements not forwarded: too long for the payload buffer,
+  truncated by the controller, or interrupted by another advertiser
+  ([ble.md](ble.md#targets)).
 * `scan_hits` counts advertisements seen by the radio, `adv_received` those
   handed to the gateway; a gap between them means the intake callback is being
   starved.

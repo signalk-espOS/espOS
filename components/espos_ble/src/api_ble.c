@@ -38,7 +38,11 @@ esp_err_t espos_ble_status_json(char **out_json)
     cJSON_AddBoolToObject(d, "scanning", st.scanning);
     cJSON_AddBoolToObject(d, "scan_suspended", st.scan_suspended);
     cJSON_AddStringToObject(d, "mac", st.mac);
+    cJSON_AddStringToObject(d, "scan_mode", espos_ble_scan_extended() ? "extended" : "legacy");
     cJSON_AddNumberToObject(d, "scan_hits", st.scan_hits);
+    if (espos_ble_scan_extended()) {
+        cJSON_AddNumberToObject(d, "ext_adv_dropped", espos_ble_ext_adv_dropped());
+    }
     cJSON_AddNumberToObject(d, "adv_received", st.adv_received);
     cJSON_AddNumberToObject(d, "adv_posted", st.adv_posted);
     cJSON_AddNumberToObject(d, "adv_dropped", st.adv_dropped);
