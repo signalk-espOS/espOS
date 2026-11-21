@@ -151,10 +151,15 @@ all, and with `coded_phy` it also listens on the LE Coded PHY that long-range
 sensors use. Two differences to know:
 
 * A long extended advertisement arrives as a chain of reports, which the
-  backend reassembles. One that does not fit `CONFIG_ESPOS_BLE_ADV_DATA_MAX`
-  (251 bytes on a BLE 5 build), that the controller truncated, or whose chain
-  another advertiser interrupted is dropped whole and counted in
-  `ext_adv_dropped`, never forwarded cut in the middle of an AD structure.
+  backend reassembles, up to four chains at a time. One that does not fit
+  `CONFIG_ESPOS_BLE_ADV_DATA_MAX` (251 bytes on a BLE 5 build with PSRAM, 128
+  without), that the controller truncated, whose chain was not finished
+  within 100 ms, or whose AD structures do not parse is dropped whole and
+  counted in `ext_adv_dropped`, never forwarded cut in the middle of an AD
+  structure.
+* GATT connections use the extended create connection on the default PHY, so
+  a sensor heard only on the Coded PHY shows up in scans but cannot be
+  connected to yet.
 * With `active_scan` on, a scan response arrives as its own report and is
   forwarded as a separate advertisement from the same address; the legacy
   scanner delivers it appended to the advertisement.

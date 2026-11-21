@@ -2,8 +2,8 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Reassembly of chained BLE 5 extended advertisements. A payload goes out
- * whole or not at all: one cut at the buffer size would end in the middle of
- * an AD structure and the server would parse the stub as data.
+ * whole or not at all: one cut short would end in the middle of an AD
+ * structure and the server would parse the stub as data.
  */
 #include <string.h>
 
@@ -13,47 +13,103 @@
 static const uint8_t kA[6] = { 1, 2, 3, 4, 5, 6 };
 static const uint8_t kB[6] = { 9, 9, 9, 9, 9, 9 };
 
+/* Flags AD (3 bytes) split as 2 + 1, and a one-byte AD of length 0x00. */
+static const uint8_t kHead[] = { 0x02, 0x01 };
+static const uint8_t kTail[] = { 0x06 };
+static const uint8_t kWhole[] = { 0x02, 0x01, 0x06 };
+
+static bool feed(espos_ble_reasm_t *r, uint32_t t, const uint8_t *addr, uint8_t sid, int st,
+                 const uint8_t *d, uint16_t n, const uint8_t **out, uint16_t *len)
+{
+    return espos_ble_reasm_feed(r, t, addr, sid, st, d, n, out, len);
+}
+
+TEST_CASE("AD structures are validated", "[reasm]")
+{
+    TEST_ASSERT_TRUE(espos_ble_ad_valid(kWhole, sizeof(kWhole)));
+    TEST_ASSERT_TRUE(espos_ble_ad_valid(NULL, 0));
+    const uint8_t padded[] = { 0x02, 0x01, 0x06, 0x00, 0xFF };
+    TEST_ASSERT_TRUE(espos_ble_ad_valid(padded, sizeof(padded)));
+    TEST_ASSERT_FALSE(espos_ble_ad_valid(kHead, sizeof(kHead)));
+    const uint8_t over[] = { 0x07 };
+    TEST_ASSERT_FALSE(espos_ble_ad_valid(over, sizeof(over)));
+}
+
 TEST_CASE("a single complete report passes straight through", "[reasm]")
 {
     espos_ble_reasm_t r = { 0 };
-    const uint8_t in[] = { 0x02, 0x01, 0x06 };
     const uint8_t *out = NULL;
     uint16_t len = 0;
-    TEST_ASSERT_TRUE(espos_ble_reasm_feed(&r, kA, 0, ESPOS_BLE_EXT_DATA_COMPLETE, in,
-                                          sizeof(in), &out, &len));
-    TEST_ASSERT_EQUAL_PTR(in, out);
-    TEST_ASSERT_EQUAL_UINT16(sizeof(in), len);
+    TEST_ASSERT_TRUE(feed(&r, 0, kA, 0, ESPOS_BLE_EXT_DATA_COMPLETE, kWhole, sizeof(kWhole), &out, &len));
+    TEST_ASSERT_EQUAL_PTR(kWhole, out);
+    TEST_ASSERT_EQUAL_UINT16(sizeof(kWhole), len);
     TEST_ASSERT_EQUAL_UINT32(0, r.dropped);
 }
 
 TEST_CASE("a chain is joined in order and handed out once", "[reasm]")
 {
     espos_ble_reasm_t r = { 0 };
-    const uint8_t p1[] = { 1, 2, 3 }, p2[] = { 4, 5 }, p3[] = { 6 };
     const uint8_t *out = NULL;
     uint16_t len = 0;
-    TEST_ASSERT_FALSE(espos_ble_reasm_feed(&r, kA, 3, ESPOS_BLE_EXT_DATA_INCOMPLETE, p1, 3, &out, &len));
-    TEST_ASSERT_FALSE(espos_ble_reasm_feed(&r, kA, 3, ESPOS_BLE_EXT_DATA_INCOMPLETE, p2, 2, &out, &len));
-    TEST_ASSERT_TRUE(espos_ble_reasm_feed(&r, kA, 3, ESPOS_BLE_EXT_DATA_COMPLETE, p3, 1, &out, &len));
-    const uint8_t want[] = { 1, 2, 3, 4, 5, 6 };
-    TEST_ASSERT_EQUAL_UINT16(sizeof(want), len);
-    TEST_ASSERT_EQUAL_UINT8_ARRAY(want, out, sizeof(want));
-    TEST_ASSERT_FALSE(r.active);
+    TEST_ASSERT_FALSE(feed(&r, 0, kA, 3, ESPOS_BLE_EXT_DATA_INCOMPLETE, kHead, sizeof(kHead), &out, &len));
+    TEST_ASSERT_TRUE(feed(&r, 1, kA, 3, ESPOS_BLE_EXT_DATA_COMPLETE, kTail, sizeof(kTail), &out, &len));
+    TEST_ASSERT_EQUAL_UINT16(sizeof(kWhole), len);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(kWhole, out, sizeof(kWhole));
     TEST_ASSERT_EQUAL_UINT32(0, r.dropped);
+}
+
+TEST_CASE("interleaved chains from two advertisers both complete", "[reasm]")
+{
+    espos_ble_reasm_t r = { 0 };
+    const uint8_t *out = NULL;
+    uint16_t len = 0;
+    TEST_ASSERT_FALSE(feed(&r, 0, kA, 0, ESPOS_BLE_EXT_DATA_INCOMPLETE, kHead, 2, &out, &len));
+    TEST_ASSERT_FALSE(feed(&r, 1, kB, 0, ESPOS_BLE_EXT_DATA_INCOMPLETE, kHead, 2, &out, &len));
+    TEST_ASSERT_TRUE(feed(&r, 2, kA, 0, ESPOS_BLE_EXT_DATA_COMPLETE, kTail, 1, &out, &len));
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(kWhole, out, sizeof(kWhole));
+    TEST_ASSERT_TRUE(feed(&r, 3, kB, 0, ESPOS_BLE_EXT_DATA_COMPLETE, kTail, 1, &out, &len));
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(kWhole, out, sizeof(kWhole));
+    TEST_ASSERT_EQUAL_UINT32(0, r.dropped);
+}
+
+TEST_CASE("a stale head is not glued to the next event", "[reasm]")
+{
+    espos_ble_reasm_t r = { 0 };
+    const uint8_t *out = NULL;
+    uint16_t len = 0;
+    TEST_ASSERT_FALSE(feed(&r, 0, kA, 0, ESPOS_BLE_EXT_DATA_INCOMPLETE, kHead, 2, &out, &len));
+    /* Its tail was lost; the next event arrives whole a second later. */
+    TEST_ASSERT_TRUE(feed(&r, 1000, kA, 0, ESPOS_BLE_EXT_DATA_COMPLETE, kWhole, 3, &out, &len));
+    TEST_ASSERT_EQUAL_PTR(kWhole, out);
+    TEST_ASSERT_EQUAL_UINT32(1, r.dropped);
+    /* And the event after that is not mistaken for a discarded tail. */
+    TEST_ASSERT_TRUE(feed(&r, 1010, kA, 0, ESPOS_BLE_EXT_DATA_COMPLETE, kWhole, 3, &out, &len));
+}
+
+TEST_CASE("a joined payload that does not parse is dropped", "[reasm]")
+{
+    espos_ble_reasm_t r = { 0 };
+    const uint8_t *out = NULL;
+    uint16_t len = 0;
+    const uint8_t bad[] = { 0x05, 0x01 };
+    TEST_ASSERT_FALSE(feed(&r, 0, kA, 0, ESPOS_BLE_EXT_DATA_INCOMPLETE, bad, 2, &out, &len));
+    TEST_ASSERT_FALSE(feed(&r, 1, kA, 0, ESPOS_BLE_EXT_DATA_COMPLETE, kTail, 1, &out, &len));
+    TEST_ASSERT_EQUAL_UINT32(1, r.dropped);
+    /* And a malformed single report too. */
+    TEST_ASSERT_FALSE(feed(&r, 2, kB, 0, ESPOS_BLE_EXT_DATA_COMPLETE, bad, 2, &out, &len));
+    TEST_ASSERT_EQUAL_UINT32(2, r.dropped);
 }
 
 TEST_CASE("a chain longer than the buffer is dropped and counted", "[reasm]")
 {
     espos_ble_reasm_t r = { 0 };
     uint8_t big[ESPOS_BLE_ADV_DATA_MAX];
-    memset(big, 0xAA, sizeof(big));
+    memset(big, 0, sizeof(big));
     const uint8_t *out = NULL;
     uint16_t len = 0;
-    TEST_ASSERT_FALSE(espos_ble_reasm_feed(&r, kA, 0, ESPOS_BLE_EXT_DATA_INCOMPLETE, big,
-                                           sizeof(big), &out, &len));
-    TEST_ASSERT_FALSE(espos_ble_reasm_feed(&r, kA, 0, ESPOS_BLE_EXT_DATA_COMPLETE, big, 1, &out, &len));
+    TEST_ASSERT_FALSE(feed(&r, 0, kA, 0, ESPOS_BLE_EXT_DATA_INCOMPLETE, big, sizeof(big), &out, &len));
+    TEST_ASSERT_FALSE(feed(&r, 1, kA, 0, ESPOS_BLE_EXT_DATA_COMPLETE, big, 1, &out, &len));
     TEST_ASSERT_EQUAL_UINT32(1, r.dropped);
-    TEST_ASSERT_FALSE(r.active);
 }
 
 TEST_CASE("a single report longer than the buffer is dropped", "[reasm]")
@@ -62,48 +118,51 @@ TEST_CASE("a single report longer than the buffer is dropped", "[reasm]")
     uint8_t big[ESPOS_BLE_ADV_DATA_MAX + 1] = { 0 };
     const uint8_t *out = NULL;
     uint16_t len = 0;
-    TEST_ASSERT_FALSE(espos_ble_reasm_feed(&r, kA, 0, ESPOS_BLE_EXT_DATA_COMPLETE, big,
-                                           sizeof(big), &out, &len));
+    TEST_ASSERT_FALSE(feed(&r, 0, kA, 0, ESPOS_BLE_EXT_DATA_COMPLETE, big, sizeof(big), &out, &len));
     TEST_ASSERT_EQUAL_UINT32(1, r.dropped);
 }
 
 TEST_CASE("a truncated chain is dropped, not forwarded cut", "[reasm]")
 {
     espos_ble_reasm_t r = { 0 };
-    const uint8_t p[] = { 1, 2 };
     const uint8_t *out = NULL;
     uint16_t len = 0;
-    TEST_ASSERT_FALSE(espos_ble_reasm_feed(&r, kA, 0, ESPOS_BLE_EXT_DATA_INCOMPLETE, p, 2, &out, &len));
-    TEST_ASSERT_FALSE(espos_ble_reasm_feed(&r, kA, 0, ESPOS_BLE_EXT_DATA_TRUNCATED, p, 2, &out, &len));
+    TEST_ASSERT_FALSE(feed(&r, 0, kA, 0, ESPOS_BLE_EXT_DATA_INCOMPLETE, kHead, 2, &out, &len));
+    TEST_ASSERT_FALSE(feed(&r, 1, kA, 0, ESPOS_BLE_EXT_DATA_TRUNCATED, kTail, 1, &out, &len));
     TEST_ASSERT_EQUAL_UINT32(1, r.dropped);
-    TEST_ASSERT_FALSE(r.active);
-}
-
-TEST_CASE("another advertiser mid-chain abandons the pending one", "[reasm]")
-{
-    espos_ble_reasm_t r = { 0 };
-    const uint8_t p[] = { 1, 2 }, q[] = { 7 };
-    const uint8_t *out = NULL;
-    uint16_t len = 0;
-    TEST_ASSERT_FALSE(espos_ble_reasm_feed(&r, kA, 0, ESPOS_BLE_EXT_DATA_INCOMPLETE, p, 2, &out, &len));
-    TEST_ASSERT_TRUE(espos_ble_reasm_feed(&r, kB, 0, ESPOS_BLE_EXT_DATA_COMPLETE, q, 1, &out, &len));
-    TEST_ASSERT_EQUAL_PTR(q, out);
-    TEST_ASSERT_EQUAL_UINT32(1, r.dropped);
-    /* Same address, other SID: a different advertising set, also abandons. */
-    TEST_ASSERT_FALSE(espos_ble_reasm_feed(&r, kA, 1, ESPOS_BLE_EXT_DATA_INCOMPLETE, p, 2, &out, &len));
-    TEST_ASSERT_FALSE(espos_ble_reasm_feed(&r, kA, 2, ESPOS_BLE_EXT_DATA_INCOMPLETE, p, 2, &out, &len));
+    TEST_ASSERT_FALSE(feed(&r, 2, kB, 0, ESPOS_BLE_EXT_DATA_TRUNCATED, kHead, 2, &out, &len));
     TEST_ASSERT_EQUAL_UINT32(2, r.dropped);
 }
 
-TEST_CASE("reset forgets a pending chain without counting it", "[reasm]")
+TEST_CASE("a fifth chain evicts the oldest", "[reasm]")
 {
     espos_ble_reasm_t r = { 0 };
-    const uint8_t p[] = { 1 };
     const uint8_t *out = NULL;
     uint16_t len = 0;
-    espos_ble_reasm_feed(&r, kA, 0, ESPOS_BLE_EXT_DATA_INCOMPLETE, p, 1, &out, &len);
+    uint8_t addr[6] = { 0 };
+    for (uint8_t i = 0; i < ESPOS_BLE_REASM_SLOTS + 1; i++) {
+        addr[5] = i;
+        TEST_ASSERT_FALSE(feed(&r, i, addr, 0, ESPOS_BLE_EXT_DATA_INCOMPLETE, kHead, 2, &out, &len));
+    }
+    TEST_ASSERT_EQUAL_UINT32(1, r.dropped);
+    /* The evicted chain's tail is discarded, even one that would parse on
+     * its own, and not counted twice. */
+    addr[5] = 0;
+    TEST_ASSERT_FALSE(feed(&r, 9, addr, 0, ESPOS_BLE_EXT_DATA_COMPLETE, kWhole, 3, &out, &len));
+    TEST_ASSERT_EQUAL_UINT32(1, r.dropped);
+    /* Its next event is accepted again. */
+    TEST_ASSERT_TRUE(feed(&r, 10, addr, 0, ESPOS_BLE_EXT_DATA_COMPLETE, kWhole, 3, &out, &len));
+    addr[5] = ESPOS_BLE_REASM_SLOTS;
+    TEST_ASSERT_TRUE(feed(&r, 9, addr, 0, ESPOS_BLE_EXT_DATA_COMPLETE, kTail, 1, &out, &len));
+}
+
+TEST_CASE("reset forgets pending chains without counting them", "[reasm]")
+{
+    espos_ble_reasm_t r = { 0 };
+    const uint8_t *out = NULL;
+    uint16_t len = 0;
+    feed(&r, 0, kA, 0, ESPOS_BLE_EXT_DATA_INCOMPLETE, kHead, 2, &out, &len);
     espos_ble_reasm_reset(&r);
-    TEST_ASSERT_FALSE(r.active);
     TEST_ASSERT_EQUAL_UINT32(0, r.dropped);
-    TEST_ASSERT_TRUE(espos_ble_reasm_feed(&r, kA, 0, ESPOS_BLE_EXT_DATA_COMPLETE, p, 1, &out, &len));
+    TEST_ASSERT_TRUE(feed(&r, 1, kA, 0, ESPOS_BLE_EXT_DATA_COMPLETE, kWhole, 3, &out, &len));
 }

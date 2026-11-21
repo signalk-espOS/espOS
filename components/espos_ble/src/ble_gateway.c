@@ -264,7 +264,7 @@ static char *build_adv_body(const espos_ble_adv_t *ads, size_t n)
 
 /* Scratch for one POST and for the control socket's upgrade headers. Not on
  * the stack: the batch alone is POST_BATCH_MAX * sizeof(espos_ble_adv_t)
- * (~5 KB), which overflows the gateway task's stack the first time a POST
+ * (~5 KB, ~13 KB with BLE 5 payloads), which overflows the gateway task's stack the first time a POST
  * actually runs - and that only happens once a token exists, so it hides
  * until the device is fully provisioned. Not static either: .bss is internal
  * RAM, and on a PSRAM board these ~7 KB belong in PSRAM; espos_ble_start()

@@ -3,7 +3,8 @@ menu "espOS BLE gateway"
     config ESPOS_BLE_ADV_DATA_MAX
         int "Largest advertisement payload forwarded (bytes)"
         range 62 251
-        default 251 if BT_BLE_50_EXTEND_SCAN_EN
+        default 251 if BT_BLE_50_EXTEND_SCAN_EN && SPIRAM
+        default 128 if BT_BLE_50_EXTEND_SCAN_EN
         default 62
         help
             Advertisement bytes kept per buffered advertisement. A legacy
@@ -15,7 +16,8 @@ menu "espOS BLE gateway"
             cut in the middle of an AD structure. Every ring slot and the
             POST batch carry this many bytes, so 251 makes a slot about 320
             bytes instead of 128; the ring is sized from free memory and
-            holds correspondingly fewer.
+            holds correspondingly fewer. Hence 251 only with PSRAM and 128
+            on a BLE 5 board without it.
 
     config ESPOS_BLE_POST_BATCH_MAX
         int "Advertisements per POST"

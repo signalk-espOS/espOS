@@ -274,58 +274,131 @@ bool espos_ble_uuid_equal(const uint8_t a[16], const uint8_t b[16])
     return memcmp(a, b, 16) == 0;
 }
 
-static void reasm_abandon(espos_ble_reasm_t *r)
+bool espos_ble_ad_valid(const uint8_t *data, uint16_t len)
 {
-    if (r->active) r->dropped++;
-    r->active = false;
+    uint16_t pos = 0;
+    while (pos < len) {
+        uint8_t ad_len = data[pos];
+        if (ad_len == 0) return true;
+        if ((uint32_t)pos + 1U + ad_len > len) return false;
+        pos = (uint16_t)(pos + 1U + ad_len);
+    }
+    return true;
 }
 
-bool espos_ble_reasm_feed(espos_ble_reasm_t *r, const uint8_t addr[6], uint8_t sid,
-                          int status, const uint8_t *data, uint16_t len,
+static void reasm_drop(espos_ble_reasm_t *r, espos_ble_reasm_slot_t *s)
+{
+    if (s->active) r->dropped++;
+    s->active = false;
+}
+
+/* Gives up a chain before its last report: count it, and remember it so the
+ * reports still to come are discarded too. A full skip list overwrites its
+ * oldest entry. */
+static void reasm_abandon(espos_ble_reasm_t *r, espos_ble_reasm_slot_t *s, uint32_t now_ms)
+{
+    if (!s->active) return;
+    espos_ble_reasm_skip_t *k = NULL;
+    for (size_t i = 0; i < ESPOS_BLE_REASM_SLOTS; i++) {
+        espos_ble_reasm_skip_t *c = &r->skip[i];
+        if (!c->active) { k = c; break; }
+        if (!k || (int32_t)(c->since_ms - k->since_ms) < 0) k = c;
+    }
+    k->active = true;
+    memcpy(k->addr, s->addr, sizeof(k->addr));
+    k->sid = s->sid;
+    k->since_ms = now_ms;
+    reasm_drop(r, s);
+}
+
+static bool reasm_emit(espos_ble_reasm_t *r, const uint8_t *data, uint16_t len,
+                       const uint8_t **out, uint16_t *out_len)
+{
+    if (len > ESPOS_BLE_ADV_DATA_MAX || !espos_ble_ad_valid(data, len)) {
+        r->dropped++;
+        return false;
+    }
+    *out = data;
+    *out_len = len;
+    return true;
+}
+
+bool espos_ble_reasm_feed(espos_ble_reasm_t *r, uint32_t now_ms, const uint8_t addr[6],
+                          uint8_t sid, int status, const uint8_t *data, uint16_t len,
                           const uint8_t **out, uint16_t *out_len)
 {
-    bool same = r->active && r->sid == sid && memcmp(r->addr, addr, sizeof(r->addr)) == 0;
-    if (r->active && !same) reasm_abandon(r);
+    for (size_t i = 0; i < ESPOS_BLE_REASM_SLOTS; i++) {
+        espos_ble_reasm_skip_t *k = &r->skip[i];
+        if (!k->active) continue;
+        if ((uint32_t)(now_ms - k->since_ms) > ESPOS_BLE_REASM_MAX_AGE_MS) {
+            k->active = false;
+        } else if (k->sid == sid && memcmp(k->addr, addr, sizeof(k->addr)) == 0) {
+            if (status != ESPOS_BLE_EXT_DATA_INCOMPLETE) k->active = false;
+            return false; /* already counted when the chain was given up */
+        }
+    }
+
+    espos_ble_reasm_slot_t *s = NULL, *free_slot = NULL, *oldest = NULL;
+    for (size_t i = 0; i < ESPOS_BLE_REASM_SLOTS; i++) {
+        espos_ble_reasm_slot_t *c = &r->slot[i];
+        if (c->active && (uint32_t)(now_ms - c->started_ms) > ESPOS_BLE_REASM_MAX_AGE_MS) {
+            /* An AUX chain spans a few ms, so its tail is lost, and the next
+             * report from that set opens a new event: not remembered as a
+             * chain to discard. */
+            reasm_drop(r, c);
+        }
+        if (!c->active) {
+            if (!free_slot) free_slot = c;
+            continue;
+        }
+        if (c->sid == sid && memcmp(c->addr, addr, sizeof(c->addr)) == 0) s = c;
+        if (!oldest || (int32_t)(c->started_ms - oldest->started_ms) < 0) oldest = c;
+    }
 
     /* The common case: the whole payload in one report, nothing pending. */
-    if (!r->active && status == ESPOS_BLE_EXT_DATA_COMPLETE) {
-        if (len > sizeof(r->data)) {
-            r->dropped++;
-            return false;
-        }
-        *out = data;
-        *out_len = len;
-        return true;
+    if (!s && status == ESPOS_BLE_EXT_DATA_COMPLETE) {
+        return reasm_emit(r, data, len, out, out_len);
+    }
+    if (!s && status == ESPOS_BLE_EXT_DATA_TRUNCATED) {
+        r->dropped++;
+        return false;
     }
 
-    if (!r->active) {
-        r->active = true;
-        r->overflow = false;
-        memcpy(r->addr, addr, sizeof(r->addr));
-        r->sid = sid;
-        r->len = 0;
+    if (!s) {
+        s = free_slot;
+        if (!s) {
+            s = oldest;
+            reasm_abandon(r, s, now_ms);
+        }
+        s->active = true;
+        s->overflow = false;
+        memcpy(s->addr, addr, sizeof(s->addr));
+        s->sid = sid;
+        s->len = 0;
+        s->started_ms = now_ms;
     }
-    if (!r->overflow) {
-        if ((size_t)r->len + len > sizeof(r->data)) {
-            r->overflow = true;
+    if (!s->overflow) {
+        if ((size_t)s->len + len > sizeof(s->data)) {
+            s->overflow = true;
         } else if (len) {
-            memcpy(r->data + r->len, data, len);
-            r->len = (uint16_t)(r->len + len);
+            memcpy(s->data + s->len, data, len);
+            s->len = (uint16_t)(s->len + len);
         }
     }
 
     if (status == ESPOS_BLE_EXT_DATA_INCOMPLETE) return false;
-    if (status == ESPOS_BLE_EXT_DATA_COMPLETE && !r->overflow) {
-        r->active = false;
-        *out = r->data;
-        *out_len = r->len;
-        return true;
+    if (status == ESPOS_BLE_EXT_DATA_COMPLETE && !s->overflow) {
+        s->active = false;
+        return reasm_emit(r, s->data, s->len, out, out_len);
     }
-    reasm_abandon(r);
+    reasm_drop(r, s);
     return false;
 }
 
 void espos_ble_reasm_reset(espos_ble_reasm_t *r)
 {
-    r->active = false;
+    for (size_t i = 0; i < ESPOS_BLE_REASM_SLOTS; i++) {
+        r->slot[i].active = false;
+        r->skip[i].active = false;
+    }
 }

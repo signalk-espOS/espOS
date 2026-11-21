@@ -937,7 +937,7 @@ what a device *is* remains a server-side concern.
   on the Coded PHY) and `"legacy"` on a BLE 4.2 one (the classic ESP32 and the
   ESP32-P4). `ext_adv_dropped`, present only with `"extended"`, counts chained
   extended advertisements not forwarded: too long for the payload buffer,
-  truncated by the controller, or interrupted by another advertiser
+  truncated by the controller, unfinished or malformed
   ([ble.md](ble.md#targets)).
 * `scan_hits` counts advertisements seen by the radio, `adv_received` those
   handed to the gateway; a gap between them means the intake callback is being

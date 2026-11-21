@@ -84,9 +84,9 @@ esp_err_t espos_ble_scan_stop(void);
 bool espos_ble_is_scanning(void);
 /* Whether this build scans with BLE 5 extended scanning (else 4.2 legacy). */
 bool espos_ble_scan_extended(void);
-/* Chained extended advertisements not forwarded: larger than
- * ESPOS_BLE_ADV_DATA_MAX, truncated by the controller, or interrupted by
- * another advertiser. Always 0 on the legacy scanner. */
+/* Extended advertisements not forwarded: larger than ESPOS_BLE_ADV_DATA_MAX,
+ * truncated by the controller, unfinished or malformed (ble_proto.h,
+ * espos_ble_reasm_feed). Always 0 on the legacy scanner. */
 uint32_t espos_ble_ext_adv_dropped(void);
 
 /* Take the Bluedroid GAP callback back.

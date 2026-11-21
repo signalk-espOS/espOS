@@ -87,22 +87,26 @@ static esp_ble_scan_params_t s_scan_params;
 #endif
 
 /* Copies one advertisement out of the stack's buffers and hands it to the
- * gateway. Runs on the BT stack task, so the callback must not block. */
+ * gateway. Runs on the BT stack task, so the callback must not block. The
+ * copy is static rather than on that task's stack: with BLE 5 payloads it is
+ * ~320 bytes, the BTC stack is IDF's default size, and the gateway copies it
+ * into its ring before the callback returns, so one buffer is enough. */
+static espos_ble_adv_t s_adv;
+
 static void emit_adv(const uint8_t *bda, int8_t rssi, const uint8_t *data, uint16_t len)
 {
-    s_scan_hits++;
     if (!s_cb.on_advertisement) return;
 
-    espos_ble_adv_t adv;
-    memset(&adv, 0, sizeof(adv));
-    snprintf(adv.address, sizeof(adv.address), "%02X:%02X:%02X:%02X:%02X:%02X",
+    espos_ble_adv_t *const a = &s_adv;
+    memset(a, 0, sizeof(*a));
+    snprintf(a->address, sizeof(a->address), "%02X:%02X:%02X:%02X:%02X:%02X",
              bda[0], bda[1], bda[2], bda[3], bda[4], bda[5]);
-    adv.rssi = rssi;
-    adv.received_us = esp_timer_get_time();
+    a->rssi = rssi;
+    a->received_us = esp_timer_get_time();
 
     if (len > ESPOS_BLE_ADV_DATA_MAX) len = ESPOS_BLE_ADV_DATA_MAX;
-    memcpy(adv.adv_data, data, len);
-    adv.adv_data_len = (uint8_t)len;
+    memcpy(a->adv_data, data, len);
+    a->adv_data_len = (uint8_t)len;
 
     /* The bounded variant: the unbounded esp_ble_resolve_adv_data() walks
      * the payload with no length to stop at, and IDF 6 deprecates it for
@@ -110,27 +114,31 @@ static void emit_adv(const uint8_t *bda, int8_t rssi, const uint8_t *data, uint1
      * a device advertises when the full one does not fit. Resolved on the
      * copy, which the stack does not own and the API wants non-const. */
     uint8_t name_len = 0;
-    uint8_t *name = esp_ble_resolve_adv_data_by_type(adv.adv_data, len,
+    uint8_t *name = esp_ble_resolve_adv_data_by_type(a->adv_data, len,
                                                      ESP_BLE_AD_TYPE_NAME_CMPL, &name_len);
     if (!name || !name_len) {
-        name = esp_ble_resolve_adv_data_by_type(adv.adv_data, len,
+        name = esp_ble_resolve_adv_data_by_type(a->adv_data, len,
                                                 ESP_BLE_AD_TYPE_NAME_SHORT, &name_len);
     }
     if (name && name_len) {
         if (name_len >= ESPOS_BLE_NAME_MAX) name_len = ESPOS_BLE_NAME_MAX - 1;
-        memcpy(adv.name, name, name_len);
-        adv.name[name_len] = '\0';
+        memcpy(a->name, name, name_len);
+        a->name[name_len] = '\0';
     }
 
-    s_cb.on_advertisement(&adv, s_cb.arg);
+    s_cb.on_advertisement(a, s_cb.arg);
 }
 
 #if ESPOS_BLE_EXT_SCAN
 static void on_ext_report(const esp_ble_gap_ext_adv_report_t *r)
 {
+    /* One hit per advertisement the radio finished receiving, forwarded or
+     * not, so scan_hits keeps meaning what the radio saw. */
+    if (r->data_status != ESP_BLE_GAP_EXT_ADV_DATA_INCOMPLETE) s_scan_hits++;
     const uint8_t *data;
     uint16_t len;
-    if (espos_ble_reasm_feed(&s_reasm, r->addr, r->sid, r->data_status, r->adv_data,
+    uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
+    if (espos_ble_reasm_feed(&s_reasm, now_ms, r->addr, r->sid, r->data_status, r->adv_data,
                              r->adv_data_len, &data, &len)) {
         emit_adv(r->addr, r->rssi, data, len);
     }
@@ -168,6 +176,11 @@ static void gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param)
         if (param->ext_scan_start.status != ESP_BT_STATUS_SUCCESS) {
             ESP_LOGE(TAG, "ext scan start failed: %d", param->ext_scan_start.status);
             s_scanning = false;
+        } else if (s_scan_inhibited) {
+            /* Suspended while the start was in flight; scan_stop() saw no
+             * running scan and could not stop it then. */
+            s_scanning = true;
+            esp_ble_gap_stop_ext_scan();
         } else {
             s_scanning = true;
             ESP_LOGI(TAG, "scanning (BLE 5 extended, %s)", s_coded ? "1M + Coded PHY" : "1M PHY");
@@ -199,6 +212,11 @@ static void gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param)
         if (param->scan_start_cmpl.status != ESP_BT_STATUS_SUCCESS) {
             ESP_LOGE(TAG, "scan start failed: %d", param->scan_start_cmpl.status);
             s_scanning = false;
+        } else if (s_scan_inhibited) {
+            /* Suspended while the start was in flight; scan_stop() saw no
+             * running scan and could not stop it then. */
+            s_scanning = true;
+            esp_ble_gap_stop_scanning();
         } else {
             s_scanning = true;
             ESP_LOGI(TAG, "scanning (BLE 4.2 legacy)");
@@ -211,6 +229,7 @@ static void gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param)
 
     case ESP_GAP_BLE_SCAN_RESULT_EVT: {
         if (param->scan_rst.search_evt != ESP_GAP_SEARCH_INQ_RES_EVT) break;
+        s_scan_hits++;
         /* Legacy reports carry the scan response behind the advertisement in
          * one buffer. Sum in a wider type: each part is at most 31. */
         uint16_t total = (uint16_t)param->scan_rst.adv_data_len +
@@ -391,9 +410,11 @@ esp_err_t espos_ble_scan_start(bool active, bool coded, uint16_t interval_ms, ui
 #if ESPOS_BLE_EXT_SCAN
     s_coded = coded;
     /* With two PHYs the controller listens on each in turn within one
-     * interval, so the windows have to share it: halving keeps the duty
-     * cycle the user configured instead of asking for more than 100%. */
-    if (coded && window_ms > interval_ms / 2) window_ms = interval_ms / 2;
+     * interval, so the configured window is shared between them: each PHY
+     * gets half, which keeps the duty cycle the user set. */
+    if (coded) {
+        window_ms /= 2;
+    }
     esp_ble_ext_scan_cfg_t cfg = {
         .scan_type = active ? BLE_SCAN_TYPE_ACTIVE : BLE_SCAN_TYPE_PASSIVE,
         .scan_interval = ms_to_units(interval_ms),
@@ -413,7 +434,10 @@ esp_err_t espos_ble_scan_start(bool active, bool coded, uint16_t interval_ms, ui
     }
     return esp_ble_gap_set_ext_scan_params(&s_scan_params);
 #else
-    if (coded) {
+    static bool warned;
+    if (coded && !warned) {
+        /* Once: scanning restarts after every suspension. */
+        warned = true;
         ESP_LOGW(TAG, "coded_phy needs the BLE 5 extended scanner; this build scans BLE 4.2 legacy only");
     }
     s_scan_params.scan_type = active ? BLE_SCAN_TYPE_ACTIVE : BLE_SCAN_TYPE_PASSIVE;
