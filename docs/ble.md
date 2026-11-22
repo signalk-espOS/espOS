@@ -143,12 +143,12 @@ One backend covers both cases; only the controller bring-up differs.
 either the BLE 4.2 legacy scanner or the BLE 5.0 extended one, never both
 (IDF refuses `BT_BLE_42_FEATURES_SUPPORTED` and `BT_BLE_50_FEATURES_SUPPORTED`
 together), and `espos_ble` follows whichever sdkconfig selected. IDF picks 4.2
-on the classic ESP32 and 5.0 on every other chip; the example forces 4.2 on the
-P4 only (below). The extended scanner hears legacy advertisements too, as
-extended reports, so nothing a 4.2 build saw goes missing; on top it hears
-devices that advertise only with extended PDUs, which a 4.2 build cannot see at
-all, and with `coded_phy` it also listens on the LE Coded PHY that long-range
-sensors use. Two differences to know:
+on the classic ESP32 and 5.0 on every other chip, the P4 included (its C6
+co-processor forwards the extended commands, below). The extended scanner
+hears legacy advertisements too, as extended reports, so nothing a 4.2 build
+saw goes missing; on top it hears devices that advertise only with extended
+PDUs, which a 4.2 build cannot see at all, and with `coded_phy` it also
+listens on the LE Coded PHY that long-range sensors use. Two differences to know:
 
 * A long extended advertisement arrives as a chain of reports, which the
   backend reassembles, up to four chains at a time. One that does not fit
@@ -167,7 +167,8 @@ sensors use. Two differences to know:
   scanner delivers it appended to the advertisement.
 
 `GET /api/v1/ble/status` says which scanner is running in `scan_mode`.
-`scan_mode: "extended"` on a board has not yet been run on hardware.
+`scan_mode: "extended"` has run on an ESP32-C5 and on a P4 whose C6 slave
+ran esp_hosted 3.0.9 (2026-11-22).
 
 **The ESP32-C5 only with PSRAM.** BLE plus WiFi plus the SignalK client does not
 fit in its internal RAM alone. With its 8 MB of PSRAM in use it does: the gateway
@@ -224,17 +225,23 @@ are easy to get wrong:
    through 0.13.x; `esp_hosted_bt_host_stack_setup()` now owns it and adds the
    bounded wait for the co-processor's controller that the hand-rolled version
    never had.
-2. **BLE 4.2, not 5.0.** The C6 slave's HCI bridge did not correctly forward
-   BLE 5.0 extended HCI commands over SDIO; legacy scan is the working path.
-   Not retried since esp_hosted 3.1 and IDF 6.1.1, so the P4 keeps 4.2 until
-   a bench test shows the extended scanner works over the bridge.
+2. **BLE 5.0 over the bridge.** Early esp_hosted builds did not forward the
+   extended HCI commands over SDIO, so the P4 used to scan legacy. A bench run
+   on IDF 6.1.1 (2026-11-22, C6 slave on esp_hosted 3.0.9) had extended
+   scanning and the Coded PHY working through the bridge, with no
+   advertisements dropped. 3.0.9 is the lowest slave version tested: a stock
+   Waveshare slave (esp_hosted 2.x) is untested, and if it drops the extended
+   commands the P4 scans nothing until the C6 is updated ([hardware →
+   Updating the C6](hardware.md#updating-the-c6-co-processor-firmware)).
+   GATT connections over the bridge are not verified yet.
 3. **Passive scan.** Active scan needs the C6 to transmit SCAN_REQ over SDIO,
    which is unreliable and can silence advertisements entirely
    (esp-hosted-mcu#180). `active_scan` defaults to false for this reason.
 
 A stock C6 slave already reports `capabilities: 0xd` = WLAN_SDIO + BT_SDIO +
-BLE_ONLY, i.e. HCI over SDIO is present. There is nothing to reflash on the
-co-processor. If the radio sees nothing at all while HCI is alive, suspect the
+BLE_ONLY, i.e. HCI over SDIO is present. Legacy scanning needs nothing
+reflashed on the co-processor; extended scanning has been tested only with a
+slave on esp_hosted 3.0.9 (point 2 above). If the radio sees nothing at all while HCI is alive, suspect the
 antenna: the C6-MINI-1U module has no PCB antenna and needs an external 2.4
 GHz one on its IPEX connector.
 

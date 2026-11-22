@@ -934,8 +934,8 @@ what a device *is* remains a server-side concern.
 ```
 
 * `scan_mode` is `"extended"` on a BLE 5 build (extended scanning, optionally
-  on the Coded PHY) and `"legacy"` on a BLE 4.2 one (the classic ESP32 and the
-  ESP32-P4). `ext_adv_dropped`, present only with `"extended"`, counts
+  on the Coded PHY) and `"legacy"` on a BLE 4.2 one (the classic ESP32).
+  `ext_adv_dropped`, present only with `"extended"`, counts
   extended advertisements, single reports or chains, not forwarded: too long
   for the payload buffer, truncated by the controller, unfinished or malformed
   ([ble.md](ble.md#targets)).
