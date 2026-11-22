@@ -24,11 +24,3 @@
 # esp_hosted_connect_to_slave(), does both in order.
 CONFIG_BT_CONTROLLER_DISABLED=y
 CONFIG_ESP_HOSTED_HOST_FEAT_BT=y
-
-# BLE 4.2, not 5.0, on this target only. The C6 slave's HCI bridge did not
-# forward BLE 5.0 extended HCI commands correctly over SDIO, and legacy scan
-# is the known-working path (the same choice ESPHome's bluetooth_proxy makes).
-# Not yet retried with esp_hosted 3.1 and IDF 6.1.1; until a bench test says
-# otherwise the P4 scans legacy and ble.coded_phy does nothing here.
-CONFIG_BT_BLE_42_FEATURES_SUPPORTED=y
-CONFIG_BT_BLE_50_FEATURES_SUPPORTED=n

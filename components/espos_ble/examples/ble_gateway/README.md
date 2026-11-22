@@ -55,10 +55,8 @@ change.
 build: it also hears devices that advertise only with extended PDUs, and
 `ble.coded_phy` adds the long-range Coded PHY. Only the extended scanner and
 connect are used, so extended advertising, periodic sync and the test mode
-are switched off to keep them out of the image. The ESP32-P4 stays on 4.2
-(`sdkconfig.defaults.esp32p4`): the C6 slave's HCI bridge did not forward
-BLE 5.0 extended HCI commands correctly over SDIO, and legacy scan is the
-known-working path there.
+are switched off to keep them out of the image. The ESP32-P4 scans the
+same way through its C6 co-processor, which forwards the extended commands.
 
 `sdkconfig.defaults.esp32p4` carries the one that is genuinely load-bearing:
 

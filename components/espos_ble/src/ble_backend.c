@@ -10,8 +10,8 @@
  * (CONFIG_BT_BLE_50_EXTEND_SCAN_EN). IDF refuses both at once. The extended
  * scanner hears everything the legacy one does -- legacy PDUs arrive as
  * extended reports -- plus devices that advertise only with extended PDUs,
- * and it can listen on the LE Coded PHY. Classic ESP32 has no BLE 5.0 and the
- * P4 keeps 4.2 (docs/ble.md, "Targets"), so the legacy path stays.
+ * and it can listen on the LE Coded PHY. Classic ESP32 has no BLE 5.0, so
+ * the legacy path stays.
  *
  * One file covers both targets because only the controller differs. On the
  * ESP32-P4 there is no local radio at all: Bluedroid's HCI is routed at an

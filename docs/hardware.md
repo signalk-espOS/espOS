@@ -334,13 +334,12 @@ connected at the same time.
 
 A stock C6 slave reports
 `capabilities: 0xd` — WLAN and BT over SDIO, BLE only — which is what the BLE
-gateway uses (HCI over SDIO, Bluedroid host on the P4). Two limits of that
-path, from [BLE gateway → Targets](ble.md#targets): **BLE 4.2 only** (the
-slave did not forward BLE 5.0 extended HCI commands correctly, not retried
-since esp_hosted 3.1) and **passive
-scan** by default (active scan over SDIO is unreliable). The C6-MINI-1U
-module on these panels has **no PCB antenna**: with nothing on its IPEX
-connector the radio hears nothing at all.
+gateway uses (HCI over SDIO, Bluedroid host on the P4). From
+[BLE gateway → Targets](ble.md#targets): **BLE 5.0 extended scanning** goes
+through the bridge (verified on IDF 6.1.1, GATT over it not yet), and
+scanning is **passive** by default (active scan over SDIO is unreliable).
+The C6-MINI-1U module on these panels has **no PCB antenna**: with nothing on
+its IPEX connector the radio hears nothing at all.
 
 When the SDIO link wedges, the WiFi state machine still reports connected
 because the disconnect never crosses the jammed link. espOS's answer is the
