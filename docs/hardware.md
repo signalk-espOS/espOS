@@ -336,8 +336,9 @@ A stock C6 slave reports
 `capabilities: 0xd` — WLAN and BT over SDIO, BLE only — which is what the BLE
 gateway uses (HCI over SDIO, Bluedroid host on the P4). From
 [BLE gateway → Targets](ble.md#targets): **BLE 5.0 extended scanning** goes
-through the bridge (verified on IDF 6.1.1, GATT over it not yet), and
-scanning is **passive** by default (active scan over SDIO is unreliable).
+through the bridge (verified on IDF 6.1.1 with a slave on esp_hosted 3.0.9; a
+stock 2.x slave and GATT over the bridge are untested), and scanning is
+**passive** by default (active scan over SDIO is unreliable).
 The C6-MINI-1U module on these panels has **no PCB antenna**: with nothing on
 its IPEX connector the radio hears nothing at all.
 
