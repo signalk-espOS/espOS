@@ -15,6 +15,18 @@ pull request. The `[Unreleased]` block below was written by hand before the
 switch; its entries belong to the next feature release and are folded into
 that section when it is cut.
 
+## 0.32.0 (2026-11-22)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Added
+* feat(ble): scan with BLE 5 extended scanning by @dirkwa in https://github.com/signalk-espOS/espOS/pull/326
+* feat(ble): scan with BLE 5 on the ESP32-P4 by @dirkwa in https://github.com/signalk-espOS/espOS/pull/328
+
+
+**Full Changelog**: https://github.com/signalk-espOS/espOS/compare/v0.31.0...v0.32.0
+
 ## 0.31.0 (2026-11-21)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
