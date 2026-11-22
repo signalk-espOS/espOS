@@ -18,12 +18,18 @@
 extern "C" {
 #endif
 
-/* 31 bytes is the legacy advertising payload limit; scan responses add a
- * second 31. Sized for both so a future active-scan path fits without
- * touching the struct. */
+/* Largest advertisement payload forwarded, from Kconfig: 62 (31 bytes of
+ * legacy advertisement plus a 31-byte scan response) unless the BLE 5
+ * extended scanner is built, whose reports carry more. The fallback is for
+ * the host build, which has no Kconfig for this component. */
+#include "sdkconfig.h"
+#ifdef CONFIG_ESPOS_BLE_ADV_DATA_MAX
+#define ESPOS_BLE_ADV_DATA_MAX CONFIG_ESPOS_BLE_ADV_DATA_MAX
+#else
 #define ESPOS_BLE_ADV_DATA_MAX 62
-#define ESPOS_BLE_NAME_MAX     32
-#define ESPOS_BLE_ADDR_LEN     18 /* "AA:BB:CC:DD:EE:FF" + NUL */
+#endif
+#define ESPOS_BLE_NAME_MAX 32
+#define ESPOS_BLE_ADDR_LEN 18 /* "AA:BB:CC:DD:EE:FF" + NUL */
 
 /* One advertisement, copied out of the stack callback. Values only - no
  * pointers into stack-owned buffers, because these are queued. */
@@ -71,9 +77,17 @@ esp_err_t espos_ble_backend_controller_only(void);
 
 esp_err_t espos_ble_backend_init(const espos_ble_callbacks_t *cb);
 esp_err_t espos_ble_backend_deinit(void);
-esp_err_t espos_ble_scan_start(bool active, uint16_t interval_ms, uint16_t window_ms);
+/* coded: also listen on the LE Coded PHY (long range). Only the BLE 5
+ * extended scanner can; the legacy one logs and ignores it. */
+esp_err_t espos_ble_scan_start(bool active, bool coded, uint16_t interval_ms, uint16_t window_ms);
 esp_err_t espos_ble_scan_stop(void);
 bool espos_ble_is_scanning(void);
+/* Whether this build scans with BLE 5 extended scanning (else 4.2 legacy). */
+bool espos_ble_scan_extended(void);
+/* Extended advertisements not forwarded: larger than ESPOS_BLE_ADV_DATA_MAX,
+ * truncated by the controller, unfinished or malformed (ble_proto.h,
+ * espos_ble_reasm_feed). Always 0 on the legacy scanner. */
+uint32_t espos_ble_ext_adv_dropped(void);
 
 /* Take the Bluedroid GAP callback back.
  *

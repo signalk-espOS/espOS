@@ -5,6 +5,14 @@
  * Bluedroid backend: controller bring-up, GAP scanning, advertisement
  * extraction.
  *
+ * Two scanners, chosen by sdkconfig because Bluedroid builds only one of them:
+ * BLE 4.2 legacy scan (CONFIG_BT_BLE_42_SCAN_EN) and BLE 5.0 extended scan
+ * (CONFIG_BT_BLE_50_EXTEND_SCAN_EN). IDF refuses both at once. The extended
+ * scanner hears everything the legacy one does -- legacy PDUs arrive as
+ * extended reports -- plus devices that advertise only with extended PDUs,
+ * and it can listen on the LE Coded PHY. Classic ESP32 has no BLE 5.0 and the
+ * P4 keeps 4.2 (docs/ble.md, "Targets"), so the legacy path stays.
+ *
  * One file covers both targets because only the controller differs. On the
  * ESP32-P4 there is no local radio at all: Bluedroid's HCI is routed at an
  * ESP32-C6 co-processor over esp_hosted's SDIO transport. Everything above
@@ -27,6 +35,7 @@
 #include "esp_gap_ble_api.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
 
 /* esp_hosted 3.x: the hosted BT feature flag is CONFIG_ESP_HOSTED_HOST_FEAT_BT.
  * 2.x spelled it CONFIG_ESP_HOSTED_ENABLE_BT_BLUEDROID + ..._BLUEDROID_HCI_VHCI
@@ -38,6 +47,14 @@
 #include "esp_hosted_bt_host_stack.h"
 #else
 #include "esp_bt.h"
+#endif
+
+#if defined(CONFIG_BT_BLE_50_EXTEND_SCAN_EN)
+#define ESPOS_BLE_EXT_SCAN 1
+#elif defined(CONFIG_BT_BLE_42_SCAN_EN)
+#define ESPOS_BLE_EXT_SCAN 0
+#else
+#error "espos_ble needs a scanner: enable CONFIG_BT_BLE_50_EXTEND_SCAN_EN or CONFIG_BT_BLE_42_SCAN_EN"
 #endif
 
 static const char *TAG = "espos_ble_backend";
@@ -59,24 +76,230 @@ static bool s_controller_up;
 /* A scan was stopped while it was still arming. Cleared by the next deliberate
  * start; see the SCAN_PARAM_SET_COMPLETE_EVT case. */
 static bool s_scan_inhibited;
+/* Makes "is it suspended?" and "it is running now" one step against
+ * espos_ble_scan_stop() on another task: without it a stop landing between
+ * the two saw no running scan, and the scan then ran on while suspended.
+ * A spinlock around two flags, never held across a stack call. */
+static portMUX_TYPE s_scan_mux = portMUX_INITIALIZER_UNLOCKED;
 static uint32_t s_scan_hits;
 static char s_mac[ESPOS_BLE_ADDR_LEN];
+#if ESPOS_BLE_EXT_SCAN
+static esp_ble_ext_scan_params_t s_scan_params;
+static bool s_coded;
+/* Only touched from gap_cb, on the one BTC task. */
+static espos_ble_reasm_t s_reasm;
+/* A stop issued to restart the scan for the reassembler (BTC task only). */
+static bool s_restarting;
+/* Starts left to try after such a stop, 0 when no restart is pending. A
+ * failed start is retried from a timer, so a busy stack cannot leave the
+ * gateway deaf until the next deliberate start. */
+#define RESTART_ATTEMPTS 5
+#define RESTART_RETRY_MS 500
+static int s_restart_left;
+static esp_timer_handle_t s_restart_timer;
+#else
 static esp_ble_scan_params_t s_scan_params;
+#endif
+
+/* Copies one advertisement out of the stack's buffers and hands it to the
+ * gateway. Runs on the BT stack task, so the callback must not block. The
+ * copy is static rather than on that task's stack: with BLE 5 payloads it is
+ * ~320 bytes, the BTC stack is IDF's default size, and the gateway copies it
+ * into its ring before the callback returns, so one buffer is enough. */
+static espos_ble_adv_t s_adv;
+
+static void emit_adv(const uint8_t *bda, int8_t rssi, const uint8_t *data, uint16_t len)
+{
+    if (!s_cb.on_advertisement) return;
+
+    espos_ble_adv_t *const a = &s_adv;
+    memset(a, 0, sizeof(*a));
+    snprintf(a->address, sizeof(a->address), "%02X:%02X:%02X:%02X:%02X:%02X",
+             bda[0], bda[1], bda[2], bda[3], bda[4], bda[5]);
+    a->rssi = rssi;
+    a->received_us = esp_timer_get_time();
+
+    if (len > ESPOS_BLE_ADV_DATA_MAX) len = ESPOS_BLE_ADV_DATA_MAX;
+    memcpy(a->adv_data, data, len);
+    a->adv_data_len = (uint8_t)len;
+
+    /* The bounded variant: the unbounded esp_ble_resolve_adv_data() walks
+     * the payload with no length to stop at, and IDF 6 deprecates it for
+     * exactly that reason. Fall back to the shortened name, which is what
+     * a device advertises when the full one does not fit. Resolved on the
+     * copy, which the stack does not own and the API wants non-const. */
+    uint8_t name_len = 0;
+    uint8_t *name = esp_ble_resolve_adv_data_by_type(a->adv_data, len,
+                                                     ESP_BLE_AD_TYPE_NAME_CMPL, &name_len);
+    if (!name || !name_len) {
+        name = esp_ble_resolve_adv_data_by_type(a->adv_data, len,
+                                                ESP_BLE_AD_TYPE_NAME_SHORT, &name_len);
+    }
+    if (name && name_len) {
+        if (name_len >= ESPOS_BLE_NAME_MAX) name_len = ESPOS_BLE_NAME_MAX - 1;
+        memcpy(a->name, name, name_len);
+        a->name[name_len] = '\0';
+    }
+
+    s_cb.on_advertisement(a, s_cb.arg);
+}
+
+#if ESPOS_BLE_EXT_SCAN
+static void on_ext_report(const esp_ble_gap_ext_adv_report_t *r)
+{
+    /* One hit per advertisement the radio finished receiving, forwarded or
+     * not, so scan_hits keeps meaning what the radio saw. */
+    if (r->data_status != ESP_BLE_GAP_EXT_ADV_DATA_INCOMPLETE) s_scan_hits++;
+    const uint8_t *data;
+    uint16_t len;
+    uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
+    if (espos_ble_reasm_feed(&s_reasm, now_ms, r->addr, r->sid, r->data_status, r->adv_data,
+                             r->adv_data_len, &data, &len)) {
+        emit_adv(r->addr, r->rssi, data, len);
+    }
+    /* Lost track of more chains than it can remember: only a scan restart
+     * guarantees no tail of theirs follows. STOP_COMPLETE starts it again. */
+    if (s_reasm.restart && !s_restarting && s_scanning && !s_scan_inhibited) {
+        ESP_LOGW(TAG, "too many extended advertising chains lost; restarting the scan");
+        /* Not queued: the next report tries again. */
+        s_restarting = esp_ble_gap_stop_ext_scan() == ESP_OK;
+    }
+}
+#endif
+
+#if ESPOS_BLE_EXT_SCAN
+static void restart_failed(void);
+
+/* One attempt to start the scan again after a restart stop. A suspension
+ * meanwhile cancels the restart; the next deliberate start takes over. */
+static void restart_scan(void)
+{
+    taskENTER_CRITICAL(&s_scan_mux);
+    bool go = s_restart_left > 0 && !s_scan_inhibited;
+    if (!go) s_restart_left = 0;
+    taskEXIT_CRITICAL(&s_scan_mux);
+    if (!go) return;
+    if (esp_ble_gap_start_ext_scan(0, 0) == ESP_OK) return; /* START_COMPLETE decides */
+    restart_failed();
+}
+
+static void restart_retry_cb(void *arg)
+{
+    (void)arg;
+    restart_scan();
+}
+
+/* Counts a failed restart attempt and schedules the next, if any remain. */
+static void restart_failed(void)
+{
+    taskENTER_CRITICAL(&s_scan_mux);
+    if (s_restart_left > 0) s_restart_left--;
+    int left = s_restart_left;
+    taskEXIT_CRITICAL(&s_scan_mux);
+    if (left == 0) {
+        ESP_LOGE(TAG, "scan restart failed %d times; scanning stays off until the next start",
+                 RESTART_ATTEMPTS);
+        return;
+    }
+    if (!s_restart_timer) {
+        const esp_timer_create_args_t args = { .callback = restart_retry_cb,
+                                               .name = "ble_rescan" };
+        if (esp_timer_create(&args, &s_restart_timer) != ESP_OK) {
+            ESP_LOGE(TAG, "scan restart failed and no retry timer; scanning stays off");
+            return;
+        }
+    }
+    ESP_LOGW(TAG, "scan restart failed; retrying in %d ms", RESTART_RETRY_MS);
+    esp_timer_start_once(s_restart_timer, RESTART_RETRY_MS * 1000ULL);
+}
+#endif
+
+/* Marks the scan running and returns whether it was suspended meanwhile,
+ * as one step against espos_ble_scan_stop(). */
+static bool scan_mark_running(void)
+{
+    taskENTER_CRITICAL(&s_scan_mux);
+    s_scanning = true;
+    bool inhibited = s_scan_inhibited;
+    taskEXIT_CRITICAL(&s_scan_mux);
+    return inhibited;
+}
 
 static void gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param)
 {
     switch (event) {
-    /* Setting scan parameters only arms the scan; it starts here, once the
-     * controller acknowledges them.
-     *
-     * Which makes starting a two-step, asynchronous affair, and leaves a
-     * window: a suspension that arrives between espos_ble_scan_start() and
-     * this event would be ignored, because espos_ble_scan_stop() sees
-     * s_scanning still false and returns without doing anything -- and then
-     * the scan starts here anyway. On an unconfigured device that window is
-     * where the setup portal lives: the scanner took half the airtime for the
-     * whole session while the log said "scanning suspended". Observed as
-     * "scanning suspended" at 4450 ms followed by "scanning" at 4458 ms. */
+        /* Setting scan parameters only arms the scan; it starts here, once the
+         * controller acknowledges them.
+         *
+         * Which makes starting a two-step, asynchronous affair, and leaves a
+         * window: a suspension that arrives between espos_ble_scan_start() and
+         * this event would be ignored, because espos_ble_scan_stop() sees
+         * s_scanning still false and returns without doing anything -- and then
+         * the scan starts here anyway. On an unconfigured device that window is
+         * where the setup portal lives: the scanner took half the airtime for the
+         * whole session while the log said "scanning suspended". Observed as
+         * "scanning suspended" at 4450 ms followed by "scanning" at 4458 ms. */
+#if ESPOS_BLE_EXT_SCAN
+    case ESP_GAP_BLE_SET_EXT_SCAN_PARAMS_COMPLETE_EVT:
+        if (param->set_ext_scan_params.status != ESP_BT_STATUS_SUCCESS) {
+            ESP_LOGE(TAG, "ext scan param set failed: %d", param->set_ext_scan_params.status);
+            break;
+        }
+        if (s_scan_inhibited) {
+            ESP_LOGI(TAG, "scan armed but suspended meanwhile; not starting");
+            break;
+        }
+        esp_ble_gap_start_ext_scan(0, 0); /* until stopped, no period */
+        break;
+
+    case ESP_GAP_BLE_EXT_SCAN_START_COMPLETE_EVT: {
+        if (param->ext_scan_start.status != ESP_BT_STATUS_SUCCESS) {
+            ESP_LOGE(TAG, "ext scan start failed: %d", param->ext_scan_start.status);
+            s_scanning = false;
+            taskENTER_CRITICAL(&s_scan_mux);
+            bool restarting = s_restart_left > 0;
+            taskEXIT_CRITICAL(&s_scan_mux);
+            if (restarting) restart_failed();
+            break;
+        }
+        taskENTER_CRITICAL(&s_scan_mux);
+        s_restart_left = 0;
+        taskEXIT_CRITICAL(&s_scan_mux);
+        bool inhibited = scan_mark_running();
+        if (inhibited) {
+            /* Suspended while the start was in flight; scan_stop() saw no
+             * running scan and could not stop it then. */
+            esp_ble_gap_stop_ext_scan();
+        } else {
+            ESP_LOGI(TAG, "scanning (BLE 5 extended, %s)", s_coded ? "1M + Coded PHY" : "1M PHY");
+        }
+        break;
+    }
+
+    case ESP_GAP_BLE_EXT_SCAN_STOP_COMPLETE_EVT: {
+        if (param->ext_scan_stop.status != ESP_BT_STATUS_SUCCESS) {
+            /* Still scanning: keep the state, so a suspension stops it again
+             * and a pending restart is asked for again by the next report. */
+            ESP_LOGE(TAG, "ext scan stop failed: %d", param->ext_scan_stop.status);
+            s_restarting = false;
+            break;
+        }
+        espos_ble_reasm_reset(&s_reasm);
+        taskENTER_CRITICAL(&s_scan_mux);
+        s_scanning = false;
+        if (s_restarting) s_restart_left = RESTART_ATTEMPTS;
+        taskEXIT_CRITICAL(&s_scan_mux);
+        s_restarting = false;
+        /* The parameters are still set; a suspension arriving after this
+         * point is caught by START_COMPLETE as above. */
+        restart_scan();
+        break;
+    }
+
+    case ESP_GAP_BLE_EXT_ADV_REPORT_EVT:
+        on_ext_report(&param->ext_adv_report.params);
+        break;
+#else
     case ESP_GAP_BLE_SCAN_PARAM_SET_COMPLETE_EVT:
         if (param->scan_param_cmpl.status != ESP_BT_STATUS_SUCCESS) {
             ESP_LOGE(TAG, "scan param set failed: %d", param->scan_param_cmpl.status);
@@ -89,15 +312,22 @@ static void gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param)
         esp_ble_gap_start_scanning(0); /* 0 = until stopped */
         break;
 
-    case ESP_GAP_BLE_SCAN_START_COMPLETE_EVT:
+    case ESP_GAP_BLE_SCAN_START_COMPLETE_EVT: {
         if (param->scan_start_cmpl.status != ESP_BT_STATUS_SUCCESS) {
             ESP_LOGE(TAG, "scan start failed: %d", param->scan_start_cmpl.status);
             s_scanning = false;
+            break;
+        }
+        bool inhibited = scan_mark_running();
+        if (inhibited) {
+            /* Suspended while the start was in flight; scan_stop() saw no
+             * running scan and could not stop it then. */
+            esp_ble_gap_stop_scanning();
         } else {
-            s_scanning = true;
-            ESP_LOGI(TAG, "scanning");
+            ESP_LOGI(TAG, "scanning (BLE 4.2 legacy)");
         }
         break;
+    }
 
     case ESP_GAP_BLE_SCAN_STOP_COMPLETE_EVT:
         s_scanning = false;
@@ -106,50 +336,15 @@ static void gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param)
     case ESP_GAP_BLE_SCAN_RESULT_EVT: {
         if (param->scan_rst.search_evt != ESP_GAP_SEARCH_INQ_RES_EVT) break;
         s_scan_hits++;
-        if (!s_cb.on_advertisement) break;
-
-        espos_ble_adv_t adv;
-        memset(&adv, 0, sizeof(adv));
-        snprintf(adv.address, sizeof(adv.address),
-                 "%02X:%02X:%02X:%02X:%02X:%02X",
-                 param->scan_rst.bda[0], param->scan_rst.bda[1],
-                 param->scan_rst.bda[2], param->scan_rst.bda[3],
-                 param->scan_rst.bda[4], param->scan_rst.bda[5]);
-        adv.rssi = param->scan_rst.rssi;
-        adv.received_us = esp_timer_get_time();
-
-        /* Sum in a wider type before clamping: each field is at most 31, so
-         * the total fits today, but adding them in a uint8_t would wrap
-         * silently if either ever grew. */
+        /* Legacy reports carry the scan response behind the advertisement in
+         * one buffer. Sum in a wider type: each part is at most 31. */
         uint16_t total = (uint16_t)param->scan_rst.adv_data_len +
                          (uint16_t)param->scan_rst.scan_rsp_len;
-        if (total > ESPOS_BLE_ADV_DATA_MAX) total = ESPOS_BLE_ADV_DATA_MAX;
-        memcpy(adv.adv_data, param->scan_rst.ble_adv, total);
-        adv.adv_data_len = (uint8_t)total;
-
-        /* The bounded variant: the unbounded esp_ble_resolve_adv_data() walks
-         * the payload with no length to stop at, and IDF 6 deprecates it for
-         * exactly that reason. Fall back to the shortened name, which is what
-         * a device advertises when the full one does not fit in 31 bytes. */
-        uint8_t name_len = 0;
-        uint16_t adv_len = total;
-        uint8_t *name = esp_ble_resolve_adv_data_by_type(
-            param->scan_rst.ble_adv, adv_len, ESP_BLE_AD_TYPE_NAME_CMPL, &name_len);
-        if (!name || !name_len) {
-            name = esp_ble_resolve_adv_data_by_type(
-                param->scan_rst.ble_adv, adv_len, ESP_BLE_AD_TYPE_NAME_SHORT,
-                &name_len);
-        }
-        if (name && name_len) {
-            if (name_len >= ESPOS_BLE_NAME_MAX) name_len = ESPOS_BLE_NAME_MAX - 1;
-            memcpy(adv.name, name, name_len);
-            adv.name[name_len] = '\0';
-        }
-
-        /* Runs on the BT stack task: the callback must not block. */
-        s_cb.on_advertisement(&adv, s_cb.arg);
+        emit_adv(param->scan_rst.bda, (int8_t)param->scan_rst.rssi,
+                 param->scan_rst.ble_adv, total);
         break;
     }
+#endif
 
     default:
         break;
@@ -313,11 +508,52 @@ static uint16_t ms_to_units(uint32_t ms)
     return (uint16_t)units;
 }
 
-esp_err_t espos_ble_scan_start(bool active, uint16_t interval_ms, uint16_t window_ms)
+esp_err_t espos_ble_scan_start(bool active, bool coded, uint16_t interval_ms, uint16_t window_ms)
 {
+    taskENTER_CRITICAL(&s_scan_mux);
     s_scan_inhibited = false;
+#if ESPOS_BLE_EXT_SCAN
+    s_restart_left = 0; /* a deliberate start supersedes a pending restart */
+#endif
+    taskEXIT_CRITICAL(&s_scan_mux);
+#if ESPOS_BLE_EXT_SCAN
+    if (s_restart_timer) esp_timer_stop(s_restart_timer);
+#endif
     if (window_ms > interval_ms) window_ms = interval_ms;
 
+#if ESPOS_BLE_EXT_SCAN
+    s_coded = coded;
+    /* With two PHYs the controller listens on each in turn within one
+     * interval, so the configured window is shared between them: each PHY
+     * gets half, which keeps the duty cycle the user set. */
+    if (coded) {
+        window_ms /= 2;
+    }
+    esp_ble_ext_scan_cfg_t cfg = {
+        .scan_type = active ? BLE_SCAN_TYPE_ACTIVE : BLE_SCAN_TYPE_PASSIVE,
+        .scan_interval = ms_to_units(interval_ms),
+        .scan_window = ms_to_units(window_ms),
+    };
+    memset(&s_scan_params, 0, sizeof(s_scan_params));
+    s_scan_params.own_addr_type = BLE_ADDR_TYPE_PUBLIC;
+    s_scan_params.filter_policy = BLE_SCAN_FILTER_ALLOW_ALL;
+    /* Duplicates are wanted: the server times devices out on silence, so a
+     * beacon that never changes must keep being reported. */
+    s_scan_params.scan_duplicate = BLE_SCAN_DUPLICATE_DISABLE;
+    s_scan_params.cfg_mask = ESP_BLE_GAP_EXT_SCAN_CFG_UNCODE_MASK;
+    s_scan_params.uncoded_cfg = cfg;
+    if (coded) {
+        s_scan_params.cfg_mask |= ESP_BLE_GAP_EXT_SCAN_CFG_CODE_MASK;
+        s_scan_params.coded_cfg = cfg;
+    }
+    return esp_ble_gap_set_ext_scan_params(&s_scan_params);
+#else
+    static bool warned;
+    if (coded && !warned) {
+        /* Once: scanning restarts after every suspension. */
+        warned = true;
+        ESP_LOGW(TAG, "coded_phy needs the BLE 5 extended scanner; this build scans BLE 4.2 legacy only");
+    }
     s_scan_params.scan_type = active ? BLE_SCAN_TYPE_ACTIVE : BLE_SCAN_TYPE_PASSIVE;
     s_scan_params.own_addr_type = BLE_ADDR_TYPE_PUBLIC;
     s_scan_params.scan_filter_policy = BLE_SCAN_FILTER_ALLOW_ALL;
@@ -326,8 +562,8 @@ esp_err_t espos_ble_scan_start(bool active, uint16_t interval_ms, uint16_t windo
     /* Duplicates are wanted: the server times devices out on silence, so a
      * beacon that never changes must keep being reported. */
     s_scan_params.scan_duplicate = BLE_SCAN_DUPLICATE_DISABLE;
-
     return esp_ble_gap_set_scan_params(&s_scan_params);
+#endif
 }
 
 esp_err_t espos_ble_scan_stop(void)
@@ -335,9 +571,16 @@ esp_err_t espos_ble_scan_stop(void)
     /* Set before the early return: a scan that has been ARMED but has not yet
      * reported SCAN_START_COMPLETE has s_scanning == false, and without this
      * flag the pending start would run on regardless of having been stopped. */
+    taskENTER_CRITICAL(&s_scan_mux);
     s_scan_inhibited = true;
-    if (!s_scanning) return ESP_OK;
+    bool running = s_scanning;
+    taskEXIT_CRITICAL(&s_scan_mux);
+    if (!running) return ESP_OK;
+#if ESPOS_BLE_EXT_SCAN
+    return esp_ble_gap_stop_ext_scan();
+#else
     return esp_ble_gap_stop_scanning();
+#endif
 }
 
 esp_err_t espos_ble_gap_reclaim(void)
@@ -354,6 +597,12 @@ esp_err_t espos_ble_gap_reclaim(void)
 
 bool espos_ble_is_scanning(void) { return s_scanning; }
 uint32_t espos_ble_scan_hits(void) { return s_scan_hits; }
+bool espos_ble_scan_extended(void) { return ESPOS_BLE_EXT_SCAN; }
+#if ESPOS_BLE_EXT_SCAN
+uint32_t espos_ble_ext_adv_dropped(void) { return s_reasm.dropped; }
+#else
+uint32_t espos_ble_ext_adv_dropped(void) { return 0; }
+#endif
 const char *espos_ble_mac(void) { return s_mac; }
 
 #endif /* CONFIG_BT_BLUEDROID_ENABLED */

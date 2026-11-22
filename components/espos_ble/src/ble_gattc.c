@@ -184,7 +184,13 @@ int espos_ble_gatt_connect(const char *mac, const char *service_uuid)
     }
     s->in_use = true;
 
+    /* Bluedroid builds one of the two: the 4.2 call under BLE 4.2, the
+     * extended create-connection under BLE 5.0. */
+#if defined(CONFIG_BT_BLE_50_FEATURES_SUPPORTED)
+    esp_err_t err = esp_ble_gattc_aux_open(s_gattc_if, s->bda, BLE_ADDR_TYPE_PUBLIC, true);
+#else
     esp_err_t err = esp_ble_gattc_open(s_gattc_if, s->bda, BLE_ADDR_TYPE_PUBLIC, true);
+#endif
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "gattc_open(%s): %s", mac, esp_err_to_name(err));
         slot_release(s);

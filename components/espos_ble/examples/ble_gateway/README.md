@@ -50,10 +50,15 @@ change.
 
 **Bluedroid, not NimBLE**, because the GATT client is Bluedroid-based.
 
-**BLE 4.2, not 5.0.** On the ESP32-P4 the C6 slave's HCI bridge does not
-correctly forward BLE 5.0 extended HCI commands over SDIO, and legacy scan is
-the known-working path — the same choice ESPHome's `bluetooth_proxy` makes.
-Kept uniform across targets so behaviour does not diverge per board.
+**BLE 5.0 where the radio has it.** IDF picks 4.2 on the classic ESP32 and
+5.0 elsewhere, and `espos_ble` scans with BLE 5 extended scanning on a 5.0
+build: it also hears devices that advertise only with extended PDUs, and
+`ble.coded_phy` adds the long-range Coded PHY. Only the extended scanner and
+connect are used, so extended advertising, periodic sync and the test mode
+are switched off to keep them out of the image. The ESP32-P4 stays on 4.2
+(`sdkconfig.defaults.esp32p4`): the C6 slave's HCI bridge did not forward
+BLE 5.0 extended HCI commands correctly over SDIO, and legacy scan is the
+known-working path there.
 
 `sdkconfig.defaults.esp32p4` carries the one that is genuinely load-bearing:
 

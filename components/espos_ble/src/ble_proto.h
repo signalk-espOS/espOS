@@ -32,6 +32,78 @@ void espos_ble_hex_encode_lower(const uint8_t *data, size_t len, char *out);
  * a non-hex digit or odd length. */
 int espos_ble_hex_decode(const char *hex, uint8_t *out, size_t out_max);
 
+/* Reassembly of chained BLE 5 extended advertisements.
+ *
+ * The controller splits a payload longer than one HCI report (up to 1650
+ * bytes) into INCOMPLETE reports ending in a COMPLETE one. Chains are keyed
+ * by advertiser address and SID, a few at a time, because a controller
+ * following several AUX chains may interleave their reports. A pending chain
+ * older than ESPOS_BLE_REASM_MAX_AGE_MS is abandoned, so the remains of an
+ * event whose tail was lost are never glued to the next event's report. A
+ * payload is handed out whole or not at all, and only when its AD structures
+ * parse -- one cut short would end mid structure and the server would read
+ * the stub as data. Everything not handed out (too long, TRUNCATED by the
+ * controller, evicted, aged out, malformed) counts in `dropped`, and the
+ * remaining reports of a chain given up early (evicted or overdue) are
+ * discarded with it, through its next terminal report -- at the cost of one
+ * advertisement when that was in fact a new event. With more abandoned
+ * chains than the skip list holds, no time limit can tell a late tail from a
+ * new advertisement, so the reassembler asks for a scan restart (`restart`)
+ * and forwards nothing untracked until the caller has restarted the scan and
+ * called espos_ble_reasm_reset(). Pure logic so the host suite can drive it;
+ * the BTC task is the only caller on the device. */
+typedef enum {
+    ESPOS_BLE_EXT_DATA_COMPLETE = 0,   /* HCI Data_Status values */
+    ESPOS_BLE_EXT_DATA_INCOMPLETE = 1,
+    ESPOS_BLE_EXT_DATA_TRUNCATED = 2,
+} espos_ble_ext_data_status_t;
+
+#define ESPOS_BLE_REASM_SLOTS      4
+#define ESPOS_BLE_REASM_MAX_AGE_MS 100 /* an AUX chain spans a few ms */
+
+typedef struct {
+    bool active;
+    bool overflow;
+    uint8_t addr[6];
+    uint8_t sid;
+    uint16_t len;
+    uint32_t started_ms;
+    uint8_t data[ESPOS_BLE_ADV_DATA_MAX];
+} espos_ble_reasm_slot_t;
+
+/* A chain given up before its last report: the rest of it is discarded
+ * rather than taken for a new advertisement. */
+typedef struct {
+    bool active;
+    uint8_t addr[6];
+    uint8_t sid;
+} espos_ble_reasm_skip_t;
+
+typedef struct {
+    espos_ble_reasm_slot_t slot[ESPOS_BLE_REASM_SLOTS];
+    espos_ble_reasm_skip_t skip[ESPOS_BLE_REASM_SLOTS];
+    /* Set when a chain had to be given up with the skip list full: any report
+     * outside the chains being followed could be its untracked rest, so none
+     * is forwarded or starts a chain until the scan is restarted -- the one
+     * boundary no report of an earlier chain crosses -- and reset clears it.
+     * Also what heals skip records of advertisers that never came back. */
+    bool restart;
+    uint32_t dropped;
+} espos_ble_reasm_t;
+
+/* Whether data[0..len) is a well-formed sequence of AD structures (a zero
+ * length byte ends it, as padding). */
+bool espos_ble_ad_valid(const uint8_t *data, uint16_t len);
+
+/* Feeds one report received at now_ms. Returns true when a whole payload is
+ * ready: *out points at it (into `data` or into r) and stays valid until the
+ * next call. */
+bool espos_ble_reasm_feed(espos_ble_reasm_t *r, uint32_t now_ms, const uint8_t addr[6],
+                          uint8_t sid, int status, const uint8_t *data, uint16_t len,
+                          const uint8_t **out, uint16_t *out_len);
+/* Forget pending chains without counting them (the scan stopped). */
+void espos_ble_reasm_reset(espos_ble_reasm_t *r);
+
 /* Ring buffer of pending advertisements.
  *
  * Fixed capacity with drop-oldest: a server that is slow, unreachable or

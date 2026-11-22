@@ -114,6 +114,7 @@ export interface SkWs {
 }
 export interface BleStatus {
   enabled: boolean; scanning: boolean; mac: string;
+  scan_mode?: "extended" | "legacy"; ext_adv_dropped?: number;
   scan_hits: number; adv_received: number; adv_posted: number; adv_dropped: number; adv_pending: number;
   post_success: number; post_fail: number; ws_connected: boolean;
   gatt_sessions: number; gatt_max: number;

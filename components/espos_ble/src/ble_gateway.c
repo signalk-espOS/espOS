@@ -137,7 +137,7 @@ static struct {
     session_t sessions[MAX_SESSIONS];
 
     /* config */
-    bool active_scan, control_ws;
+    bool active_scan, coded_phy, control_ws;
     uint32_t scan_int, scan_win, post_int, status_int, max_gatt;
 
     /* Set by gateway_task just before it deletes itself, so stop() can wait
@@ -264,7 +264,7 @@ static char *build_adv_body(const espos_ble_adv_t *ads, size_t n)
 
 /* Scratch for one POST and for the control socket's upgrade headers. Not on
  * the stack: the batch alone is POST_BATCH_MAX * sizeof(espos_ble_adv_t)
- * (~5 KB), which overflows the gateway task's stack the first time a POST
+ * (~5 KB, ~13 KB with BLE 5 payloads), which overflows the gateway task's stack the first time a POST
  * actually runs - and that only happens once a token exists, so it hides
  * until the device is fully provisioned. Not static either: .bss is internal
  * RAM, and on a PSRAM board these ~7 KB belong in PSRAM; espos_ble_start()
@@ -1288,6 +1288,8 @@ esp_err_t espos_ble_start(void)
     int32_t v;
     g.active_scan = false;
     espos_config_get_bool(ESPOS_CFG_NS_BLE, ESPOS_CFG_BLE_ACTIVE_SCAN, &g.active_scan);
+    g.coded_phy = false;
+    espos_config_get_bool(ESPOS_CFG_NS_BLE, ESPOS_CFG_BLE_CODED_PHY, &g.coded_phy);
     v = 320;
     espos_config_get_i32(ESPOS_CFG_NS_BLE, ESPOS_CFG_BLE_SCAN_INT_MS, &v);
     g.scan_int = (uint32_t)v;
@@ -1484,7 +1486,7 @@ esp_err_t espos_ble_start(void)
     xSemaphoreTakeRecursive(scan_mutex(), portMAX_DELAY);
     g.running = true;
     if (g.scan_suspend_count == 0) {
-        espos_ble_scan_start(g.active_scan, (uint16_t)g.scan_int, (uint16_t)g.scan_win);
+        espos_ble_scan_start(g.active_scan, g.coded_phy, (uint16_t)g.scan_int, (uint16_t)g.scan_win);
     } else {
         ESP_LOGI(TAG, "not scanning yet: %s", "suspended before the gateway started");
     }
@@ -1746,7 +1748,7 @@ static esp_err_t scan_resume_locked(void)
         return err;
     }
     ESP_LOGI(TAG, "scanning resumed");
-    return espos_ble_scan_start(g.active_scan, (uint16_t)g.scan_int, (uint16_t)g.scan_win);
+    return espos_ble_scan_start(g.active_scan, g.coded_phy, (uint16_t)g.scan_int, (uint16_t)g.scan_win);
 }
 
 bool espos_ble_scan_is_suspended(void) { return g.scan_suspend_count > 0; }
