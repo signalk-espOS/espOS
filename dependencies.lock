@@ -159,7 +159,7 @@ dependencies:
       type: idf
     version: 6.1.1
   joltwallet/littlefs:
-    component_hash: e1a0f4a6adf821759cb34703a91107bbdce5d7ff6f4728f40ab012bb87842974
+    component_hash: f633efcd615b58206ec1b131591f7fc5b212716603ebc24697900aab71e9d3bd
     dependencies:
     - name: idf
       require: private
@@ -167,7 +167,7 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.23.1
+    version: 1.23.3
   signalk-espos/espos_audio:
     dependencies:
     - name: idf
@@ -239,7 +239,7 @@ dependencies:
     - name: joltwallet/littlefs
       rules:
       - if: target != linux
-      version: ==1.23.1
+      version: ==1.23.3
     - name: signalk-espos/espos_event
       override_path: ../espos_event
       version: ^0.32.0
@@ -414,6 +414,6 @@ direct_dependencies:
 - signalk-espos/espos_sk_flow
 - signalk-espos/espos_time
 - signalk-espos/espos_wifi
-manifest_hash: fa9accda0094995279402c3e3e849372d9165a4e63fe188f57d9aba60df4f280
+manifest_hash: 676b5b30966f148fb6173aef1bda0a82a50619a70b2d5b3f15fb2781c2efe77e
 target: esp32s3
 version: 3.0.0
