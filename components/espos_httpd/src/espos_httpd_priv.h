@@ -22,7 +22,8 @@ esp_err_t espos_httpd_register_auth_api(void);
 
 /* auth.c: load the key and session lifetime from config (before the first
  * handler is registered), follow their changes, and the check the trampoline
- * runs for a protected endpoint — false means a 401/403/429 has been sent. */
+ * runs for a protected endpoint — false means a 401/403/429 has been sent
+ * (with Connection: close when the request has a body, which stays unread). */
 esp_err_t espos_httpd_auth_init(void);
 void espos_httpd_auth_config_changed(const char *ns, const char *key);
 bool espos_httpd_auth_enforce(httpd_req_t *req);

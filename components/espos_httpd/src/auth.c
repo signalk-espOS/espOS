@@ -21,6 +21,7 @@
  * cycles, counted in NVS across the cycles themselves because RTC memory does
  * not survive one.
  */
+#include <fcntl.h>
 #include <string.h>
 #include <strings.h>
 #include <sys/socket.h>
@@ -475,6 +476,35 @@ static esp_err_t send_verdict(httpd_req_t *req, espos_httpd_auth_verdict_t v)
     }
 }
 
+/* A refused request's body is never read. Left alone, esp_http_server
+ * drains it on its own task once the handler returns, and a client that
+ * trickles the body holds the web UI, the REST API and OTA until it is done.
+ * Read only what has already arrived, without waiting, so a client that sent
+ * a small body with its headers still gets the refusal rather than a reset,
+ * then close. Never wait for more: the wait would be on the one server task. */
+static void drain_refused_body(httpd_req_t *req)
+{
+    int fd = httpd_req_to_sockfd(req);
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+        httpd_resp_set_hdr(req, "Connection", "close");
+        return;
+    }
+    size_t left = req->content_len < CONFIG_ESPOS_HTTPD_MAX_BODY ? req->content_len : CONFIG_ESPOS_HTTPD_MAX_BODY;
+    char sink[256];
+    while (left > 0) {
+        /* httpd_req_recv first hands out what came in with the headers; once
+         * the socket is empty, the non-blocking read returns a timeout */
+        int r = httpd_req_recv(req, sink, left < sizeof(sink) ? left : sizeof(sink));
+        if (r <= 0) {
+            break;
+        }
+        left -= (size_t)r;
+    }
+    fcntl(fd, F_SETFL, flags); /* the verdict is sent on a blocking socket, as always */
+    httpd_resp_set_hdr(req, "Connection", "close");
+}
+
 bool espos_httpd_auth_enforce(httpd_req_t *req)
 {
     if (!s.lock) {
@@ -491,6 +521,9 @@ bool espos_httpd_auth_enforce(httpd_req_t *req)
                  v == ESPOS_HTTPD_AUTH_THROTTLED          ? "too many failed keys"
                  : v == ESPOS_HTTPD_AUTH_FORBIDDEN_ORIGIN ? "cross-site request"
                                                           : "no API key configured");
+    }
+    if (req->content_len > 0) {
+        drain_refused_body(req);
     }
     send_verdict(req, v);
     return false;

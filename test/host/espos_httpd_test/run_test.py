@@ -713,6 +713,45 @@ class AuthTests(unittest.TestCase):
         st, _, _, cfg = req("GET", "/api/v1/config?ns=httpd", headers=self.BEARER)
         self.assertEqual(cfg["httpd"]["api_key"], SENTINEL)
 
+    @staticmethod
+    def read_until_closed(sock, limit_s):
+        """Everything the server sends until it closes the socket, and how long that took."""
+        sock.settimeout(limit_s)
+        start = time.time()
+        data = b""
+        while True:
+            chunk = sock.recv(4096)
+            if not chunk:
+                return data, time.time() - start
+            data += chunk
+
+    def test_02a_refused_body_closes(self):
+        """A refused request's body is not left for the server task to drain:
+        one sent with the headers is read and answered, a trickled one is not
+        waited for, and either way the connection closes (docs/rest-api.md "Authentication")."""
+        body = b'{"app":{"label":"nope"}}'
+        with socket.create_connection(("127.0.0.1", PORT), timeout=5) as s:
+            s.sendall(b"PUT /api/v1/config HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\n"
+                      b"Content-Length: %d\r\n\r\n" % len(body) + body)
+            data, _ = self.read_until_closed(s, 5)
+        head = data.split(b"\r\n\r\n", 1)[0].decode()
+        self.assertTrue(head.startswith("HTTP/1.1 401"), head)
+        self.assertIn("connection: close", head.lower())
+        # a body that never arrives in full
+        with socket.create_connection(("127.0.0.1", PORT), timeout=5) as s:
+            s.sendall(b"PUT /api/v1/config HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\n"
+                      b"Content-Length: 100000\r\n\r\n{\"app\":")
+            start = time.time()
+            st, _, _, _ = req("GET", "/api/v1/system/ping")
+            self.assertEqual(st, 200)
+            self.assertLess(time.time() - start, 1)
+            data, took = self.read_until_closed(s, 5)
+        self.assertTrue(data.startswith(b"HTTP/1.1 401"), data[:64])
+        self.assertLess(took, 1)
+        # the settings did not change
+        _, _, _, cfg = req("GET", "/api/v1/config?ns=app", headers=self.BEARER)
+        self.assertNotEqual(cfg["app"].get("label"), "nope")
+
     def test_03_bearer(self):
         st, _, _, js = req("GET", "/api/v1/config", headers=self.BEARER)
         self.assertEqual(st, 200)

@@ -139,6 +139,14 @@ export interface Mock {
    * (null) when the request would get a 401 or 403 on the device.
    */
   events(headers: Record<string, string | undefined>, listener: (e: MockEvent) => void): (() => void) | null;
+  /**
+   * Authenticate a request before its body is read: the refusal it gets,
+   * with Connection: close, or the function that handles it once the body is
+   * in, without checking the credential a second time. The device never
+   * waits for a refused body (docs/rest-api.md "Authentication"), so a
+   * transport admits a request with a body before reading it.
+   */
+  admit(req: Omit<MockRequest, "body">): MockResponse | ((body: string) => Promise<MockResponse>);
   /** Stop every timer, so a test or a closed page leaves nothing running. */
   close(): void;
 }
@@ -541,13 +549,14 @@ export function createMock(opts: MockOptions): Mock {
     return null;
   }
 
-  function route(req: MockRequest): MockResponse {
+  const isPublicPath = (r: string) => r.startsWith("/auth/") || r === "/system/ping";
+
+  function route(req: MockRequest, admitted?: "none" | "bearer" | "cookie"): MockResponse {
     const url = new URL(req.path, "http://x");
     const r = url.pathname;
     const m = req.method;
     const h = req.headers;
-    const isPublic = r.startsWith("/auth/") || r === "/system/ping";
-    const authed = authenticate(m, h, isPublic);
+    const authed = admitted ?? authenticate(m, h, isPublicPath(r));
     if (typeof authed !== "string") return authed;
     // Before any handler, so no write can reach the state below: the demo is
     // something to look at. 403 is what a device answers a request it will
@@ -831,6 +840,29 @@ export function createMock(opts: MockOptions): Mock {
       } catch (e) {
         return Promise.resolve(err(500, "internal", String(e)));
       }
+    },
+    admit(req) {
+      let authed: ReturnType<typeof authenticate>;
+      try {
+        authed = authenticate(req.method, req.headers, isPublicPath(new URL(req.path, "http://x").pathname));
+      } catch (e) {
+        const fail = err(500, "internal", String(e));
+        return { ...fail, headers: { ...fail.headers, Connection: "close" } };
+      }
+      if (typeof authed !== "string") return { ...authed, headers: { ...authed.headers, Connection: "close" } };
+      // The device reads the body on its one server task, so nothing can
+      // change the key or end a session meanwhile; here another request can.
+      // A Bearer admission is kept while the key stands, so the key is not
+      // checked twice; a cookie is looked up again, which has no side effects.
+      const key = apiKey();
+      return (body) => {
+        try {
+          const still = authed !== "cookie" && apiKey() === key ? authed : undefined;
+          return Promise.resolve(route({ ...req, body }, still));
+        } catch (e) {
+          return Promise.resolve(err(500, "internal", String(e)));
+        }
+      };
     },
     events(headers, listener) {
       const authed = authenticate("GET", headers, false);
