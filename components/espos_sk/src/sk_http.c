@@ -344,6 +344,9 @@ esp_err_t espos_sk_http_perform(const espos_sk_http_req_t *rq, espos_sk_http_res
         r->err = err;
         return err;
     }
+    /* Before the allocation below, for the same reason as above: an empty
+     * 401 that cannot get its one-byte string is still a 401. */
+    r->status = status;
     if (!b.buf) {
         /* an empty reply still hands back a string */
         b.buf = calloc(1, 1);
@@ -352,7 +355,6 @@ esp_err_t espos_sk_http_perform(const espos_sk_http_req_t *rq, espos_sk_http_res
             return r->err;
         }
     }
-    r->status = status;
     r->body = b.buf;
     r->len = b.len;
     r->truncated = b.truncated;
