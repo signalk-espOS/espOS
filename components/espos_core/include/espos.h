@@ -117,8 +117,13 @@ const char *espos_board(void);
  * A binding generated from the headers records the value it was built
  * against and compares it with espos_abi_version() at run time.
  */
-#define ESPOS_ABI_VERSION 9
+#define ESPOS_ABI_VERSION 10
 /* History, so that a binding pinned to an older value can tell what moved:
+ *   10 espos_sk_http_resp_t and espos_sk_http_result_t gained local_error +
+ *      local_reason, espos_sk_tok_port_t gained stream_live and
+ *      espos_sk_tok_status_t gained local_error_count (all appended,
+ *      sizeof), so that a token check that never left the device does not
+ *      take the stream down -- espOS #331.
  *   9  espos_sk_report_unauthorized() returns esp_err_t instead of void, so
  *      that a caller reporting once can tell a report lost to a full queue
  *      -- espOS #284.

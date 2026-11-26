@@ -10,6 +10,7 @@
  * answers pings. Raises skLinkStalled when the stream stays down while WiFi
  * claims to be up — the one network condition a restart fixes.
  */
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -70,6 +71,12 @@
  * connection. */
 #define SK_WS_CONNECT_TIMEOUT_MS 8000
 
+/* How recent the last message from the server must be for the stream to
+ * count as live (espos_sk_ws_live()). The token machine keeps an approved
+ * state through a failed check while the stream is live, so this is how long
+ * a quiet stream is still taken as proof that the server is there. */
+#define SK_WS_LIVE_MS 60000
+
 static const char *TAG = "espos_skws";
 
 static struct {
@@ -87,6 +94,11 @@ static struct {
     espos_sk_ws_status_t st;
     bool sending;                    /* a delta message is being written; reported as pending */
     uint32_t connected_since_ms;
+    /* The last time the server sent us anything: the upgrade, then every
+     * payload read. Written by the ws task alone, read by the SK task
+     * (espos_sk_ws_live()); relaxed is enough, it is one timestamp and
+     * nothing else is published through it. */
+    _Atomic uint32_t last_rx_ms;
     uint32_t backoff_round;
     uint32_t retry_at_ms;
     char label[40];
@@ -743,17 +755,32 @@ static void ws_task(void *arg)
         bool net_up = espos_net_is_up();
         /* token "" is fine when the server runs without security (OPEN); the
          * token machine only exposes a server once it is usable */
+        bool allowed = espos_sk_stream_allowed();
         bool have = espos_sk_get_server(&srv) == ESP_OK && espos_sk_get_token(token, sizeof(token)) == ESP_OK &&
-                    espos_sk_stream_allowed();
+                    allowed;
         bool ready = s.enabled && net_up && have;
         check_stall(ready, connected, &down_since_ms);
         if (connected) {
             bool changed = strcmp(srv.host, cur_srv.host) != 0 || srv.port != cur_srv.port ||
                            srv.tls != cur_srv.tls || strcmp(token, cur_token) != 0;
             if (!ready || changed) {
-                ESP_LOGI(TAG, "closing stream (%s)", !s.enabled ? "disabled" : !net_up ? "network down"
-                                                                           : changed   ? "server/token changed"
-                                                                                       : "no server");
+                /* The token machine first: leaving APPROVED also blanks the
+                 * token, which reads as "changed", and that sent whoever read
+                 * the log looking for a new server or a revoked token when the
+                 * machine had only lost a check. */
+                char why[ESPOS_SK_MSG_MAX + 32];
+                if (!s.enabled) {
+                    snprintf(why, sizeof(why), "disabled");
+                } else if (!net_up) {
+                    snprintf(why, sizeof(why), "network down");
+                } else if (!allowed) {
+                    espos_sk_token_describe(why, sizeof(why));
+                } else if (changed) {
+                    snprintf(why, sizeof(why), "server/token changed");
+                } else {
+                    snprintf(why, sizeof(why), "no server");
+                }
+                ESP_LOGI(TAG, "closing stream (%s)", why);
                 esp_transport_close(ws);
                 connected = false;
                 set_stream_connected(false);
@@ -976,6 +1003,7 @@ static void ws_task(void *arg)
             espos_sk_meta_connected(&s.meta); /* the client task reconciles at once */
             s.st.last_error[0] = '\0';
             s.connected_since_ms = now_ms();
+            atomic_store_explicit(&s.last_rx_ms, s.connected_since_ms, memory_order_relaxed); /* the upgrade answered */
             unlock();
             ESP_LOGI(TAG, "stream connected");
             set_stream_connected(true);
@@ -1145,6 +1173,7 @@ static void ws_task(void *arg)
                     have = 0;
                 } else {
                     have += (size_t)r;
+                    atomic_store_explicit(&s.last_rx_ms, now_ms(), memory_order_relaxed);
                 }
                 int total = esp_transport_ws_get_read_payload_len(ws);
                 complete = espos_sk_ws_gather_step(&gather, (size_t)r, total > 0 ? (size_t)total : 0,
@@ -1269,6 +1298,18 @@ esp_err_t espos_sk_flush(uint32_t timeout_ms)
         }
         vTaskDelay(pdMS_TO_TICKS(10));
     }
+}
+
+bool espos_sk_ws_live(void)
+{
+    if (!s.lock) {
+        return false;
+    }
+    lock();
+    bool connected = s.st.connected;
+    unlock();
+    uint32_t t = atomic_load_explicit(&s.last_rx_ms, memory_order_relaxed);
+    return connected && t && now_ms() - t < SK_WS_LIVE_MS;
 }
 
 esp_err_t espos_sk_ws_get_status(espos_sk_ws_status_t *out)

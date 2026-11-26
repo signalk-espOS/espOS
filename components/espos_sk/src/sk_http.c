@@ -32,6 +32,7 @@
 #include "freertos/semphr.h"
 #include "cJSON.h"
 #include "esp_http_client.h"
+#include "esp_tls_errors.h" /* ESP_ERR_ESP_TLS_CANNOT_CREATE_SOCKET */
 #include "esp_log.h"
 
 #include "espos_net.h"
@@ -183,6 +184,12 @@ esp_err_t espos_sk_http_self_path(const char *sk_path, const char *suffix, char 
     return ESP_OK;
 }
 
+static void set_local(espos_sk_http_resp_t *r, const char *why)
+{
+    r->local_error = true;
+    snprintf(r->local_reason, sizeof(r->local_reason), "%s", why);
+}
+
 esp_err_t espos_sk_http_perform(const espos_sk_http_req_t *rq, espos_sk_http_resp_t *r)
 {
     memset(r, 0, sizeof(*r));
@@ -235,6 +242,9 @@ esp_err_t espos_sk_http_perform(const espos_sk_http_req_t *rq, espos_sk_http_res
             xSemaphoreGive(sem);
             free(b.buf);
             ESP_LOGW(TAG, "%s %s: deferred (%s)", method_name(rq->method), url, esp_err_to_name(hs));
+            if (hs == ESP_ERR_NO_MEM) {
+                set_local(r, "no memory for TLS");
+            }
             r->err = hs;
             return hs;
         }
@@ -244,6 +254,7 @@ esp_err_t espos_sk_http_perform(const espos_sk_http_req_t *rq, espos_sk_http_res
     esp_http_client_handle_t c = esp_http_client_init(&cfg);
     if (!c) {
         err = ESP_ERR_NO_MEM;
+        set_local(r, "no memory for the client");
     } else {
         const char *accept = rq->accept ? rq->accept : "application/json";
         if (accept[0]) {
@@ -260,6 +271,17 @@ esp_err_t espos_sk_http_perform(const espos_sk_http_req_t *rq, espos_sk_http_res
         }
         err = esp_http_client_perform(c);
         status = esp_http_client_get_status_code(c);
+        if (err != ESP_OK && status == 0) {
+            /* esp_http_client says ESP_ERR_HTTP_CONNECT for every connection
+             * that did not come up. The transport's last error tells a full
+             * socket table apart from a server that did not answer; read it
+             * before cleanup frees the handle that holds it. */
+            int tls_code = 0, tls_flags = 0;
+            if (esp_http_client_get_and_clear_last_tls_error(c, &tls_code, &tls_flags) ==
+                ESP_ERR_ESP_TLS_CANNOT_CREATE_SOCKET) {
+                set_local(r, "no free socket");
+            }
+        }
         esp_http_client_cleanup(c);
         if (err != ESP_OK && (status == 401 || status == 403)) {
             /* esp_http_client treats 401 as "needs auth" and fails perform()
@@ -343,6 +365,12 @@ static int leg_ex(const espos_sk_server_t *srv, espos_sk_http_method_t method, c
     if (out && r.cert_error) {
         out->cert_error = true;
         snprintf(out->cert_reason, sizeof(out->cert_reason), "%s", r.cert_reason);
+    }
+    /* Likewise a request that never left the device: the machine must not
+     * read it as the server's silence. */
+    if (out && r.local_error) {
+        out->local_error = true;
+        snprintf(out->local_reason, sizeof(out->local_reason), "%s", r.local_reason);
     }
     if (err != ESP_OK) {
         return 0;

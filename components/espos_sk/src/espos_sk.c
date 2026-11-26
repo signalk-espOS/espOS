@@ -245,6 +245,15 @@ static void p_status_changed(void *ctx)
     }
 }
 
+/* The stream is the better witness while it runs: it carries the same token
+ * and receives from the server all the time, where a check is one request
+ * that a full socket table or a busy server can fail. */
+static bool p_stream_live(void *ctx)
+{
+    (void)ctx;
+    return espos_sk_ws_live();
+}
+
 static const espos_sk_tok_port_t k_port = {
     .http_request = p_request,
     .http_poll = p_poll,
@@ -255,6 +264,7 @@ static const espos_sk_tok_port_t k_port = {
     .now_ms = p_now,
     .random = p_random,
     .status_changed = p_status_changed,
+    .stream_live = p_stream_live,
 };
 
 /* ------------------------------------------------------ config load */
@@ -1005,6 +1015,7 @@ static char *status_json_from(const espos_sk_tok_status_t *st, const char *sourc
     cJSON_AddNumberToObject(cnt, "denied", st->deny_count);
     cJSON_AddNumberToObject(cnt, "unauthorized", st->unauthorized_count);
     cJSON_AddNumberToObject(cnt, "cert_errors", st->cert_error_count);
+    cJSON_AddNumberToObject(cnt, "local_errors", st->local_error_count);
     cJSON *srv = cJSON_AddObjectToObject(root, "server");
     if (st->has_server) {
         cJSON_AddStringToObject(srv, "host", st->server.host);
@@ -1202,6 +1213,23 @@ const char *espos_sk_client_id(void)
 const char *espos_sk_vessel_context(void)
 {
     return s.vessel_context[0] ? s.vessel_context : NULL;
+}
+
+void espos_sk_token_describe(char *out, size_t n)
+{
+    if (!out || !n) {
+        return;
+    }
+    if (!s.lock) {
+        snprintf(out, n, "token machine not started");
+        return;
+    }
+    lock();
+    espos_sk_tok_state_t st = s.snap.state;
+    char err[ESPOS_SK_MSG_MAX];
+    snprintf(err, sizeof(err), "%s", s.snap.last_error);
+    unlock();
+    snprintf(out, n, "token %s%s%s", espos_sk_tok_state_str(st), err[0] ? ": " : "", err);
 }
 
 /* The stream may run when the token is approved, or when the server has

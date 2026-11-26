@@ -2584,6 +2584,7 @@ class SkTlsTests(unittest.TestCase):
         # sk.scheme is auto and the sim advertised the plaintext service type,
         # so the answer is http and no probe was needed.
         self.assertIn("cert_errors", js["token"]["counts"])
+        self.assertEqual(js["token"]["counts"]["local_errors"], 0)
         st, _, _, srv = req("GET", "/api/v1/sk/servers")
         self.assertEqual(srv["servers"][0]["scheme"], "http")
 

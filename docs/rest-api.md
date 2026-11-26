@@ -739,7 +739,7 @@ the cap is refused with `ESP_ERR_NO_MEM` and logged by `espos_sse`.
             "approved_s": 120, "next_action_s": 40, "last_check_s": 20,
             "last_http_status": 200, "last_error": "",
             "counts": {"requests": 1, "approved": 1, "denied": 0, "unauthorized": 0,
-                       "cert_errors": 0}},
+                       "cert_errors": 0, "local_errors": 0}},
   "server": {"host": "192.168.1.10", "port": 80, "self": "urn:mrn:signalk:uuid:…",
              "source": "discovered", "scheme": "http", "by_self": false, "name": "boat",
              "swname": "signalk-server", "swvers": "2.31.1"},
@@ -761,6 +761,16 @@ https` — what is actually in use, which under `sk.scheme = auto` is the only
 place to read it. `server.by_self` is true while the server stands in for the
 one the token or pending request belongs to, found by its self URN while that
 address is silent; refusals from it do not cost the token (signalk.md). The token itself is never returned.
+
+`counts.local_errors` counts token requests and checks that never left the
+device: no free socket, or no memory for the connection. `last_error` then
+says which resource ran out, for example `request not sent: no free socket
+on this device` instead of `server unreachable`. When it is the socket, the
+firmware opens more connections than `CONFIG_LWIP_MAX_SOCKETS` allows; the
+other causes are memory for the HTTP client or a TLS handshake. A check that fails this
+way, or that gets no reply while the stream is receiving, leaves an approved
+token approved and the stream running; `last_error` says `stream kept` until
+the next check succeeds.
 
 `cert_error` means the server's TLS certificate is not the one this device
 trusts. The token is kept (it is the transport that is wrong, not the

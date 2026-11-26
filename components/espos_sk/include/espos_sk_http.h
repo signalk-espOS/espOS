@@ -71,6 +71,12 @@ typedef struct {
      * says which way it differed. */
     bool cert_error;
     char cert_reason[64];
+    /* The request never left this device: no free socket, or no memory for
+     * the client or the TLS handshake. status is 0, as for an unreachable
+     * server, but the fix is on the device (CONFIG_LWIP_MAX_SOCKETS, fewer
+     * connections open at once), not on the network. local_reason names it. */
+    bool local_error;
+    char local_reason[32];
 } espos_sk_http_resp_t;
 
 /** Zeroed (or NULL) = 6000 ms, 16 KiB, Bearer on, 401/403 reported, Accept: application/json. */

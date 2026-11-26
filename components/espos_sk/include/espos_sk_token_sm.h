@@ -13,6 +13,10 @@
  *             ─ href gone (404/500 not found) ▶ IDLE (re-request)
  *   APPROVED  ─ periodic GET /signalk/v1/api/self with the token
  *             ─ 401/403 ▶ token invalidated ▶ IDLE
+ *             ─ no reply ▶ ERROR, unless the leg never left the device or
+ *               the stream is live: then APPROVED, checked again on backoff
+ *   OPEN      ─ re-POSTed every 60 s, staying OPEN while the answer is out;
+ *               no reply is handled as from APPROVED
  *   VERIFYING ─ 200 ▶ APPROVED (self URN learned)   ─ 401/403 ▶ IDLE
  *   any leg   ─ the server's certificate is not the trusted one ▶ CERT_ERROR
  *               (token kept, flat 60 s retry, stream held down)
@@ -146,6 +150,13 @@ typedef struct {
      * seconds. */
     bool cert_error;
     char cert_reason[64];
+    /* The request never left this device: no free socket, or no memory for
+     * the client. http_status is 0 here too, and on its own reads as "server
+     * unreachable" -- but it says nothing about the server or the token, so a
+     * check that fails this way must not cost an approved state. local_reason
+     * names the shortage for last_error. */
+    bool local_error;
+    char local_reason[32];
 } espos_sk_http_result_t;
 
 /* Port: everything the machine needs from the outside world. Actions are
@@ -160,6 +171,12 @@ typedef struct {
     uint32_t (*now_ms)(void *ctx);
     uint32_t (*random)(void *ctx);
     void (*status_changed)(void *ctx);
+    /* True while the delta stream is connected and has received a message
+     * recently: proof that the server is there and takes our token, better
+     * than one check request. A check that gets no reply then keeps the
+     * state APPROVED instead of taking the stream down. May be NULL (never
+     * live). */
+    bool (*stream_live)(void *ctx);
 } espos_sk_tok_port_t;
 
 typedef struct {
@@ -176,6 +193,7 @@ typedef struct {
     int last_http_status;
     char last_error[ESPOS_SK_MSG_MAX];
     uint32_t request_count, approve_count, deny_count, unauthorized_count, cert_error_count;
+    uint32_t local_error_count;   /* legs that failed on this device (local_error) */
     bool busy;                    /* an HTTP action is in flight */
 } espos_sk_tok_status_t;
 
