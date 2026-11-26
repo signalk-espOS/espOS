@@ -284,13 +284,17 @@ esp_err_t espos_sk_http_perform(const espos_sk_http_req_t *rq, espos_sk_http_res
             esp_err_t last = esp_http_client_get_and_clear_last_tls_error(c, &tls_code, &tls_flags);
             if (last == ESP_ERR_ESP_TLS_CANNOT_CREATE_SOCKET) {
                 set_local(r, "no free socket");
+            } else if (last == ESP_ERR_NO_MEM) {
+                /* esp-tls copies the host name before it connects, plaintext
+                 * or not, and says so when that copy fails. */
+                set_local(r, "no memory for the connection");
             }
 #if CONFIG_ESPOS_SK_TLS
             /* The handshake preflight checks the heap but reserves nothing,
              * so mbedTLS can still run short half way: esp-tls records the
              * mbedTLS code negated next to its own. */
-            else if (rq->srv->tls && (last == ESP_ERR_MBEDTLS_SSL_SETUP_FAILED || last == ESP_ERR_NO_MEM ||
-                                      tls_code == -MBEDTLS_ERR_SSL_ALLOC_FAILED)) {
+            else if (rq->srv->tls &&
+                     (last == ESP_ERR_MBEDTLS_SSL_SETUP_FAILED || tls_code == -MBEDTLS_ERR_SSL_ALLOC_FAILED)) {
                 set_local(r, "no memory for TLS handshake");
             }
 #endif
