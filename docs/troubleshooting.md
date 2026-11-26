@@ -234,7 +234,8 @@ Three places answer most questions before you get here:
     (`CONFIG_LWIP_MAX_ACTIVE_TCP`), and a TCP socket needs a connection when
     it is created, so a free slot in the table does not help above that cap.
     The TCP count is the same sum without the listeners, espos_httpd's 3 own
-    sockets and the DNS responder: 12 for espOS, 17 with both servers.
+    sockets and the DNS responder, plus a second voice orchestrator waiting
+    to be accepted: 12 for espOS, 18 with both servers.
     espos.defaults sets both to 24. Compare the two counts with the values
     in the build's `sdkconfig`:
 
@@ -248,7 +249,8 @@ Three places answer most questions before you get here:
 
     IDF applies a defaults file only to options the `sdkconfig` does not
     set yet, so after changing one, or updating espOS, delete the build's
-    `sdkconfig` before building again.
+    `sdkconfig` before building again. That also drops what was set with
+    `idf.py menuconfig`, so note those values first.
 
 **A PUT comes back `COMPLETED` with `statusCode 405 "PUT not supported for …"`**
 :   That is the server's real answer: no plugin on the server handles PUTs for

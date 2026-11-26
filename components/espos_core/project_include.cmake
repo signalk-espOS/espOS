@@ -79,7 +79,9 @@ endif()
 # The two optional servers count when their component is in the build. The
 # voice satellite (espos_voice, on the two targets esp-sr runs on; elsewhere
 # the component is an empty stub) holds 3: its listener, the orchestrator's
-# connection and the connection to a network wake service. The candump
+# connection and the connection to a network wake service. It serves one
+# orchestrator at a time, so a second one waits in its listen queue until
+# the first leaves: a TCP connection without a socket. The candump
 # server (espos_n2k) holds its listener and one per client,
 # CONFIG_ESPOS_N2K_CANDUMP_MAX_CLIENTS. A configure step sees only that the
 # component is linked, not whether the firmware starts the server, so a
@@ -91,7 +93,8 @@ endif()
 # that count a free slot in the table still ends in "Failed to create
 # socket", and a client connecting to a server on the device gets no answer.
 # The TCP count is the socket count without what is not a TCP connection:
-# espos_httpd's 3 own sockets, the DNS responder and each server's listener.
+# espos_httpd's 3 own sockets, the DNS responder and each server's listener,
+# plus the orchestrator waiting in the voice satellite's listen queue.
 set(_espos_sse_clients 3)
 if(DEFINED CONFIG_ESPOS_HTTPD_SSE_MAX_CLIENTS)
     set(_espos_sse_clients ${CONFIG_ESPOS_HTTPD_SSE_MAX_CLIENTS})
@@ -105,7 +108,7 @@ set(_espos_extra_tcp 0)
 set(_espos_extra_why "")
 if(DEFINED CONFIG_ESPOS_VOICE_WYOMING_PORT AND CONFIG_IDF_TARGET MATCHES "^esp32(s3|p4)$")
     math(EXPR _espos_extra_sockets "${_espos_extra_sockets} + 3")
-    math(EXPR _espos_extra_tcp "${_espos_extra_tcp} + 2")
+    math(EXPR _espos_extra_tcp "${_espos_extra_tcp} + 3")
     string(APPEND _espos_extra_why ", the voice satellite holds 3 (its listener, the orchestrator and a network wake service)")
 endif()
 if(DEFINED CONFIG_ESPOS_N2K_CANDUMP_PORT)
@@ -128,7 +131,7 @@ if(DEFINED CONFIG_LWIP_MAX_SOCKETS AND CONFIG_LWIP_MAX_SOCKETS LESS ${_espos_min
 endif()
 if(DEFINED CONFIG_LWIP_MAX_ACTIVE_TCP AND CONFIG_LWIP_MAX_ACTIVE_TCP LESS ${_espos_min_tcp})
     _espos_lint_report(
-        "CONFIG_LWIP_MAX_ACTIVE_TCP=${CONFIG_LWIP_MAX_ACTIVE_TCP}: lwIP caps TCP connections apart from the socket table, and a TCP socket takes its connection when it is created. The sockets above that are TCP connections come to ${_espos_min_tcp}: everything but espos_httpd's 3 own sockets, the DNS responder and any server's listener. Below that a free socket still fails with \"Failed to create socket\", and a client connecting to the device gets no answer."
+        "CONFIG_LWIP_MAX_ACTIVE_TCP=${CONFIG_LWIP_MAX_ACTIVE_TCP}: lwIP caps TCP connections apart from the socket table, and a TCP socket takes its connection when it is created. The sockets above that are TCP connections come to ${_espos_min_tcp}: everything but espos_httpd's 3 own sockets, the DNS responder and any server's listener, plus a second voice orchestrator waiting to be accepted. Below that a free socket still fails with \"Failed to create socket\", and a client connecting to the device gets no answer."
         "CONFIG_LWIP_MAX_ACTIVE_TCP=${_espos_min_tcp}")
 endif()
 

@@ -22,11 +22,12 @@ sat.start();
 
 The satellite holds up to 3 sockets: its listener, the orchestrator's
 connection, and the connection to a network wake service when the wake
-word is detected on the server. It serves one orchestrator at a time and
-closes a second one. espOS's configure check counts the 3 in
-`CONFIG_LWIP_MAX_SOCKETS` and the 2 connections in
-`CONFIG_LWIP_MAX_ACTIVE_TCP` on the two targets the satellite runs on, and
-espos.defaults has room for them.
+word is detected on the server. It serves one orchestrator at a time: a
+second one waits in the listen queue, with a TCP connection but no socket,
+until the first disconnects. espOS's configure check counts the 3 sockets
+in `CONFIG_LWIP_MAX_SOCKETS` and the 3 connections (both orchestrators and
+the wake service) in `CONFIG_LWIP_MAX_ACTIVE_TCP` on the two targets the
+satellite runs on, and espos.defaults has room for them.
 
 ## espos_audio
 

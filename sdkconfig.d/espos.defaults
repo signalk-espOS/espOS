@@ -63,11 +63,12 @@ CONFIG_LWIP_MAX_SOCKETS=24
 
 # lwIP caps TCP connections on their own, at 16, and a TCP socket takes its
 # connection when it is created, so a cap below the table turns a free slot
-# into the same "Failed to create socket". The connections above come to 17
-# with both servers (the listeners, espos_httpd's own sockets and the DNS
-# responder are not TCP connections). lwIP takes each connection from the
-# heap when it opens, so the cap costs nothing and matches the table; a
-# firmware that raises the table raises this with it.
+# into the same "Failed to create socket". The connections above come to 18
+# with both servers: the listeners, espos_httpd's own sockets and the DNS
+# responder are not TCP connections, and a second voice orchestrator waiting
+# in the satellite's listen queue is one without a socket. lwIP takes each
+# connection from the heap when it opens, so the cap costs nothing and
+# matches the table; a firmware that raises the table raises this with it.
 CONFIG_LWIP_MAX_ACTIVE_TCP=24
 
 # ---- WebSocket upgrade. tcp_transport builds the whole upgrade request in one

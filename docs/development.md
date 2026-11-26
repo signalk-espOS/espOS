@@ -38,7 +38,8 @@ commented). Builds are optimised for size (`-Os`), which keeps a 4 MB
 board's fixed app slot from filling up; the debug profile goes back to
 `-Og`, which keeps more locals and line numbers for backtraces and a debugger. After changing any defaults file delete the build's `sdkconfig`
 — IDF applies defaults only to options the existing `sdkconfig` does not
-already set.
+already set. That also drops what was set with `idf.py menuconfig`, so note
+those values first.
 
 ## Web UI
 
