@@ -193,8 +193,8 @@ typedef struct {
     int last_http_status;
     char last_error[ESPOS_SK_MSG_MAX];
     uint32_t request_count, approve_count, deny_count, unauthorized_count, cert_error_count;
-    uint32_t local_error_count;   /* legs that failed on this device (local_error) */
     bool busy;                    /* an HTTP action is in flight */
+    uint32_t local_error_count;   /* legs that failed on this device (local_error) */
 } espos_sk_tok_status_t;
 
 typedef struct espos_sk_tok_sm {
