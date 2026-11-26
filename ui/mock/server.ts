@@ -89,6 +89,15 @@ export function startMock(port = 8484): http.Server {
       req.on("close", () => { close(); clearInterval(ping); });
       return;
     }
+    const hasBody = (req.headers["content-length"] ?? "0") !== "0" || req.headers["transfer-encoding"] !== undefined;
+    if (hasBody) {
+      // Authenticated before the body is read, as the device does: it never waits for a refused one.
+      const admitted = mock.admit({ method, path: r, headers });
+      const out = typeof admitted === "function" ? await admitted(await readBody(req)) : admitted;
+      res.writeHead(out.status, out.headers);
+      res.end(out.body);
+      return;
+    }
     const out = await mock.handle({ method, path: r, headers, body: await readBody(req) });
     res.writeHead(out.status, out.headers);
     res.end(out.body);

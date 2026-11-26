@@ -70,3 +70,44 @@ void test("the development mock still writes", async () => {
     mock.close();
   }
 });
+
+void test("a request with a body is authenticated once, before it is read", async () => {
+  const mock = createMock({ schema });
+  try {
+    const set = await mock.handle({ method: "PUT", path: "/config", headers: json, body: '{"httpd":{"api_key":"k"}}' });
+    assert.equal(set.status, 200);
+    const refused = mock.admit({ method: "PUT", path: "/config", headers: json });
+    assert.ok(typeof refused !== "function");
+    assert.equal(refused.status, 401);
+    assert.equal(refused.headers["Connection"], "close");
+    assert.equal(typeof mock.admit({ method: "POST", path: "/auth/login", headers: json }), "function");
+    const broken = mock.admit({ method: "PUT", path: "//", headers: json });
+    assert.ok(typeof broken !== "function");
+    assert.equal(broken.status, 500);
+    // A good key admitted before four wrong ones does not clear their count when its body arrives.
+    const upload = mock.admit({ method: "PUT", path: "/config", headers: { ...json, authorization: "Bearer k" } });
+    assert.equal(typeof upload, "function");
+    const wrong = { method: "GET", path: "/config", headers: { authorization: "Bearer nope" }, body: "" };
+    for (let i = 0; i < 4; i++) assert.equal((await mock.handle(wrong)).status, 401);
+    if (typeof upload === "function") assert.equal((await upload('{"wifi":{"ssid1":"Other"}}')).status, 200);
+    assert.equal((await mock.handle(wrong)).status, 401); // the fifth wrong key starts the lockout
+    assert.equal((await mock.handle(wrong)).status, 429);
+  } finally {
+    mock.close();
+  }
+});
+
+void test("an admission lapses when the key changes before the body arrives", async () => {
+  const mock = createMock({ schema });
+  try {
+    await mock.handle({ method: "PUT", path: "/config", headers: json, body: '{"httpd":{"api_key":"k"}}' });
+    const old = { ...json, authorization: "Bearer k" };
+    const paused = mock.admit({ method: "PUT", path: "/config", headers: old });
+    assert.equal(typeof paused, "function");
+    const rekey = await mock.handle({ method: "PUT", path: "/config", headers: old, body: '{"httpd":{"api_key":"k2"}}' });
+    assert.equal(rekey.status, 200);
+    if (typeof paused === "function") assert.equal((await paused('{"httpd":{"api_key":"k3"}}')).status, 401);
+  } finally {
+    mock.close();
+  }
+});
