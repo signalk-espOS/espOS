@@ -61,7 +61,10 @@ static esp_err_t trampoline(httpd_req_t *req)
     const route_t *r = req->user_ctx;
     req->user_ctx = r->user_ctx; /* the handler sees what it registered */
     if (!(r->flags & ESPOS_HTTPD_PUBLIC) && !espos_httpd_auth_enforce(req)) {
-        return ESP_OK; /* the 401/403/429 has been sent */
+        /* the 401/403/429 has been sent; with a body, it said Connection:
+         * close, and ESP_FAIL closes the socket before the server drains
+         * what is left of it */
+        return req->content_len > 0 ? ESP_FAIL : ESP_OK;
     }
     return r->handler(req);
 }

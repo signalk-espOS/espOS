@@ -62,6 +62,13 @@ open ([security.md](security.md)). Otherwise:
 | `403` | `auth_unconfigured` | the build has `CONFIG_ESPOS_HTTPD_AUTH_REQUIRED=y` and no key is set yet; set one from the portal, which is exempt exactly while that is true |
 | `429` | `too_many_attempts` | five wrong keys within 60 s: every key check (login and Bearer, the right key too) answers this for 30 s, `Retry-After` says how long; live cookies keep working |
 
+A refused request that has a body is answered with `Connection: close`. The
+device reads only what of the body has already arrived, so a small body sent
+with the headers still gets the status, and then closes the connection; it
+never waits for the rest, because the one server task would wait with it and
+every other client behind it. A client still sending its body may see a
+connection reset instead of the status.
+
 The check runs before the handler, for every endpoint registered through
 `espos_httpd_register()` — an application's own included; an endpoint that
 must stay open registers with `espos_httpd_register_ex(uri, ESPOS_HTTPD_PUBLIC)`.
