@@ -130,6 +130,20 @@ static void do_request(espos_sk_tok_sm_t *sm)
     notify(sm);
 }
 
+/* The open server's periodic re-POST (404 = still open, 202 = security got
+ * switched on). Unlike do_request it stays OPEN while the answer is out: the
+ * stream may run only in APPROVED and OPEN, so a detour through IDLE closed
+ * it for the length of every probe, once a minute, on every server that runs
+ * without security. */
+static void do_open_probe(espos_sk_tok_sm_t *sm)
+{
+    sm->st.busy = true;
+    sm->st.request_count++;
+    cancel(sm);
+    sm->port->http_request(sm->ctx, &sm->st.server, &sm->cfg);
+    notify(sm);
+}
+
 static void do_poll(espos_sk_tok_sm_t *sm)
 {
     sm->st.state = ESPOS_SK_TOK_REQUESTED;
@@ -150,10 +164,9 @@ static void do_verify(espos_sk_tok_sm_t *sm, bool as_check)
     notify(sm);
 }
 
-static void enter_error(espos_sk_tok_sm_t *sm, const char *msg)
+/* The next retry on the error ladder: 10 s doubling to 5 min, ±20 % jitter. */
+static void arm_error_backoff(espos_sk_tok_sm_t *sm)
 {
-    sm->st.state = ESPOS_SK_TOK_ERROR;
-    set_error(sm, msg);
     uint32_t d = sm->error_backoff_ms;
     /* ±20 % jitter */
     uint32_t j = sm->port->random(sm->ctx) % (d / 5 + 1);
@@ -164,7 +177,66 @@ static void enter_error(espos_sk_tok_sm_t *sm, const char *msg)
             sm->error_backoff_ms = ERR_MAX_MS;
         }
     }
+}
+
+static void enter_error(espos_sk_tok_sm_t *sm, const char *msg)
+{
+    sm->st.state = ESPOS_SK_TOK_ERROR;
+    set_error(sm, msg);
+    arm_error_backoff(sm);
     notify(sm);
+}
+
+/* A leg that got no answer. Said apart from "server unreachable" when the
+ * request never left this device: that one is fixed on the device (sockets,
+ * memory), and reading it as a network or server problem sends whoever looks
+ * at the status to the wrong place. */
+static void enter_no_reply(espos_sk_tok_sm_t *sm, const espos_sk_http_result_t *r)
+{
+    if (r->local_error) {
+        char m[ESPOS_SK_MSG_MAX];
+        snprintf(m, sizeof(m), "request not sent: %s on this device", r->local_reason[0] ? r->local_reason : "no resources");
+        enter_error(sm, m);
+        return;
+    }
+    enter_error(sm, "server unreachable");
+}
+
+/* A check from APPROVED (or the probe from OPEN) that failed without the
+ * server saying no. Leaving either state takes the stream down
+ * (espos_sk_stream_allowed()), so it is left only when the failure may be the
+ * server's: not when the request never got off the device, and not while the
+ * stream shows the server is there and taking our token. Both happened together on a panel whose socket table ran
+ * full: the check could not open a socket, and the stream it then closed had
+ * been receiving frames the whole time.
+ *
+ * The check is retried on the error ladder meanwhile. A pending plaintext
+ * second opinion stays pending: nothing has answered for or against the
+ * token, so plain_unauth_streak is left as it is. Returns true when held. */
+static bool hold_streaming(espos_sk_tok_sm_t *sm, const espos_sk_http_result_t *r)
+{
+    if (sm->st.state != ESPOS_SK_TOK_APPROVED && sm->st.state != ESPOS_SK_TOK_OPEN) {
+        return false;
+    }
+    bool live = sm->port->stream_live && sm->port->stream_live(sm->ctx);
+    if (!r->local_error && !live) {
+        return false;
+    }
+    char why[48];
+    if (r->local_error) {
+        snprintf(why, sizeof(why), "%s on this device", r->local_reason[0] ? r->local_reason : "no resources");
+    } else if (r->http_status == 0) {
+        snprintf(why, sizeof(why), "no reply");
+    } else {
+        snprintf(why, sizeof(why), "HTTP %d", r->http_status);
+    }
+    char m[ESPOS_SK_MSG_MAX];
+    snprintf(m, sizeof(m), "%s failed (%.40s); stream kept, checking again",
+             sm->st.state == ESPOS_SK_TOK_OPEN ? "security probe" : "token check", why);
+    set_error(sm, m);
+    arm_error_backoff(sm);
+    notify(sm);
+    return true;
 }
 
 /* The transport refused the server. The token is kept on purpose: it is still
@@ -426,11 +498,14 @@ void espos_sk_tok_event(espos_sk_tok_sm_t *sm, espos_sk_tok_event_t ev, const vo
             evaluate(sm);
             return;
         }
-        if (sm->st.state != ESPOS_SK_TOK_IDLE || !sm->st.busy) {
-            return; /* stale */
+        if ((sm->st.state != ESPOS_SK_TOK_IDLE && sm->st.state != ESPOS_SK_TOK_OPEN) || !sm->st.busy) {
+            return; /* stale (OPEN: the probe from do_open_probe) */
         }
         sm->st.busy = false;
         sm->st.last_http_status = r->http_status;
+        if (r->local_error) {
+            sm->st.local_error_count++;
+        }
         if (r->cert_error) {
             enter_cert_error(sm, r->cert_reason);
             return;
@@ -527,8 +602,11 @@ void espos_sk_tok_event(espos_sk_tok_sm_t *sm, espos_sk_tok_event_t ev, const vo
             notify(sm);
             return;
         }
+        if (hold_streaming(sm, r)) {
+            return;
+        }
         if (r->http_status == 0) {
-            enter_error(sm, "server unreachable");
+            enter_no_reply(sm, r);
         } else if (r->message[0]) {
             /* Prefer what the server said over restating its status code. On a
              * 400 that is not the duplicate case above, its message is the only
@@ -564,6 +642,9 @@ void espos_sk_tok_event(espos_sk_tok_sm_t *sm, espos_sk_tok_event_t ev, const vo
         }
         sm->st.busy = false;
         sm->st.last_http_status = r->http_status;
+        if (r->local_error) {
+            sm->st.local_error_count++;
+        }
         if (r->cert_error) {
             enter_cert_error(sm, r->cert_reason);
             return;
@@ -637,7 +718,7 @@ void espos_sk_tok_event(espos_sk_tok_sm_t *sm, espos_sk_tok_event_t ev, const vo
             return;
         }
         if (r->http_status == 0) {
-            enter_error(sm, "server unreachable");
+            enter_no_reply(sm, r);
         } else {
             char m[ESPOS_SK_MSG_MAX];
             snprintf(m, sizeof(m), "poll failed (HTTP %d)", r->http_status);
@@ -661,6 +742,9 @@ void espos_sk_tok_event(espos_sk_tok_sm_t *sm, espos_sk_tok_event_t ev, const vo
         }
         sm->st.busy = false;
         sm->st.last_http_status = r->http_status;
+        if (r->local_error) {
+            sm->st.local_error_count++;
+        }
         sm->st.last_check_ms = now(sm);
         if (r->cert_error) {
             enter_cert_error(sm, r->cert_reason);
@@ -718,8 +802,11 @@ void espos_sk_tok_event(espos_sk_tok_sm_t *sm, espos_sk_tok_event_t ev, const vo
             do_request(sm);
             return;
         }
+        if (hold_streaming(sm, r)) {
+            return;
+        }
         if (r->http_status == 0) {
-            enter_error(sm, "server unreachable");
+            enter_no_reply(sm, r);
         } else {
             char m[ESPOS_SK_MSG_MAX];
             snprintf(m, sizeof(m), "check failed (HTTP %d)", r->http_status);
@@ -749,7 +836,7 @@ void espos_sk_tok_event(espos_sk_tok_sm_t *sm, espos_sk_tok_event_t ev, const vo
             /* GET /self succeeds without a token when allow_readonly is on,
              * so a re-POST is the only reliable probe: 404 = still open,
              * 202 = security got enabled and we are already in the queue. */
-            do_request(sm);
+            do_open_probe(sm);
             break;
         case ESPOS_SK_TOK_ERROR:
         case ESPOS_SK_TOK_CERT_ERROR:

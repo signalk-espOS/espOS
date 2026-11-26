@@ -288,11 +288,11 @@ export function createMock(opts: MockOptions): Mock {
   }
   interface SkToken {
     state: string; has_token: boolean; busy: boolean; last_http_status: number; last_error: string;
-    counts: { requests: number; approved: number; denied: number; unauthorized: number };
+    counts: { requests: number; approved: number; denied: number; unauthorized: number; local_errors: number };
     pending_s?: number; pending_href?: string; approved_s?: number;
   }
   const sk = {
-    token: { state: "no_server", has_token: false, busy: false, last_http_status: 0, last_error: "", counts: { requests: 0, approved: 0, denied: 0, unauthorized: 0 } } as SkToken,
+    token: { state: "no_server", has_token: false, busy: false, last_http_status: 0, last_error: "", counts: { requests: 0, approved: 0, denied: 0, unauthorized: 0, local_errors: 0 } } as SkToken,
     server: { source: "none" } as SkServer, client_id: profile.clientId, vessel_context: profile.vesselContext, description: `espOS ${profile.hostname}`, permissions: "readwrite",
     discovery: { enabled: true, count: 0, last_s: null as number | null },
     ws: { enabled: true, connected: false, reconnects: 0, sent: 0, send_errors: 0, pending: 0, buffered: 0, buffered_bytes: 0, dropped: 0, last_error: "", meta: { declared: 3, reconciled: 0 }, in: { subs: 2, frames: 0, received: 0 }, put: { pending: 0, ok: 0, failed: 0 } },

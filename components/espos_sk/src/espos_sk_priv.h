@@ -271,6 +271,12 @@ void espos_sk_ws_meta_round(void);
 /* JSON snippet for the status document. */
 char *espos_sk_ws_status_json(void);
 bool espos_sk_stream_allowed(void);
+/* Connected, and the server sent something within the last minute. Feeds the
+ * token machine's stream_live port. Any task. */
+bool espos_sk_ws_live(void);
+/* "token <state>: <last error>" for a log line that says why the stream may
+ * not run. Any task. */
+void espos_sk_token_describe(char *out, size_t n);
 
 /* SignalK clock fallback: follows navigation.datetime while espos_time is
  * unset, and stands down once a better source syncs (sk_time.c). */

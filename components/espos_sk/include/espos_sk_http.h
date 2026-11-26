@@ -61,7 +61,8 @@ extern "C" {
 #define ESPOS_SK_URL_MAX 384
 
 typedef struct {
-    int status;      /* HTTP status; 0 when no reply arrived (see err) */
+    int status;      /* HTTP status; 0 when no reply arrived (see err). Also set with
+                      * err == ESP_ERR_NO_MEM when a reply came but its body could not be kept */
     esp_err_t err;   /* the function's return value, kept with the reply */
     char *body;      /* malloc'ed, NUL-terminated, "" for an empty reply; NULL when err != ESP_OK */
     size_t len;      /* bytes in body (excluding the NUL) */
@@ -73,6 +74,12 @@ typedef struct {
      * says which way it differed. */
     bool cert_error;
     char cert_reason[64];
+    /* The request never left this device: no free socket, or no memory for
+     * the client or the TLS handshake. status is 0, as for an unreachable
+     * server, but the fix is on the device (CONFIG_LWIP_MAX_SOCKETS, fewer
+     * connections open at once), not on the network. local_reason names it. */
+    bool local_error;
+    char local_reason[32];
 } espos_sk_http_resp_t;
 
 /** Zeroed (or NULL) = 6000 ms, 16 KiB, Bearer on, 401/403 reported, Accept: application/json. */

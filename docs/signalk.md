@@ -68,7 +68,8 @@ NO_SERVER ──server known──▶ evaluate:
                                             {clientId, description, permissions}
         202 {state:PENDING, href}   ▶ REQUESTED, href persisted
         404 (security disabled)     ▶ OPEN  (no token needed; re-POSTed every 60 s,
-                                            GET /self is blind to security when allow_readonly is on)
+                                            GET /self is blind to security when allow_readonly is on;
+                                            stays OPEN, stream up, while the probe is out)
         403 (device requests off)   ▶ DENIED
         400 "already requested"     ▶ ERROR, retry 60 s doubling to 10 min
         unreachable / 5xx           ▶ ERROR, backoff 10 s → 5 min
@@ -80,6 +81,9 @@ REQUESTED: GET href every 5 s, ×1.5 up to 60 s
 VERIFYING / APPROVED: GET /signalk/v1/api/self with Bearer
         200                         ▶ APPROVED (self URN learned/updated), re-check every check_s
         401 / 403                   ▶ token dropped ▶ IDLE (request again)
+        no reply / 5xx              ▶ ERROR, backoff 10 s → 5 min; from APPROVED only
+                                      when the stream is quiet and the request left the
+                                      device, otherwise APPROVED, checked again on that backoff
 APPROVED + any other SK call reporting 401/403 (espos_sk_report_unauthorized) ▶ IDLE
 ```
 
@@ -125,6 +129,14 @@ What is worth knowing about it:
   device to the twin for good. A token saved by older firmware has no address
   yet and learns it from its first successful check over plain http. Over TLS
   there is no separate check, so such a token keeps matching by `self` only.
+* **A failed check doesn't take a running stream down.** The stream stops
+  whenever the token is not approved. So a check that gets no answer while
+  the stream is receiving keeps the token approved and tries again on the
+  error backoff: the stream carries the same token and is better proof than
+  one request. The same goes for a check that never left the device, because
+  every socket was taken or memory ran short. Only a 401 or 403 counts
+  against the token. `GET /sk/status` shows `stream kept` in `last_error`
+  meanwhile, and counts the device-side failures in `counts.local_errors`.
 * **A pending request survives a reboot.** Its `href` is saved with the
   server it belongs to, so a device restarted while waiting for approval goes
   on polling instead of asking again.
@@ -519,7 +531,10 @@ espos_sk_ws_url("/signalk/v1/stream", url, sizeof(url)); /* ws(s)://… */
 ```
 
 * **The reply** has `status` (0 when nothing came back), `body` (allocated,
-  NUL-terminated, `""` for an empty reply), `len` and `truncated`. The call
+  NUL-terminated, `""` for an empty reply), `len` and `truncated`.
+  `local_error` is set when the request never left the device (no free
+  socket, no memory), with `local_reason` saying which; `status` is 0 then
+  too, but the server was never asked. The call
   returns `ESP_OK` whenever a reply arrived, so a 404 or 500 counts as
   success; check `status`. `ESP_ERR_INVALID_STATE` means no server is
   chosen, `ESP_ERR_TIMEOUT` that no connection slot came free, and anything

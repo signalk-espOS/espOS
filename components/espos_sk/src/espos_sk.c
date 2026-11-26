@@ -67,6 +67,11 @@ static struct {
     action_t action;
     char action_href[ESPOS_SK_HREF_MAX];
     char action_token[ESPOS_SK_TOKEN_CAP];
+    /* The server the machine aimed the queued action at. A leg runs against
+     * this, not against whatever is selected when it runs: an action kept
+     * queued (run_action) must not carry its token to a server chosen in
+     * the meantime. The machine drops the answer as stale either way. */
+    espos_sk_server_t action_srv;
     uint32_t timer_due_ms;           /* 0 = none */
     uint32_t discover_due_ms;
     bool discovery_enabled;
@@ -139,22 +144,22 @@ static void unlock(void) { xSemaphoreGive(s.lock); }
 static void p_request(void *ctx, const espos_sk_server_t *srv, const espos_sk_tok_cfg_t *cfg)
 {
     (void)ctx;
-    (void)srv;
     (void)cfg;
     s.action = ACT_REQUEST;
+    s.action_srv = *srv;
 }
 static void p_poll(void *ctx, const espos_sk_server_t *srv, const char *href)
 {
     (void)ctx;
-    (void)srv;
     s.action = ACT_POLL;
+    s.action_srv = *srv;
     snprintf(s.action_href, sizeof(s.action_href), "%s", href);
 }
 static void p_verify(void *ctx, const espos_sk_server_t *srv, const char *token)
 {
     (void)ctx;
-    (void)srv;
     s.action = ACT_VERIFY;
+    s.action_srv = *srv;
     snprintf(s.action_token, sizeof(s.action_token), "%s", token);
 }
 static void p_save(void *ctx, const espos_sk_tok_store_t *st)
@@ -245,6 +250,15 @@ static void p_status_changed(void *ctx)
     }
 }
 
+/* The stream is the better witness while it runs: it carries the same token
+ * and receives from the server all the time, where a check is one request
+ * that a full socket table or a busy server can fail. */
+static bool p_stream_live(void *ctx)
+{
+    (void)ctx;
+    return espos_sk_ws_live();
+}
+
 static const espos_sk_tok_port_t k_port = {
     .http_request = p_request,
     .http_poll = p_poll,
@@ -255,6 +269,7 @@ static const espos_sk_tok_port_t k_port = {
     .now_ms = p_now,
     .random = p_random,
     .status_changed = p_status_changed,
+    .stream_live = p_stream_live,
 };
 
 /* ------------------------------------------------------ config load */
@@ -843,15 +858,21 @@ static void maybe_rotate_unreachable(void)
     select_server();
 }
 
-static void run_action(void)
+/* Runs the leg the machine asked for and feeds it the result. Returns false
+ * when the result could not even be allocated: the action then stays queued
+ * and runs on the next pass of the task loop, a second or less later. The
+ * machine sits busy until it answers, and every timer is ignored while it
+ * does, so dropping the action would leave it busy for good. */
+static bool run_action(void)
 {
     action_t a = s.action;
-    s.action = ACT_NONE;
     espos_sk_http_result_t *r = calloc(1, sizeof(*r));
     if (!r) {
-        return;
+        ESP_LOGW(TAG, "no memory for a token request's result; trying again shortly");
+        return false;
     }
-    espos_sk_server_t srv = s.server;
+    s.action = ACT_NONE;
+    espos_sk_server_t srv = s.action_srv;
     switch (a) {
     case ACT_REQUEST:
         espos_sk_http_request(&srv, &s.cfg, r);
@@ -877,6 +898,7 @@ static void run_action(void)
         select_server();
     }
     maybe_rotate_unreachable();
+    return true;
 }
 
 static void sk_task(void *arg)
@@ -921,8 +943,7 @@ static void sk_task(void *arg)
             s.net_was_up = up;
         }
         /* 1. run whatever the machine asked for (blocking HTTP) */
-        while (s.action != ACT_NONE) {
-            run_action();
+        while (s.action != ACT_NONE && run_action()) {
         }
         /* 2. timers */
         uint32_t t = now_ms();
@@ -1005,6 +1026,7 @@ static char *status_json_from(const espos_sk_tok_status_t *st, const char *sourc
     cJSON_AddNumberToObject(cnt, "denied", st->deny_count);
     cJSON_AddNumberToObject(cnt, "unauthorized", st->unauthorized_count);
     cJSON_AddNumberToObject(cnt, "cert_errors", st->cert_error_count);
+    cJSON_AddNumberToObject(cnt, "local_errors", st->local_error_count);
     cJSON *srv = cJSON_AddObjectToObject(root, "server");
     if (st->has_server) {
         cJSON_AddStringToObject(srv, "host", st->server.host);
@@ -1202,6 +1224,23 @@ const char *espos_sk_client_id(void)
 const char *espos_sk_vessel_context(void)
 {
     return s.vessel_context[0] ? s.vessel_context : NULL;
+}
+
+void espos_sk_token_describe(char *out, size_t n)
+{
+    if (!out || !n) {
+        return;
+    }
+    if (!s.lock) {
+        snprintf(out, n, "token machine not started");
+        return;
+    }
+    lock();
+    espos_sk_tok_state_t st = s.snap.state;
+    char err[ESPOS_SK_MSG_MAX];
+    snprintf(err, sizeof(err), "%s", s.snap.last_error);
+    unlock();
+    snprintf(out, n, "token %s%s%s", espos_sk_tok_state_str(st), err[0] ? ": " : "", err);
 }
 
 /* The stream may run when the token is approved, or when the server has

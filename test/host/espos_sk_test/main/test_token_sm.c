@@ -24,6 +24,7 @@ static struct {
     espos_sk_server_t last_poll_srv;
     espos_sk_tok_store_t saved;
     uint32_t rnd;
+    bool live; /* what the stream_live port answers */
 } F;
 
 static void f_request(void *ctx, const espos_sk_server_t *srv, const espos_sk_tok_cfg_t *cfg)
@@ -79,6 +80,11 @@ static void f_notify(void *ctx)
     (void)ctx;
     F.notifies++;
 }
+static bool f_live(void *ctx)
+{
+    (void)ctx;
+    return F.live;
+}
 
 static const espos_sk_tok_port_t PORT = {
     .http_request = f_request,
@@ -90,6 +96,7 @@ static const espos_sk_tok_port_t PORT = {
     .now_ms = f_now,
     .random = f_random,
     .status_changed = f_notify,
+    .stream_live = f_live,
 };
 
 static espos_sk_tok_sm_t SM;
@@ -139,6 +146,23 @@ static void verify_result(int status, const char *self)
     espos_sk_http_result_t r = { .http_status = status };
     if (self) strcpy(r.self, self);
     espos_sk_tok_event(&SM, ESPOS_SK_EV_VERIFY_RESULT, &r);
+}
+/* A leg that never left the device: no socket, no memory. */
+static void verify_result_local(const char *why)
+{
+    espos_sk_http_result_t r = { .http_status = 0, .local_error = true };
+    strcpy(r.local_reason, why);
+    espos_sk_tok_event(&SM, ESPOS_SK_EV_VERIFY_RESULT, &r);
+}
+/* Started, server A known, stored token verified: APPROVED over plaintext. */
+static void approved_on_a(void)
+{
+    espos_sk_tok_store_t st = { .token = "tok.en.9", .token_self = "urn:mrn:signalk:uuid:aaaa" };
+    reset(&st);
+    espos_sk_tok_event(&SM, ESPOS_SK_EV_START, NULL);
+    espos_sk_tok_event(&SM, ESPOS_SK_EV_SERVER, &SRV_A);
+    verify_result(200, "urn:mrn:signalk:uuid:aaaa");
+    TEST_ASSERT_EQUAL(ESPOS_SK_TOK_APPROVED, ST()->state);
 }
 
 TEST_CASE("happy path: request → pending → approved → verifying → approved", "[sk_tok]")
@@ -540,6 +564,49 @@ TEST_CASE("security disabled on the server: OPEN, re-probed by POST, requests wh
     TEST_ASSERT_EQUAL(3, F.requests);
 }
 
+TEST_CASE("an open server stays OPEN while its re-probe is out", "[sk_tok]")
+{
+    /* The stream may run only in APPROVED and OPEN. A probe that went by way
+     * of IDLE closed it for the length of the request, once a minute. */
+    reset(NULL);
+    espos_sk_tok_event(&SM, ESPOS_SK_EV_START, NULL);
+    espos_sk_tok_event(&SM, ESPOS_SK_EV_SERVER, &SRV_A);
+    request_result(404, NULL, NULL);
+    TEST_ASSERT_EQUAL(ESPOS_SK_TOK_OPEN, ST()->state);
+    int notifies = F.notifies;
+    tick(60000);
+    TEST_ASSERT_EQUAL(2, F.requests);
+    TEST_ASSERT_TRUE(ST()->busy);
+    TEST_ASSERT_EQUAL(ESPOS_SK_TOK_OPEN, ST()->state);                             /* not IDLE */
+    TEST_ASSERT_TRUE(F.notifies > notifies);                                       /* busy is still reported */
+    request_result(404, NULL, NULL);
+    TEST_ASSERT_EQUAL(ESPOS_SK_TOK_OPEN, ST()->state);
+    TEST_ASSERT_FALSE(ST()->busy);
+    TEST_ASSERT_EQUAL_UINT32(F.now + 60000, F.timer_due);
+}
+
+TEST_CASE("an open server's probe without a reply keeps OPEN while the stream is live", "[sk_tok]")
+{
+    reset(NULL);
+    espos_sk_tok_event(&SM, ESPOS_SK_EV_START, NULL);
+    espos_sk_tok_event(&SM, ESPOS_SK_EV_SERVER, &SRV_A);
+    request_result(404, NULL, NULL);
+    F.live = true;
+    tick(60000);
+    request_result(0, NULL, NULL);
+    TEST_ASSERT_EQUAL(ESPOS_SK_TOK_OPEN, ST()->state);
+    TEST_ASSERT_NOT_NULL(strstr(ST()->last_error, "security probe failed (no reply)"));
+    uint32_t d = F.timer_due - F.now;
+    TEST_ASSERT_TRUE(d >= 9000 && d <= 12000);
+    /* The stream went quiet too: now it is the server. */
+    F.live = false;
+    tick(d);
+    TEST_ASSERT_EQUAL(3, F.requests);
+    request_result(0, NULL, NULL);
+    TEST_ASSERT_EQUAL(ESPOS_SK_TOK_ERROR, ST()->state);
+    TEST_ASSERT_EQUAL_STRING("server unreachable", ST()->last_error);
+}
+
 TEST_CASE("a host that is not a SignalK server (599) is an error, not 'open'", "[sk_tok]")
 {
     reset(NULL);
@@ -813,6 +880,119 @@ TEST_CASE("server change while an action is in flight: the stale answer is dropp
     request_result(202, "/signalk/v1/requests/for-B", NULL);
     TEST_ASSERT_EQUAL(1, F.verifies);
     TEST_ASSERT_EQUAL_STRING("pasted", F.last_verify_token);
+}
+
+/* The field case behind the five below: a panel's socket table ran full, the
+ * periodic check could not open a socket, ERROR took a stream down that had
+ * been receiving frames the whole time, and the panel showed "connection
+ * lost" every few minutes while the server and the token were fine. */
+
+TEST_CASE("a check with no reply keeps APPROVED while the stream is live", "[sk_tok]")
+{
+    approved_on_a();
+    F.live = true;
+    tick(60000);                                                                   /* periodic check */
+    TEST_ASSERT_EQUAL(2, F.verifies);
+    verify_result(0, NULL);
+    TEST_ASSERT_EQUAL(ESPOS_SK_TOK_APPROVED, ST()->state);                         /* stream may run */
+    TEST_ASSERT_EQUAL_STRING("tok.en.9", espos_sk_tok_token(&SM));
+    TEST_ASSERT_NOT_NULL(strstr(ST()->last_error, "no reply"));
+    TEST_ASSERT_NOT_NULL(strstr(ST()->last_error, "stream kept"));
+    uint32_t d = F.timer_due - F.now;
+    TEST_ASSERT_TRUE(d >= 9000 && d <= 12000);                                     /* error ladder, not 60 s */
+    tick(d);
+    TEST_ASSERT_EQUAL(3, F.verifies);
+    verify_result(0, NULL);                                                        /* still nothing */
+    d = F.timer_due - F.now;
+    TEST_ASSERT_TRUE(d >= 18000 && d <= 24000);                                    /* the ladder climbs */
+    tick(d);
+    verify_result(200, "urn:mrn:signalk:uuid:aaaa");
+    TEST_ASSERT_EQUAL(ESPOS_SK_TOK_APPROVED, ST()->state);
+    TEST_ASSERT_EQUAL_STRING("", ST()->last_error);
+    TEST_ASSERT_EQUAL_UINT32(F.now + 60000, F.timer_due);                          /* back to the cadence */
+    TEST_ASSERT_EQUAL(0, ST()->unauthorized_count);
+}
+
+TEST_CASE("a check that got no socket keeps APPROVED even with the stream quiet", "[sk_tok]")
+{
+    approved_on_a();
+    F.live = false;
+    tick(60000);
+    verify_result_local("no free socket");
+    TEST_ASSERT_EQUAL(ESPOS_SK_TOK_APPROVED, ST()->state);
+    TEST_ASSERT_NOT_NULL(strstr(ST()->last_error, "no free socket on this device"));
+    TEST_ASSERT_EQUAL(1, ST()->local_error_count);
+    tick(F.timer_due - F.now);
+    TEST_ASSERT_EQUAL(3, F.verifies);
+    verify_result(200, "urn:mrn:signalk:uuid:aaaa");
+    TEST_ASSERT_EQUAL(ESPOS_SK_TOK_APPROVED, ST()->state);
+    TEST_ASSERT_EQUAL_STRING("", ST()->last_error);
+}
+
+TEST_CASE("a check with no reply and no live stream is still an error", "[sk_tok]")
+{
+    approved_on_a();
+    F.live = false;
+    tick(60000);
+    verify_result(0, NULL);
+    TEST_ASSERT_EQUAL(ESPOS_SK_TOK_ERROR, ST()->state);
+    TEST_ASSERT_EQUAL_STRING("server unreachable", ST()->last_error);
+    TEST_ASSERT_EQUAL(0, ST()->local_error_count);
+    /* A refusal is the server's word, live stream or not. */
+    tick(F.timer_due - F.now);
+    verify_result(200, "urn:mrn:signalk:uuid:aaaa");
+    F.live = true;
+    tick(60000);
+    verify_result(503, NULL);                                                      /* a proxy's error page */
+    TEST_ASSERT_EQUAL(ESPOS_SK_TOK_APPROVED, ST()->state);
+    TEST_ASSERT_NOT_NULL(strstr(ST()->last_error, "HTTP 503"));
+}
+
+TEST_CASE("a plaintext 401, then a re-check without a socket: token kept, second opinion still owed", "[sk_tok]")
+{
+    approved_on_a();
+    F.live = true;
+    espos_sk_tok_event(&SM, ESPOS_SK_EV_UNAUTHORIZED, NULL);                       /* some call got 401 */
+    TEST_ASSERT_EQUAL(ESPOS_SK_TOK_APPROVED, ST()->state);
+    tick(5000);                                                                    /* the second opinion */
+    TEST_ASSERT_EQUAL(2, F.verifies);
+    verify_result_local("no free socket");
+    TEST_ASSERT_EQUAL(ESPOS_SK_TOK_APPROVED, ST()->state);                         /* was: ERROR, stream closed */
+    TEST_ASSERT_EQUAL_STRING("tok.en.9", F.saved.token);
+    /* Nothing answered for the token in between, so a 401 now is the second
+     * in a row and clears it, as it would have without the gap. */
+    tick(F.timer_due - F.now);
+    TEST_ASSERT_EQUAL(3, F.verifies);
+    verify_result(401, NULL);
+    TEST_ASSERT_EQUAL(ESPOS_SK_TOK_IDLE, ST()->state);
+    TEST_ASSERT_EQUAL_STRING("", F.saved.token);
+    TEST_ASSERT_EQUAL(2, ST()->unauthorized_count);
+}
+
+TEST_CASE("a leg that never left the device says so instead of 'server unreachable'", "[sk_tok]")
+{
+    /* First check of a stored token: VERIFYING, where nothing has proven the
+     * server yet, so it is an error -- but one that points at the device. */
+    espos_sk_tok_store_t st = { .token = "tok.en.9", .token_self = "urn:mrn:signalk:uuid:aaaa" };
+    reset(&st);
+    F.live = true;                                                                 /* not consulted here */
+    espos_sk_tok_event(&SM, ESPOS_SK_EV_START, NULL);
+    espos_sk_tok_event(&SM, ESPOS_SK_EV_SERVER, &SRV_A);
+    TEST_ASSERT_EQUAL(ESPOS_SK_TOK_VERIFYING, ST()->state);
+    verify_result_local("no free socket");
+    TEST_ASSERT_EQUAL(ESPOS_SK_TOK_ERROR, ST()->state);
+    TEST_ASSERT_EQUAL_STRING("request not sent: no free socket on this device", ST()->last_error);
+    TEST_ASSERT_EQUAL(1, ST()->local_error_count);
+    /* The access request leg reports the same way. */
+    reset(NULL);
+    espos_sk_tok_event(&SM, ESPOS_SK_EV_START, NULL);
+    espos_sk_tok_event(&SM, ESPOS_SK_EV_SERVER, &SRV_A);
+    espos_sk_http_result_t r = { .http_status = 0, .local_error = true };
+    strcpy(r.local_reason, "no memory for TLS");
+    espos_sk_tok_event(&SM, ESPOS_SK_EV_REQUEST_RESULT, &r);
+    TEST_ASSERT_EQUAL(ESPOS_SK_TOK_ERROR, ST()->state);
+    TEST_ASSERT_EQUAL_STRING("request not sent: no memory for TLS on this device", ST()->last_error);
+    TEST_ASSERT_EQUAL(1, ST()->local_error_count);
 }
 
 TEST_CASE("state names", "[sk_tok]")
