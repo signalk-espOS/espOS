@@ -766,7 +766,8 @@ address is silent; refusals from it do not cost the token (signalk.md). The toke
 device: no free socket, or no memory for the connection. `last_error` then
 says which resource ran out, for example `request not sent: no free socket
 on this device` instead of `server unreachable`. When it is the socket, the
-firmware opens more connections than `CONFIG_LWIP_MAX_SOCKETS` allows; the
+firmware opens more connections than `CONFIG_LWIP_MAX_SOCKETS` or
+`CONFIG_LWIP_MAX_ACTIVE_TCP` allows; the
 other causes are memory for the HTTP client or a TLS handshake. A check that fails this
 way, or that gets no reply while the stream is receiving, leaves an approved
 token approved and the stream running; `last_error` says `stream kept` until

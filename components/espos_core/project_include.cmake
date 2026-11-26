@@ -75,6 +75,23 @@ endif()
 # the delta stream, the BLE control socket, an OTA download) plus the
 # event-stream clients and espos_sk's concurrent HTTP calls, which is 16 at
 # the defaults. A component not in the build counts at its default.
+#
+# The two optional servers count when their component is in the build. The
+# voice satellite (espos_voice, on the two targets esp-sr runs on; elsewhere
+# the component is an empty stub) holds 3: its listener, the orchestrator's
+# connection and the connection to a network wake service. The candump
+# server (espos_n2k) holds its listener and one per client,
+# CONFIG_ESPOS_N2K_CANDUMP_MAX_CLIENTS. A configure step sees only that the
+# component is linked, not whether the firmware starts the server, so a
+# firmware that links one and never starts it is asked for room it does not
+# use. espos.defaults has that room.
+#
+# lwIP caps TCP connections on their own (CONFIG_LWIP_MAX_ACTIVE_TCP, 16 in
+# IDF), and a TCP socket() takes its connection when it is created, so below
+# that count a free slot in the table still ends in "Failed to create
+# socket", and a client connecting to a server on the device gets no answer.
+# The TCP count is the socket count without what is not a TCP connection:
+# espos_httpd's 3 own sockets, the DNS responder and each server's listener.
 set(_espos_sse_clients 3)
 if(DEFINED CONFIG_ESPOS_HTTPD_SSE_MAX_CLIENTS)
     set(_espos_sse_clients ${CONFIG_ESPOS_HTTPD_SSE_MAX_CLIENTS})
@@ -83,12 +100,36 @@ set(_espos_sk_http 2)
 if(DEFINED CONFIG_ESPOS_SK_HTTP_MAX_CONCURRENT)
     set(_espos_sk_http ${CONFIG_ESPOS_SK_HTTP_MAX_CONCURRENT})
 endif()
+set(_espos_extra_sockets 0)
+set(_espos_extra_tcp 0)
+set(_espos_extra_why "")
+if(DEFINED CONFIG_ESPOS_VOICE_WYOMING_PORT AND CONFIG_IDF_TARGET MATCHES "^esp32(s3|p4)$")
+    math(EXPR _espos_extra_sockets "${_espos_extra_sockets} + 3")
+    math(EXPR _espos_extra_tcp "${_espos_extra_tcp} + 2")
+    string(APPEND _espos_extra_why ", the voice satellite holds 3 (its listener, the orchestrator and a network wake service)")
+endif()
+if(DEFINED CONFIG_ESPOS_N2K_CANDUMP_PORT)
+    # Present in every espos_n2k; the client limit is newer and defaults to 3.
+    set(_espos_candump_clients 3)
+    if(DEFINED CONFIG_ESPOS_N2K_CANDUMP_MAX_CLIENTS)
+        set(_espos_candump_clients ${CONFIG_ESPOS_N2K_CANDUMP_MAX_CLIENTS})
+    endif()
+    math(EXPR _espos_extra_sockets "${_espos_extra_sockets} + 1 + ${_espos_candump_clients}")
+    math(EXPR _espos_extra_tcp "${_espos_extra_tcp} + ${_espos_candump_clients}")
+    string(APPEND _espos_extra_why ", the candump server holds its listener and up to CONFIG_ESPOS_N2K_CANDUMP_MAX_CLIENTS=${_espos_candump_clients} clients")
+endif()
 math(EXPR _espos_httpd_clients "4 + ${_espos_sse_clients}")
-math(EXPR _espos_min_sockets "11 + ${_espos_sse_clients} + ${_espos_sk_http}")
+math(EXPR _espos_min_sockets "11 + ${_espos_sse_clients} + ${_espos_sk_http} + ${_espos_extra_sockets}")
+math(EXPR _espos_min_tcp "7 + ${_espos_sse_clients} + ${_espos_sk_http} + ${_espos_extra_tcp}")
 if(DEFINED CONFIG_LWIP_MAX_SOCKETS AND CONFIG_LWIP_MAX_SOCKETS LESS ${_espos_min_sockets})
     _espos_lint_report(
-        "CONFIG_LWIP_MAX_SOCKETS=${CONFIG_LWIP_MAX_SOCKETS}: espos_httpd may hold ${_espos_httpd_clients} clients (4 + CONFIG_ESPOS_HTTPD_SSE_MAX_CLIENTS) and 3 sockets of its own, the setup portal's DNS responder holds 1, and the delta stream, espOS's HTTP calls to the server (up to CONFIG_ESPOS_SK_HTTP_MAX_CONCURRENT=${_espos_sk_http}), the BLE gateway's control socket and an OTA download share the same table: ${_espos_min_sockets} in all. Below that a browser with the web UI open can take the sockets the device's own calls need: \"Failed to create socket\" in the log, and accept() failing with ENFILE."
+        "CONFIG_LWIP_MAX_SOCKETS=${CONFIG_LWIP_MAX_SOCKETS}: espos_httpd may hold ${_espos_httpd_clients} clients (4 + CONFIG_ESPOS_HTTPD_SSE_MAX_CLIENTS) and 3 sockets of its own, the setup portal's DNS responder holds 1${_espos_extra_why}, and the delta stream, espOS's HTTP calls to the server (up to CONFIG_ESPOS_SK_HTTP_MAX_CONCURRENT=${_espos_sk_http}), the BLE gateway's control socket and an OTA download share the same table: ${_espos_min_sockets} in all. Below that a browser with the web UI open can take the sockets the device's own calls need: \"Failed to create socket\" in the log, and accept() failing with ENFILE."
         "CONFIG_LWIP_MAX_SOCKETS=${_espos_min_sockets}")
+endif()
+if(DEFINED CONFIG_LWIP_MAX_ACTIVE_TCP AND CONFIG_LWIP_MAX_ACTIVE_TCP LESS ${_espos_min_tcp})
+    _espos_lint_report(
+        "CONFIG_LWIP_MAX_ACTIVE_TCP=${CONFIG_LWIP_MAX_ACTIVE_TCP}: lwIP caps TCP connections apart from the socket table, and a TCP socket takes its connection when it is created. The sockets above that are TCP connections come to ${_espos_min_tcp}: everything but espos_httpd's 3 own sockets, the DNS responder and any server's listener. Below that a free socket still fails with \"Failed to create socket\", and a client connecting to the device gets no answer."
+        "CONFIG_LWIP_MAX_ACTIVE_TCP=${_espos_min_tcp}")
 endif()
 
 if(CONFIG_IDF_TARGET STREQUAL "esp32p4")
@@ -390,7 +431,12 @@ unset(_espos_stack)
 unset(_espos_sse_clients)
 unset(_espos_sk_http)
 unset(_espos_httpd_clients)
+unset(_espos_extra_sockets)
+unset(_espos_extra_tcp)
+unset(_espos_extra_why)
+unset(_espos_candump_clients)
 unset(_espos_min_sockets)
+unset(_espos_min_tcp)
 unset(_espos_table)
 unset(_espos_rows)
 unset(_espos_cols)

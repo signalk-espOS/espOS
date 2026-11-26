@@ -19,7 +19,7 @@ namespace espos_n2k {
 
 struct CandumpTcpServerConfig {
   uint16_t port = CONFIG_ESPOS_N2K_CANDUMP_PORT;
-  uint8_t max_clients = 3;
+  uint8_t max_clients = CONFIG_ESPOS_N2K_CANDUMP_MAX_CLIENTS;
   const char* interface_name = "can0";
 };
 
@@ -73,6 +73,9 @@ class CandumpTcpServer {
 
   // Per-client queues for fan-out.
   static constexpr int kMaxClients = 8;
+  static_assert(
+      CONFIG_ESPOS_N2K_CANDUMP_MAX_CLIENTS <= kMaxClients,
+      "CONFIG_ESPOS_N2K_CANDUMP_MAX_CLIENTS above what the server takes");
   QueueHandle_t client_queues_[kMaxClients] = {};
   SemaphoreHandle_t clients_mutex_ = nullptr;
 };

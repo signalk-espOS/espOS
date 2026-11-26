@@ -35,6 +35,15 @@ the bitrate — and the transmitter joins it. A transmitter started on its own
 logs that the bus is not up and stays stopped, rather than dropping every
 frame in silence the way it used to.
 
+The server takes `CONFIG_ESPOS_N2K_CANDUMP_MAX_CLIENTS` clients (3 by
+default, `max_clients` in its config overrides it, 8 at most) and closes
+any client past that. Its listener and each client hold a socket, and
+each client a TCP connection, from the tables espOS shares with the web
+server. espOS's configure check counts them, and espos.defaults has room
+for the default 3. A firmware that sets `max_clients` higher in code
+raises `CONFIG_LWIP_MAX_SOCKETS` and `CONFIG_LWIP_MAX_ACTIVE_TCP` by the
+difference ([troubleshooting](troubleshooting.md)).
+
 One receiver feeds several consumers. The server adds a listener of its own
 when it starts, and anything else on the bus — an [NMEA 2000 node](#the-device-as-an-nmea-2000-node),
 the application — adds its own with `TwaiReceiver::add_listener()`, before or
