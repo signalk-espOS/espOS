@@ -59,7 +59,8 @@ extern "C" {
 #define ESPOS_SK_URL_MAX 384
 
 typedef struct {
-    int status;      /* HTTP status; 0 when no reply arrived (see err) */
+    int status;      /* HTTP status; 0 when no reply arrived (see err). Also set with
+                      * err == ESP_ERR_NO_MEM when a reply came but its body could not be kept */
     esp_err_t err;   /* the function's return value, kept with the reply */
     char *body;      /* malloc'ed, NUL-terminated, "" for an empty reply; NULL when err != ESP_OK */
     size_t len;      /* bytes in body (excluding the NUL) */

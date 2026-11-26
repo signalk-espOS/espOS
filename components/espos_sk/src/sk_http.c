@@ -39,6 +39,7 @@
 #include "espos_sk_http.h"
 #include "espos_sk_priv.h"
 #if CONFIG_ESPOS_SK_TLS
+#include "mbedtls/ssl.h" /* MBEDTLS_ERR_SSL_ALLOC_FAILED */
 #include "espos_sk_tls.h"
 #endif
 
@@ -207,6 +208,7 @@ esp_err_t espos_sk_http_perform(const espos_sk_http_req_t *rq, espos_sk_http_res
     if (xSemaphoreTake(sem, pdMS_TO_TICKS(rq->timeout_ms)) != pdTRUE) {
         ESP_LOGW(TAG, "%s %s: %d requests already in flight, none finished within %u ms", method_name(rq->method), url,
                  CONFIG_ESPOS_SK_HTTP_MAX_CONCURRENT, (unsigned)rq->timeout_ms);
+        set_local(r, "request slots busy");
         r->err = ESP_ERR_TIMEOUT;
         return r->err;
     }
@@ -244,6 +246,8 @@ esp_err_t espos_sk_http_perform(const espos_sk_http_req_t *rq, espos_sk_http_res
             ESP_LOGW(TAG, "%s %s: deferred (%s)", method_name(rq->method), url, esp_err_to_name(hs));
             if (hs == ESP_ERR_NO_MEM) {
                 set_local(r, "no memory for TLS");
+            } else if (hs == ESP_ERR_TIMEOUT) {
+                set_local(r, "TLS handshake slot busy");
             }
             r->err = hs;
             return hs;
@@ -277,10 +281,19 @@ esp_err_t espos_sk_http_perform(const espos_sk_http_req_t *rq, espos_sk_http_res
              * socket table apart from a server that did not answer; read it
              * before cleanup frees the handle that holds it. */
             int tls_code = 0, tls_flags = 0;
-            if (esp_http_client_get_and_clear_last_tls_error(c, &tls_code, &tls_flags) ==
-                ESP_ERR_ESP_TLS_CANNOT_CREATE_SOCKET) {
+            esp_err_t last = esp_http_client_get_and_clear_last_tls_error(c, &tls_code, &tls_flags);
+            if (last == ESP_ERR_ESP_TLS_CANNOT_CREATE_SOCKET) {
                 set_local(r, "no free socket");
             }
+#if CONFIG_ESPOS_SK_TLS
+            /* The handshake preflight checks the heap but reserves nothing,
+             * so mbedTLS can still run short half way: esp-tls records the
+             * mbedTLS code negated next to its own. */
+            else if (rq->srv->tls && (last == ESP_ERR_MBEDTLS_SSL_SETUP_FAILED || last == ESP_ERR_NO_MEM ||
+                                      tls_code == -MBEDTLS_ERR_SSL_ALLOC_FAILED)) {
+                set_local(r, "no memory for TLS handshake");
+            }
+#endif
         }
         esp_http_client_cleanup(c);
         if (err != ESP_OK && (status == 401 || status == 403)) {
@@ -324,6 +337,10 @@ esp_err_t espos_sk_http_perform(const espos_sk_http_req_t *rq, espos_sk_http_res
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "%s %s: %s", method_name(rq->method), url, esp_err_to_name(err));
         free(b.buf);
+        /* A reply may have arrived whose body could not be kept (ESP_ERR_NO_MEM
+         * after the headers). Its status is still the server's answer, and a
+         * 401/403 among them must reach the token machine. */
+        r->status = status;
         r->err = err;
         return err;
     }
@@ -373,7 +390,9 @@ static int leg_ex(const espos_sk_server_t *srv, espos_sk_http_method_t method, c
         snprintf(out->local_reason, sizeof(out->local_reason), "%s", r.local_reason);
     }
     if (err != ESP_OK) {
-        return 0;
+        /* No body to hand over, but a refusal stands without one: the token
+         * machine decides on the status alone. Anything else is no answer. */
+        return (r.status == 401 || r.status == 403) ? r.status : 0;
     }
     *body_out = r.body; /* ownership moves to the caller */
     if (truncated) {
@@ -442,6 +461,8 @@ void espos_sk_http_request(const espos_sk_server_t *srv, const espos_sk_tok_cfg_
     char *body = cJSON_PrintUnformatted(j);
     cJSON_Delete(j);
     if (!body) {
+        out->local_error = true;
+        snprintf(out->local_reason, sizeof(out->local_reason), "no memory for the request");
         return;
     }
     char *resp = NULL;
@@ -459,7 +480,12 @@ void espos_sk_http_request(const espos_sk_server_t *srv, const espos_sk_tok_cfg_
         bool is_sk = st == 200 && probe && strstr(probe, "endpoints");
         free(probe);
         if (!is_sk) {
-            out->http_status = 599;
+            /* 599 only on an answer that is not a SignalK server's. No answer
+             * at all (a full socket table, a dropped link) stays 0, so the
+             * machine reads it as such: an open server's live stream is kept
+             * through it, and nobody is told the host is not a SignalK
+             * server on the strength of a socket that was never opened. */
+            out->http_status = st == 0 ? 0 : 599;
         }
     }
     ESP_LOGI(TAG, "access request → %d %s %s", out->http_status, out->state, out->href[0] ? out->href : out->message);
