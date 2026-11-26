@@ -853,14 +853,20 @@ static void maybe_rotate_unreachable(void)
     select_server();
 }
 
-static void run_action(void)
+/* Runs the leg the machine asked for and feeds it the result. Returns false
+ * when the result could not even be allocated: the action then stays queued
+ * and runs on the next pass of the task loop, a second or less later. The
+ * machine sits busy until it answers, and every timer is ignored while it
+ * does, so dropping the action would leave it busy for good. */
+static bool run_action(void)
 {
     action_t a = s.action;
-    s.action = ACT_NONE;
     espos_sk_http_result_t *r = calloc(1, sizeof(*r));
     if (!r) {
-        return;
+        ESP_LOGW(TAG, "no memory for a token request's result; trying again shortly");
+        return false;
     }
+    s.action = ACT_NONE;
     espos_sk_server_t srv = s.server;
     switch (a) {
     case ACT_REQUEST:
@@ -887,6 +893,7 @@ static void run_action(void)
         select_server();
     }
     maybe_rotate_unreachable();
+    return true;
 }
 
 static void sk_task(void *arg)
@@ -931,8 +938,7 @@ static void sk_task(void *arg)
             s.net_was_up = up;
         }
         /* 1. run whatever the machine asked for (blocking HTTP) */
-        while (s.action != ACT_NONE) {
-            run_action();
+        while (s.action != ACT_NONE && run_action()) {
         }
         /* 2. timers */
         uint32_t t = now_ms();
