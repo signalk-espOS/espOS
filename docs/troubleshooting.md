@@ -227,14 +227,30 @@ Three places answer most questions before you get here:
     browser holds a few connections to the web UI, and the device's own calls
     to the server fail until the browser lets go. espOS needs 11 +
     `CONFIG_ESPOS_HTTPD_SSE_MAX_CLIENTS` +
-    `CONFIG_ESPOS_SK_HTTP_MAX_CONCURRENT`, which is 16 at the defaults.
-    Compare that with the value in the build's `sdkconfig`:
+    `CONFIG_ESPOS_SK_HTTP_MAX_CONCURRENT`, which is 16 at the defaults. The
+    optional servers come on top: 3 for the voice satellite and 1 +
+    `CONFIG_ESPOS_N2K_CANDUMP_MAX_CLIENTS` (4) for the candump server, so 23
+    with both. lwIP also caps TCP connections on their own
+    (`CONFIG_LWIP_MAX_ACTIVE_TCP`), and a TCP socket needs a connection when
+    it is created, so a free slot in the table does not help above that cap.
+    The TCP count is the same sum without the listeners, espos_httpd's 3 own
+    sockets and the DNS responder, plus a second voice orchestrator waiting
+    to be accepted: 12 for espOS, 18 with both servers.
+    espos.defaults sets both to 24. Compare the two counts with the values
+    in the build's `sdkconfig`:
 
-    * below it, the firmware was built with an espOS that did not check it
-      (the build now stops and names the number): update espOS, or raise
-      the value in the firmware's `sdkconfig.defaults`;
-    * at or above it, the firmware opens connections of its own on top of
-      espOS's: raise it in the firmware's `sdkconfig.defaults`.
+    * a value below its count means the firmware was built with an espOS
+      that did not check it (the build now stops and names the number):
+      update espOS, or raise the value in the firmware's
+      `sdkconfig.defaults`;
+    * values at or above their counts mean the firmware opens connections
+      of its own on top of espOS's: raise them in the firmware's
+      `sdkconfig.defaults`.
+
+    IDF applies a defaults file only to options the `sdkconfig` does not
+    set yet, so after changing one, or updating espOS, delete the build's
+    `sdkconfig` before building again. That also drops what was set with
+    `idf.py menuconfig`, so note those values first.
 
 **A PUT comes back `COMPLETED` with `statusCode 405 "PUT not supported for …"`**
 :   That is the server's real answer: no plugin on the server handles PUTs for

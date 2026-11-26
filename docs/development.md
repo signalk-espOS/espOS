@@ -38,7 +38,8 @@ commented). Builds are optimised for size (`-Os`), which keeps a 4 MB
 board's fixed app slot from filling up; the debug profile goes back to
 `-Og`, which keeps more locals and line numbers for backtraces and a debugger. After changing any defaults file delete the build's `sdkconfig`
 — IDF applies defaults only to options the existing `sdkconfig` does not
-already set.
+already set. That also drops what was set with `idf.py menuconfig`, so note
+those values first.
 
 ## Web UI
 
@@ -144,7 +145,9 @@ key kept outside the project ([ota.md](ota.md), "Signing key").
 A project that installs espOS's components from the registry and writes its
 own `CMakeLists.txt` bypasses the prologue. `espos_core`'s
 `project_include.cmake` then checks the sdkconfig values whose absence shows
-only in the field — the event and timer task stacks, and on the ESP32-P4
+only in the field — the event and timer task stacks, the socket table and
+the TCP connection cap (sized for what is in the build, the voice satellite
+and the candump server included), and on the ESP32-P4
 PSRAM itself, the L2 cache line with the hosted mempool in PSRAM and the
 block-ack window with PSRAM — and fails the configure with the exact line to
 add.

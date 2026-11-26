@@ -43,14 +43,33 @@ CONFIG_HTTPD_ERR_RESP_NO_DELAY=y
 # up to 7 clients (4 + CONFIG_ESPOS_HTTPD_SSE_MAX_CLIENTS) plus 3 of its own,
 # the setup portal's DNS responder 1, the delta stream 1, espos_sk's HTTP
 # calls up to 2 (CONFIG_ESPOS_SK_HTTP_MAX_CONCURRENT), the BLE gateway's
-# control socket 1 and an OTA download 1. At 10 a browser with the web UI
-# open left nothing for the outgoing calls: a P4 BLE gateway logged
-# "Failed to create socket" on every advertisement POST for a minute after
-# boot. 16 covers all of it at the defaults; each event-stream client or
-# concurrent HTTP call a firmware adds needs one more, and the consumer lint
-# in espos_core/project_include.cmake asks for the sum.
+# control socket 1 and an OTA download 1: 16. The optional servers come on
+# top: the voice satellite 3 (listener, orchestrator, network wake) and the
+# candump server 4 (listener and CONFIG_ESPOS_N2K_CANDUMP_MAX_CLIENTS). At 10
+# a browser with the web UI open left nothing for the outgoing calls: a P4
+# BLE gateway logged "Failed to create socket" on every advertisement POST
+# for a minute after boot. A P4 cockpit with both servers and a web server
+# of its own ran out at 16 and lost its Signal K stream (#331). 24 covers
+# espOS at the defaults (23 with both servers). Each event-stream client,
+# concurrent HTTP call or candump client a firmware adds needs one more, and
+# the consumer lint in espos_core/project_include.cmake asks for that sum.
+# What the firmware decides in code comes on top and no check can see it: a
+# second esp_http_server takes 3 of its own and one per client, and a
+# max_clients set in code above CONFIG_ESPOS_N2K_CANDUMP_MAX_CLIENTS one per
+# extra client. Such a firmware raises this and the TCP cap below in its own
+# sdkconfig.defaults.
 # A slot costs a few dozen bytes; an open connection costs the same either way.
-CONFIG_LWIP_MAX_SOCKETS=16
+CONFIG_LWIP_MAX_SOCKETS=24
+
+# lwIP caps TCP connections on their own, at 16, and a TCP socket takes its
+# connection when it is created, so a cap below the table turns a free slot
+# into the same "Failed to create socket". The connections above come to 18
+# with both servers: the listeners, espos_httpd's own sockets and the DNS
+# responder are not TCP connections, and a second voice orchestrator waiting
+# in the satellite's listen queue is one without a socket. lwIP takes each
+# connection from the heap when it opens, so the cap costs nothing and
+# matches the table; a firmware that raises the table raises this with it.
+CONFIG_LWIP_MAX_ACTIVE_TCP=24
 
 # ---- WebSocket upgrade. tcp_transport builds the whole upgrade request in one
 # CONFIG_WS_BUFFER_SIZE buffer and refuses to dial when it does not fit. The

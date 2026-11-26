@@ -12,6 +12,20 @@ menu "espOS NMEA 2000"
             hand; clients that browse mDNS take the port from the record and
             do not care.
 
+    config ESPOS_N2K_CANDUMP_MAX_CLIENTS
+        int "candump TCP server clients"
+        default 3
+        range 1 8
+        help
+            Default client limit of CandumpTcpServer
+            (CandumpTcpServerConfig::max_clients overrides it per instance;
+            8 is the most the server takes). A client past the limit is
+            connected and closed again. Each client holds a socket and a TCP
+            connection, so espos_core's configure check counts this value,
+            plus the listener, in the room it asks of CONFIG_LWIP_MAX_SOCKETS
+            and CONFIG_LWIP_MAX_ACTIVE_TCP. A firmware that sets
+            max_clients higher in code needs that much more room of its own.
+
     config ESPOS_N2K_RX_QUEUE_DEPTH
         int "TWAI receive queue depth (frames)"
         default 64
