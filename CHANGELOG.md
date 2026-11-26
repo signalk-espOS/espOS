@@ -15,6 +15,19 @@ pull request. The `[Unreleased]` block below was written by hand before the
 switch; its entries belong to the next feature release and are folded into
 that section when it is cut.
 
+## 0.32.2 (2026-11-26)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Fixed
+* fix(sk): report a 401 to the token machine only on /signalk/ paths by @dirkwa in https://github.com/signalk-espOS/espOS/pull/335
+* fix(sk): keep a live stream through failed token checks by @dirkwa in https://github.com/signalk-espOS/espOS/pull/334
+* fix(core): count the voice and candump servers and the TCP cap in the socket check by @dirkwa in https://github.com/signalk-espOS/espOS/pull/337
+
+
+**Full Changelog**: https://github.com/signalk-espOS/espOS/compare/v0.32.1...v0.32.2
+
 ## 0.32.1 (2026-11-26)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
