@@ -67,6 +67,11 @@ static struct {
     action_t action;
     char action_href[ESPOS_SK_HREF_MAX];
     char action_token[ESPOS_SK_TOKEN_CAP];
+    /* The server the machine aimed the queued action at. A leg runs against
+     * this, not against whatever is selected when it runs: an action kept
+     * queued (run_action) must not carry its token to a server chosen in
+     * the meantime. The machine drops the answer as stale either way. */
+    espos_sk_server_t action_srv;
     uint32_t timer_due_ms;           /* 0 = none */
     uint32_t discover_due_ms;
     bool discovery_enabled;
@@ -139,22 +144,22 @@ static void unlock(void) { xSemaphoreGive(s.lock); }
 static void p_request(void *ctx, const espos_sk_server_t *srv, const espos_sk_tok_cfg_t *cfg)
 {
     (void)ctx;
-    (void)srv;
     (void)cfg;
     s.action = ACT_REQUEST;
+    s.action_srv = *srv;
 }
 static void p_poll(void *ctx, const espos_sk_server_t *srv, const char *href)
 {
     (void)ctx;
-    (void)srv;
     s.action = ACT_POLL;
+    s.action_srv = *srv;
     snprintf(s.action_href, sizeof(s.action_href), "%s", href);
 }
 static void p_verify(void *ctx, const espos_sk_server_t *srv, const char *token)
 {
     (void)ctx;
-    (void)srv;
     s.action = ACT_VERIFY;
+    s.action_srv = *srv;
     snprintf(s.action_token, sizeof(s.action_token), "%s", token);
 }
 static void p_save(void *ctx, const espos_sk_tok_store_t *st)
@@ -867,7 +872,7 @@ static bool run_action(void)
         return false;
     }
     s.action = ACT_NONE;
-    espos_sk_server_t srv = s.server;
+    espos_sk_server_t srv = s.action_srv;
     switch (a) {
     case ACT_REQUEST:
         espos_sk_http_request(&srv, &s.cfg, r);
