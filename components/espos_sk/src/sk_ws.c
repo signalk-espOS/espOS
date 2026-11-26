@@ -94,10 +94,10 @@ static struct {
     espos_sk_ws_status_t st;
     bool sending;                    /* a delta message is being written; reported as pending */
     uint32_t connected_since_ms;
-    /* The last time the server sent us anything: the upgrade, then every
-     * payload read. Written by the ws task alone, read by the SK task
-     * (espos_sk_ws_live()); relaxed is enough, it is one timestamp and
-     * nothing else is published through it. */
+    /* The last payload read from the server on this connection, 0 = none
+     * yet (the server's hello follows the upgrade at once). Written by the
+     * ws task alone, read by the SK task (espos_sk_ws_live()); relaxed is
+     * enough, it is one timestamp and nothing else is published through it. */
     _Atomic uint32_t last_rx_ms;
     uint32_t backoff_round;
     uint32_t retry_at_ms;
@@ -1003,7 +1003,7 @@ static void ws_task(void *arg)
             espos_sk_meta_connected(&s.meta); /* the client task reconciles at once */
             s.st.last_error[0] = '\0';
             s.connected_since_ms = now_ms();
-            atomic_store_explicit(&s.last_rx_ms, s.connected_since_ms, memory_order_relaxed); /* the upgrade answered */
+            atomic_store_explicit(&s.last_rx_ms, 0, memory_order_relaxed); /* nothing from this connection yet */
             unlock();
             ESP_LOGI(TAG, "stream connected");
             set_stream_connected(true);
