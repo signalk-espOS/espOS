@@ -107,6 +107,14 @@ void test("an admission lapses when the key changes before the body arrives", as
     const rekey = await mock.handle({ method: "PUT", path: "/config", headers: old, body: '{"httpd":{"api_key":"k2"}}' });
     assert.equal(rekey.status, 200);
     if (typeof paused === "function") assert.equal((await paused('{"httpd":{"api_key":"k3"}}')).status, 401);
+    // and a cookie admission lapses with its session
+    const login = await mock.handle({ method: "POST", path: "/auth/login", headers: json, body: '{"key":"k2"}' });
+    assert.equal(login.status, 204);
+    const cookie = { ...json, cookie: (login.headers["Set-Cookie"] ?? "").split(";")[0], origin: "http://127.0.0.1", host: "127.0.0.1" };
+    const viaCookie = mock.admit({ method: "PUT", path: "/config", headers: cookie });
+    assert.equal(typeof viaCookie, "function");
+    assert.equal((await mock.handle({ method: "POST", path: "/auth/logout", headers: cookie, body: "" })).status, 204);
+    if (typeof viaCookie === "function") assert.equal((await viaCookie('{"wifi":{"ssid1":"Other"}}')).status, 401);
   } finally {
     mock.close();
   }

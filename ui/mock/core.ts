@@ -851,12 +851,14 @@ export function createMock(opts: MockOptions): Mock {
       }
       if (typeof authed !== "string") return { ...authed, headers: { ...authed.headers, Connection: "close" } };
       // The device reads the body on its one server task, so nothing can
-      // change the key meanwhile; here another request can, and a new key
-      // ends every session, so the admission is only good for the key it saw.
+      // change the key or end a session meanwhile; here another request can.
+      // A Bearer admission is kept while the key stands, so the key is not
+      // checked twice; a cookie is looked up again, which has no side effects.
       const key = apiKey();
       return (body) => {
         try {
-          return Promise.resolve(route({ ...req, body }, apiKey() === key ? authed : undefined));
+          const still = authed !== "cookie" && apiKey() === key ? authed : undefined;
+          return Promise.resolve(route({ ...req, body }, still));
         } catch (e) {
           return Promise.resolve(err(500, "internal", String(e)));
         }
