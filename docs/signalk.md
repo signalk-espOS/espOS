@@ -538,9 +538,12 @@ espos_sk_ws_url("/signalk/v1/stream", url, sizeof(url)); /* ws(s)://… */
 * **The token** is read at each call and sent as a header, never in the
   URL, where it would end up in every proxy and server log. No token, no
   header, which is what a server without security expects. A 401 or 403 on a
-  request that carried a token calls `espos_sk_report_unauthorized()`: the
-  token machine checks the token again and, if the server really dropped the
-  device, asks for access again.
+  `/signalk/` path that carried a token calls `espos_sk_report_unauthorized()`:
+  the token machine checks the token again and, if the server really dropped
+  the device, asks for access again. Other paths are not reported. A plugin
+  route (`/plugins/…`) or the admin API (`/skServer/…`) has access rules of
+  its own and turns down a good readwrite token, which says nothing about
+  whether the token still works.
 * **http or https** follows the chosen server, as decided by `sk.scheme`
   ([below](#which-scheme-skscheme)). Certificates are checked against the same
   trust store as the stream. `espos_sk_url()` and `espos_sk_ws_url()` build
