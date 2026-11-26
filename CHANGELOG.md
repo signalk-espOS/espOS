@@ -15,6 +15,17 @@ pull request. The `[Unreleased]` block below was written by hand before the
 switch; its entries belong to the next feature release and are folded into
 that section when it is cut.
 
+## 0.32.1 (2026-11-26)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Fixed
+* fix(httpd): close refused requests instead of draining by @dirkwa in https://github.com/signalk-espOS/espOS/pull/332
+
+
+**Full Changelog**: https://github.com/signalk-espOS/espOS/compare/v0.32.0...v0.32.1
+
 ## 0.32.0 (2026-11-22)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
