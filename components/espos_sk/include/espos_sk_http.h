@@ -30,8 +30,10 @@
  *     header, which is right for a server running without security;
  *   - scheme from the selected server's tls flag (http/ws, or https/wss with
  *     the same certificate-bundle rules as the delta stream, docs/signalk.md);
- *   - 401/403 while a token was sent -> espos_sk_report_unauthorized(), so
- *     the token machine re-verifies and re-requests, unless opted out;
+ *   - 401/403 on a /signalk/ path while a token was sent ->
+ *     espos_sk_report_unauthorized(), so the token machine re-verifies and
+ *     re-requests, unless opted out. Other paths (/plugins/, /skServer/)
+ *     have access rules of their own and are never reported;
  *   - ESP_ERR_INVALID_STATE when no server is selected;
  *   - requests in flight are bounded by Kconfig ESPOS_SK_HTTP_MAX_CONCURRENT
  *     (default 2): each costs a socket and, over TLS, ~20 KB of RAM. A caller
@@ -78,7 +80,7 @@ typedef struct {
     uint32_t timeout_ms;          /* 0 = 6000 */
     size_t max_body;              /* 0 = 16384 */
     bool no_auth;                 /* omit the Authorization header even when a token exists */
-    bool no_report_unauthorized;  /* a 401/403 does not touch the token machine */
+    bool no_report_unauthorized;  /* a 401/403 does not touch the token machine (only /signalk/ paths report) */
     const char *accept;           /* NULL = "application/json"; "" = no Accept header */
 } espos_sk_http_opts_t;
 

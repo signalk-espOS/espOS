@@ -69,10 +69,16 @@ static esp_err_t request(espos_sk_http_method_t method, const char *path, const 
     free(token);
     if (err == ESP_OK && (r->status == 401 || r->status == 403) && sent_token && !opts.no_report_unauthorized) {
         /* Only when our token was on the request: a 401 without one means the
-         * server wants a token the machine is already busy obtaining. The
-         * report is a queued command, so it cannot wait on this task. */
-        ESP_LOGW(TAG, "%s: HTTP %d with our token, reporting to the token machine", path, r->status);
-        espos_sk_report_unauthorized();
+         * server wants a token the machine is already busy obtaining. And
+         * only where the token is what decides (see
+         * espos_sk_http_path_judges_token). The report is a queued command,
+         * so it cannot wait on this task. */
+        if (espos_sk_http_path_judges_token(path)) {
+            ESP_LOGW(TAG, "%s: HTTP %d with our token, reporting to the token machine", path, r->status);
+            espos_sk_report_unauthorized();
+        } else {
+            ESP_LOGD(TAG, "%s: HTTP %d, the route's own rule; token not in question", path, r->status);
+        }
     }
     return err;
 }

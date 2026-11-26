@@ -298,6 +298,27 @@ static inline bool espos_sk_ws_gather_step(espos_sk_ws_gather_t *g, size_t r, si
     return fin;
 }
 
+/* Does a 401/403 on this path say anything about our token? Only the Signal K
+ * API's own paths are guarded by the token alone. A plugin route
+ * (/plugins/...) or the server's admin API (/skServer/...) has rules of its
+ * own -- admin only, or the plugin's -- and refuses a perfectly good
+ * readwrite token. Reported, such a refusal made the token machine re-check,
+ * and on a panel polling a plugin every few seconds that re-check is what
+ * took the stream down when it could not get a socket. */
+static inline bool espos_sk_http_path_judges_token(const char *path)
+{
+    static const char prefix[] = "/signalk/";
+    if (!path) {
+        return false;
+    }
+    for (size_t i = 0; i < sizeof(prefix) - 1; i++) {
+        if (path[i] != prefix[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
 /* What a 0-byte read means, from the transport's view of the frame it last
  * read a header for. A data frame with payload still owed is a read that
  * timed out mid-payload (IDF before 6.0.3 forgets the frame then, so the
