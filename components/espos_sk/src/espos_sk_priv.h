@@ -142,6 +142,29 @@ typedef enum {
  */
 espos_sk_probe_t espos_sk_http_probe_https(const char *host, uint16_t port, uint16_t *out_port);
 
+/* What the scheme probe does after its plain leg, when that leg was not a
+ * redirect to https. */
+typedef enum {
+    ESPOS_SK_PROBE_NEXT_PLAIN,     /* something answered over http: use it */
+    ESPOS_SK_PROBE_NEXT_TRY_TLS,   /* connected, no http answer: maybe a TLS-only port */
+    ESPOS_SK_PROBE_NEXT_NO_ANSWER, /* the connection never came up */
+} espos_sk_probe_next_t;
+
+/* `connect_failed` is the plain leg ending in ESP_ERR_HTTP_CONNECT: a connect
+ * timeout, a refused connection or a name that did not resolve. The https leg
+ * would dial the same host and port, so it cannot do better, and on a lossy
+ * link or a down host it only holds a socket and, should the connect get
+ * through after all, an mbedTLS context for the full leg timeout. A leg that
+ * did connect and then got no http answer is what a TLS-only port looks like,
+ * and only that one is worth a handshake. */
+static inline espos_sk_probe_next_t espos_sk_probe_after_plain(bool ok, int status, bool connect_failed)
+{
+    if (ok || status > 0) {
+        return ESPOS_SK_PROBE_NEXT_PLAIN;
+    }
+    return connect_failed ? ESPOS_SK_PROBE_NEXT_NO_ANSWER : ESPOS_SK_PROBE_NEXT_TRY_TLS;
+}
+
 /* "<scheme>://host:port/path"; ESP_ERR_INVALID_SIZE when it does not fit. */
 esp_err_t espos_sk_http_build_url(const espos_sk_server_t *srv, const char *scheme, const char *path, char *out, size_t n);
 /* "/signalk/v1/api/vessels/self/<a/b/c><suffix>" from a dotted path. */
