@@ -538,11 +538,14 @@ void espos_sk_http_verify(const espos_sk_server_t *srv, const char *token, espos
  *   30x + Location: https://…   the server redirects plaintext away, which is
  *                               what signalk-server with ssl:true does; the
  *                               Location may also name a different port.
- *   connection refused          nothing listens on the plain port -- try https
- *                               on the same port once before giving up, since a
- *                               server that only speaks TLS is the other common
- *                               shape.
+ *   connected, no http answer   the port took the connection but did not speak
+ *                               http -- try https on the same port once before
+ *                               giving up, since a server that only speaks TLS
+ *                               is the other common shape.
  *   anything else               plain http works; use it.
+ *
+ * A connection that never came up (timed out, refused, unresolved) skips the
+ * https leg: it would dial the same host and port (espos_sk_probe_after_plain).
  *
  * And a fourth that is not an answer: nothing responds on either scheme.
  * That is a host that is down, still booting or not reachable yet, and it
@@ -595,13 +598,18 @@ espos_sk_probe_t espos_sk_http_probe_https(const char *host, uint16_t port, uint
         ESP_LOGI(TAG, "%s:%u redirects to https (%s)", host, (unsigned)port, loc);
         return ESPOS_SK_PROBE_TLS;
     }
-    if (err == ESP_OK || status > 0) {
+    switch (espos_sk_probe_after_plain(err == ESP_OK, status, err == ESP_ERR_HTTP_CONNECT)) {
+    case ESPOS_SK_PROBE_NEXT_PLAIN:
         return ESPOS_SK_PROBE_PLAIN;
+    case ESPOS_SK_PROBE_NEXT_NO_ANSWER:
+        return ESPOS_SK_PROBE_NO_ANSWER;
+    case ESPOS_SK_PROBE_NEXT_TRY_TLS:
+        break;
     }
-    /* Nothing answered on the plain port. A TLS-only server is the other
-     * thing that looks like this, so ask once before concluding the host
-     * is simply down -- and let the trust store judge the certificate,
-     * which is what tells the two apart. */
+    /* The plain port took the connection but gave no http answer. A
+     * TLS-only server is the other thing that looks like this, so ask once
+     * before concluding the host is simply down -- and let the trust store
+     * judge the certificate, which is what tells the two apart. */
     espos_sk_server_t secure = plain;
     secure.tls = true;
     espos_sk_http_req_t rq2 = rq;
