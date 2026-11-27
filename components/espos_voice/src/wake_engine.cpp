@@ -138,12 +138,22 @@ void WakeEngine::stop() {
   // returned is it safe to destroy the AFE and release the mic — never
   // vTaskDelete a task that may be mid-WakeNet-inference or inside the
   // detection callback. The tasks self-delete, so no vTaskDelete here.
+  //
+  // No time limit: destroying the AFE under a task that has not returned is
+  // a use-after-free, and both exit within seconds of running_ going false.
+  // A task still in the detection callback is the satellite's to end first
+  // (WyomingSatellite::stop_wake_backend() does).
+  auto join = [](SemaphoreHandle_t done, const char* which) {
+    while (xSemaphoreTake(done, pdMS_TO_TICKS(3000)) != pdTRUE) {
+      ESP_LOGW(kTag, "waiting for the wake %s task to exit", which);
+    }
+  };
   if (feed_task_ && feed_exited_) {
-    xSemaphoreTake(feed_exited_, pdMS_TO_TICKS(3000));
+    join(feed_exited_, "feed");
     feed_task_ = nullptr;
   }
   if (fetch_task_ && fetch_exited_) {
-    xSemaphoreTake(fetch_exited_, pdMS_TO_TICKS(3000));
+    join(fetch_exited_, "fetch");
     fetch_task_ = nullptr;
   }
   if (afe_data_ && afe_handle_) {
