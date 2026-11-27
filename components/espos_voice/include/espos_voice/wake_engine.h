@@ -81,6 +81,7 @@ class WakeEngine {
   void clear_probe();
 
  private:
+  void fail_start();  // undo a start() that failed before its tasks
   static void feed_task_tramp(void* arg);
   static void fetch_task_tramp(void* arg);
   void feed_loop();
