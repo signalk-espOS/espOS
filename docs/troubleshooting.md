@@ -216,7 +216,9 @@ Three places answer most questions before you get here:
     * With `sk.ws_enabled` off the device keeps buffering but never opens the
       connection.
     * A rising `dropped` count means the offline buffer is too small for the
-      outage: raise `sk.buffer_msgs` or `sk.buffer_kb`.
+      outage: raise `sk.buffer_msgs` or `sk.buffer_kb`. On a chip without
+      PSRAM, which defaults to 8 KiB, watch `min_internal_free` in
+      `/api/v1/system/info` through an outage before going much higher.
 
     [Signal K → Delta stream](signalk.md#delta-stream-m4).
 

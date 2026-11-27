@@ -131,6 +131,8 @@ static void load_cfg(void)
     size_t msgs = (size_t)v;
     v = 32;
     espos_config_get_i32(ESPOS_CFG_NS_SK, ESPOS_CFG_SK_BUFFER_KB, &v);
+    v = espos_sk_buffer_kb(v, espos_config_is_set(ESPOS_CFG_NS_SK, ESPOS_CFG_SK_BUFFER_KB),
+                           CONFIG_ESPOS_SK_BUFFER_KB_DEFAULT);
     size_t bytes = (size_t)v * 1024;
     v = 20;
     espos_config_get_i32(ESPOS_CFG_NS_SK, ESPOS_CFG_SK_DRAIN_PER_S, &v);
@@ -169,6 +171,7 @@ static void load_cfg(void)
         if (nd) {
             espos_sk_delta_destroy(s.delta);
             s.delta = nd;
+            ESP_LOGI(TAG, "offline buffer: up to %u messages / %u KiB", (unsigned)msgs, (unsigned)(bytes / 1024));
         }
     } else {
         espos_sk_delta_set_label(s.delta, s.label);
