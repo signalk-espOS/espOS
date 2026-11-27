@@ -65,9 +65,14 @@ satellite was set up for. Called before `start()`, it only records the
 choice, so a device that should not listen never loads WakeNet:
 
 ```cpp
-sat.set_wake_enabled(false);  // push-to-talk only
-sat.start();
+if (sat.set_wake_enabled(false)) {  // push-to-talk only
+  sat.start();
+}
 ```
+
+Before `start()` nothing else holds the satellite's lifecycle lock, so a
+false there means another task was switching it at that moment and the
+choice was not recorded. Try again rather than start with WakeNet.
 
 While the satellite runs, `false` from `set_wake_enabled()` means the
 switch did not complete: a network wake task that is still in an

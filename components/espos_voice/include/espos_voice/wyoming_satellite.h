@@ -439,6 +439,9 @@ class WyomingSatellite {
     WakeEngine* e = nullptr;
   };
   char wake_word_[24] = "";  // the first engine's word, see wake_word()
+  // An engine a reader still held when it was torn down; stop_wake_backend()
+  // deletes it once the readers are gone. Under lifecycle_.
+  WakeEngine* zombie_ = nullptr;
 
   void
   start_wake_pipeline();  // detection -> pause engine -> run pipeline -> resume
@@ -456,8 +459,12 @@ class WyomingSatellite {
   // set_wake_enabled()'s choice; start() and set_wake_network() honour it.
   std::atomic<bool> wake_wanted_{true};
   // Between ota_quiesce() and ota_resume(), so an engine started in between
-  // starts parked. Read and written under lifecycle_.
-  bool ota_parked_ = false;
+  // starts parked. Atomic: start_wake_pipeline() reads it on the engine's
+  // fetch task, without lifecycle_.
+  std::atomic<bool> ota_parked_{false};
+  // While a detection's utterance holds the engine paused (see
+  // start_wake_pipeline() and ota_resume()).
+  std::atomic<bool> detection_paused_{false};
   // Serialises start()/stop()/set_wake_network()/set_wake_enabled() and the
   // OTA hooks: they all tear down and build up the same back-ends, and can
   // arrive from any task.
