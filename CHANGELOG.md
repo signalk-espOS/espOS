@@ -15,6 +15,17 @@ pull request. The `[Unreleased]` block below was written by hand before the
 switch; its entries belong to the next feature release and are folded into
 that section when it is cut.
 
+## 0.32.3 (2026-11-27)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Fixed
+* fix(sk): end subscriptions without making signalk-server close the stream by @dirkwa in https://github.com/signalk-espOS/espOS/pull/339
+
+
+**Full Changelog**: https://github.com/signalk-espOS/espOS/compare/v0.32.2...v0.32.3
+
 ## 0.32.2 (2026-11-26)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
