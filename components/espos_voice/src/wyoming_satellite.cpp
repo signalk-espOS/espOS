@@ -1250,25 +1250,23 @@ void WyomingSatellite::start_wake_pipeline() {
   if (config_.awake_cue) play_wake_tone();
   run_detection_pipeline();
   if (e) {
+    // Not before the utterance's stream has let go of the mic, which has one
+    // reader: a pipeline that timed out or was cut short leaves run_mic() in
+    // its release tail. This is the fetch task, which the utterance held
+    // anyway; a teardown or stop() ends the wait at once. The pause stays
+    // ours until then, so ota_resume() cannot resume under the stream either.
+    while ((listening_.load() || mic_running_.load()) &&
+           !wake_teardown_.load() && running_.load()) {
+      vTaskDelay(pdMS_TO_TICKS(10));
+    }
     // The engine keeps one pause flag for two reasons, this utterance and an
     // OTA download; whichever ends last resumes. This side clears its flag
     // before it reads the OTA one, ota_resume() the other way round, so at
     // least one of the two sees the other done (resume() is idempotent).
+    // Not during a teardown, which stops this engine next.
     detection_paused_.store(false);
-    // Not during a teardown, which stops this engine next. And not while the
-    // utterance's stream still holds the mic, which has one reader: a
-    // pipeline that timed out or was cut short leaves run_mic() in its
-    // release tail.
-    for (int i = 0; i < 300 && (listening_.load() || mic_running_.load());
-         i++) {
-      if (wake_teardown_.load()) break;
-      vTaskDelay(pdMS_TO_TICKS(10));
-    }
-    const bool mic_free = !listening_.load() && !mic_running_.load();
-    if (!ota_parked_.load() && !wake_teardown_.load() && mic_free) {
+    if (!ota_parked_.load() && !wake_teardown_.load() && running_.load()) {
       e->resume();
-    } else if (!mic_free && !wake_teardown_.load()) {
-      ESP_LOGW(kTag, "mic still streaming — wake word resumes on the next one");
     }
   }
 }
