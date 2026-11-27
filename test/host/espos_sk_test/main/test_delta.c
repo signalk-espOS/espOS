@@ -4,6 +4,7 @@
 #include <string.h>
 #include "unity.h"
 #include "espos_sk_delta.h"
+#include "espos_sk_priv.h"
 
 static espos_sk_delta_t *mk(size_t max_msgs, size_t max_bytes, uint32_t drain)
 {
@@ -681,4 +682,17 @@ TEST_CASE("no_drop: a window too large for the ring is dropped, not refused fore
     TEST_ESP_OK(espos_sk_delta_publish(d, "a.b", "1", 3000));
     TEST_ESP_OK(espos_sk_delta_flush(d, 3000));
     espos_sk_delta_destroy(d);
+}
+
+TEST_CASE("offline buffer size: a firmware default replaces the key's default only while unset", "[delta]")
+{
+    /* sk.buffer_kb unset reads its descriptor default, 32 */
+    TEST_ASSERT_EQUAL_INT32(8, espos_sk_buffer_kb(32, false, 8));
+    /* a value someone wrote wins, even one equal to the descriptor default */
+    TEST_ASSERT_EQUAL_INT32(32, espos_sk_buffer_kb(32, true, 8));
+    TEST_ASSERT_EQUAL_INT32(64, espos_sk_buffer_kb(64, true, 8));
+    /* 0 keeps the descriptor default (a chip with PSRAM) */
+    TEST_ASSERT_EQUAL_INT32(32, espos_sk_buffer_kb(32, false, 0));
+    /* below the key's minimum reads as the minimum */
+    TEST_ASSERT_EQUAL_INT32(4, espos_sk_buffer_kb(32, false, 2));
 }

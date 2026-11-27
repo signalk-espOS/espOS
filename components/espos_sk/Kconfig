@@ -245,6 +245,25 @@ menu "espOS SignalK"
             overflow behaviour. ESPOS_SK_PENDING_MAX in espos_sk_delta.h stays
             the cap callers are told about.
 
+    config ESPOS_SK_BUFFER_KB_DEFAULT
+        int "Offline buffer size while sk.buffer_kb is unset (KiB, 0 = 32)"
+        default 8 if !SPIRAM
+        default 0
+        range 0 512
+        help
+            The offline buffer holds deltas while the stream is down, and it
+            takes them from internal RAM one message at a time, so it costs
+            nothing until the server goes away and then grows to its limit.
+            sk.buffer_kb's own default, 32 KiB, is a lot for a chip without
+            PSRAM: on a classic ESP32 with the server down, a 32 KiB buffer
+            next to the WiFi stack and the HTTP server ended in an espos_health
+            restart on low memory after about nine minutes. 8 KiB stayed flat.
+
+            This value replaces that default on such a chip. It applies only
+            while sk.buffer_kb has never been set: a value written through the
+            config API or the web UI always wins. 0 keeps sk.buffer_kb's own
+            default; values below 4 are read as 4, the key's minimum.
+
     config ESPOS_SK_NOTIFICATIONS
         bool "Device-health notifications"
         default y

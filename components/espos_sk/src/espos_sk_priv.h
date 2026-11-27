@@ -278,6 +278,21 @@ bool espos_sk_ws_live(void);
  * not run. Any task. */
 void espos_sk_token_describe(char *out, size_t n);
 
+/* The offline buffer's size in KiB. `configured` is what sk.buffer_kb reads
+ * (its descriptor default while unset); `firmware_default` is
+ * CONFIG_ESPOS_SK_BUFFER_KB_DEFAULT, which replaces that descriptor default on
+ * a chip without PSRAM (0 = keep it). A value someone set always wins. */
+static inline int32_t espos_sk_buffer_kb(int32_t configured, bool is_set, int32_t firmware_default)
+{
+    if (is_set || firmware_default <= 0) {
+        return configured;
+    }
+    if (firmware_default < 4) {
+        return 4; /* the key's minimum */
+    }
+    return firmware_default;
+}
+
 /* SignalK clock fallback: follows navigation.datetime while espos_time is
  * unset, and stands down once a better source syncs (sk_time.c). */
 void espos_sk_time_start(void);

@@ -232,8 +232,11 @@ How a value gets to the server (`sk_delta.c` is plain C and unit-tested;
    takes about 370 bytes, so lower it on a board short of memory.
 2. **Buffering** while the stream is down (`sk.buffer_msgs` / `sk.buffer_kb`,
    128 messages or 32 KiB by default). When it is full the oldest messages go
-   first, counted in `ws.dropped`. Batches keep closing while offline, so a
-   path's history is kept, not only its latest value.
+   first, counted in `ws.dropped`. The buffer takes internal RAM a message at a
+   time, so it costs nothing until an outage. On a chip without PSRAM the
+   size defaults to 8 KiB instead (`CONFIG_ESPOS_SK_BUFFER_KB_DEFAULT`) while
+   `sk.buffer_kb` is unset; a value you set always wins. Batches keep closing
+   while offline, so a path's history is kept, not only its latest value.
 3. **Draining** after a reconnect at `sk.drain_per_s` (20 per second by
    default), so the backlog doesn't swamp the server. New values queue behind
    it, so each path stays in order.
