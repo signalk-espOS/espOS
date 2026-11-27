@@ -170,6 +170,8 @@ bool WyomingSatellite::stop_wake_backend() {
     ESP_LOGI(kTag, "the wake engine that did not stop has stopped");
     delete stuck_engine_;
     stuck_engine_ = nullptr;
+    espos_health_report("wakeService", ESPOS_HEALTH_NORMAL,
+                        "");  // no restart needed
   }
   // DETACH the engine pointer first: a reader that loads it from now on sees
   // null. One that loaded it before holds an EngineRef, and the engine is
