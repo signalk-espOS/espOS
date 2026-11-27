@@ -1410,6 +1410,14 @@ bool WyomingSatellite::probe_mic_levels(
       if (m) xSemaphoreGive(m);
     }
   } unlock{lifecycle_};
+  // The probe reconfigures and closes the shared RX, which a kept engine's
+  // blocked read may still be on.
+  if (stuck_engine_) {
+    ESP_LOGW(
+        kTag,
+        "mic probe refused: a wake engine that did not stop holds the mic");
+    return false;
+  }
   WakeEngine* e =
       config_.on_device_wake && !ota_parked_ ? wake_engine_.load() : nullptr;
   if (e) e->pause();
