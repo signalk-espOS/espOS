@@ -191,6 +191,26 @@ size_t espos_sk_frame_parse(const char *json, size_t len, espos_sk_frame_t *info
     return delivered;
 }
 
+bool espos_sk_frame_has_capability(const espos_sk_frame_t *info, const char *capability)
+{
+    if (!info || info->kind != ESPOS_SK_FRAME_HELLO || !info->_priv || !capability) {
+        return false;
+    }
+    const arena_t *a = info->_priv;
+    const cJSON *caps = cJSON_GetObjectItem(a->root, "capabilities");
+    if (!cJSON_IsArray(caps)) {
+        return false; /* cJSON_ArrayForEach would walk an object's members too */
+    }
+    const cJSON *c;
+    cJSON_ArrayForEach(c, caps)
+    {
+        if (cJSON_IsString(c) && strcmp(c->valuestring, capability) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void espos_sk_frame_free(espos_sk_frame_t *info)
 {
     arena_t *a = info->_priv;

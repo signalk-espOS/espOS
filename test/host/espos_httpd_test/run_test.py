@@ -1037,6 +1037,11 @@ class MockSignalK:
         self.values = {}        # path -> current value, served as the REST node {"value": …}
         self.subs = []          # subscribe frames received on the stream
         self.unsubs = []
+        # What the hello lists; ["subscriptionIds"] makes this a server with
+        # signalk-server#3288. Without it, like signalk-server 2.38, any
+        # unsubscribe but unsubscribe-all closes the connection.
+        self.capabilities = None
+        self.closed_on_unsub = 0
         self.puts = []          # {"requestId","path","value"} received via the stream
         self.put_reply = {"state": "COMPLETED", "statusCode": 200}   # what the mock answers a PUT with
         self.raw_frames = []    # non-delta, non-put frames from the client
@@ -1074,8 +1079,10 @@ class MockSignalK:
                 self.end_headers()
                 sock = self.connection
                 sock.settimeout(1.0)
-                hello = json.dumps({"name": "signalk-server", "version": "2.31.1", "self": "vessels." + mock.self_urn}).encode()
-                sock.sendall(bytes([0x81, len(hello)]) + hello)
+                hello = {"name": "signalk-server", "version": "2.31.1", "self": "vessels." + mock.self_urn}
+                if mock.capabilities is not None:
+                    hello["capabilities"] = mock.capabilities
+                MockSignalK.ws_send(sock, hello)
                 mock.ws_open += 1
                 mock.ws_clients.append(sock)
                 buf = b""
@@ -1121,6 +1128,17 @@ class MockSignalK:
                                     mock.subs.append(doc)
                                 elif "unsubscribe" in doc:
                                     mock.unsubs.append(doc)
+                                    rows = doc.get("unsubscribe") or []
+                                    every = doc.get("context") == "*" and len(rows) == 1 and rows[0].get("path") == "*"
+                                    by_id = ("subscriptionIds" in (mock.capabilities or []) and rows
+                                             and all(isinstance(r.get("subscriptionId"), str) for r in rows))
+                                    if not (every or by_id):
+                                        # signalk-server's subscriptionmanager throws, and
+                                        # processUnsubscribe ends the connection.
+                                        mock.closed_on_unsub += 1
+                                        MockSignalK.ws_send(sock, "Only unsubscribe-all supported")
+                                        sock.sendall(bytes([0x88, 0]))
+                                        raise ConnectionError("closed on unsubscribe")
                                 elif "put" in doc:
                                     mock.puts.append({"requestId": doc.get("requestId"), **doc["put"]})
                                     if mock.put_reply is not None:
@@ -1894,6 +1912,9 @@ class SkInboundTests(unittest.TestCase):
                                      if any(x["path"] == "navigation.*" for x in s["subscribe"])), None), timeout=5)
         self.assertIsNotNone(sub, "device must send a subscribe frame")
         self.assertEqual(sub["context"], "vessels.self")
+        # One pattern per frame, named so a server with ids can end it alone.
+        self.assertEqual(sub["subscriptionId"], "navigation.*")
+        self.assertEqual(len(sub["subscribe"]), 1)
         self.assertEqual(sub["subscribe"][0]["path"], "navigation.*")
         self.assertEqual(sub["subscribe"][0]["period"], 500)
         self.assertEqual(sub["subscribe"][0]["policy"], "instant")
@@ -2007,23 +2028,40 @@ class SkInboundTests(unittest.TestCase):
         # fallback) are not this test's business, but they are counted.
         own_subs = sum(1 for s in self.mock.subs for x in s["subscribe"] if x["path"] == "navigation.datetime")
         own_subs = 1 if own_subs else 0
+        _, _, _, sk0 = req("GET", "/api/v1/sk/status")
+        n_unsubs, n_subs = len(self.mock.unsubs), len(self.mock.subs)
         st, _, _, js = req("POST", "/__harness/sk/sub", {"unsubscribe": self.h1})
         self.assertEqual(js["result"], "ESP_OK")
-        un = wait_for(lambda: self.mock.unsubs[-1] if self.mock.unsubs else None, timeout=5)
+        # The mock, like signalk-server 2.38, lists no subscriptionIds: the
+        # device ends every subscription and subscribes the rest again,
+        # because any other unsubscribe would make the server close the stream.
+        un = wait_for(lambda: self.mock.unsubs[n_unsubs] if len(self.mock.unsubs) > n_unsubs else None, timeout=5)
         self.assertIsNotNone(un)
-        self.assertEqual(un["unsubscribe"][0]["path"], "navigation.*")
-        # drop the stream: everything still subscribed must be re-sent in one frame
+        self.assertEqual(un, {"context": "*", "unsubscribe": [{"path": "*"}]})
+        again = wait_for(
+            lambda: (lambda xs: xs if {"environment.mode", "notifications.*"} <= xs else None)
+                    ({x["path"] for s in self.mock.subs[n_subs:] for x in s["subscribe"]}),
+            timeout=5)
+        self.assertIsNotNone(again, self.mock.subs[n_subs:])
+        self.assertNotIn("navigation.*", again)
+        self.assertEqual(self.mock.closed_on_unsub, 0)
+        _, _, _, sk1 = req("GET", "/api/v1/sk/status")
+        self.assertTrue(sk1["ws"]["connected"])
+        self.assertEqual(sk1["ws"]["reconnects"], sk0["ws"]["reconnects"])   # the stream stayed up
+        # drop the stream: everything still subscribed must be sent again
         n_before = len(self.mock.subs)
         self.mock.ws_accept = False
         wait_sk(lambda j: not j["ws"]["connected"], timeout=10)
         self.mock.ws_accept = True
         js = wait_sk(lambda j: j["ws"]["connected"], timeout=25)
         self.assertIsNotNone(js, sk_status())
-        sub = wait_for(lambda: self.mock.subs[-1] if len(self.mock.subs) > n_before else None, timeout=5)
-        self.assertIsNotNone(sub)
         # The firmware's own subscription (the clock fallback) is resent too;
         # what this test is about is that the app's survived the reconnect.
-        paths = sorted(x["path"] for x in sub["subscribe"] if x["path"] != "navigation.datetime")
+        paths = wait_for(
+            lambda: (lambda xs: xs if {"environment.mode", "notifications.*"} <= set(xs) else None)
+                    (sorted(x["path"] for s in self.mock.subs[n_before:] for x in s["subscribe"]
+                            if x["path"] != "navigation.datetime")),
+            timeout=5)
         self.assertEqual(paths, ["environment.mode", "notifications.*"])
         st, _, _, sk = req("GET", "/api/v1/sk/status")
         # The two this test registered, plus whatever the firmware holds itself.
@@ -2041,6 +2079,34 @@ class SkInboundTests(unittest.TestCase):
         self.assertIsNotNone(r, self.rx()["count"])
         self.assertEqual(r["count"], 120)
 
+
+    def test_08_unsubscribe_by_id_when_the_server_lists_it(self):
+        # A server with signalk-server#3288 says so in its hello; reconnect so
+        # the device reads one that does.
+        self.mock.capabilities = ["subscriptionIds"]
+        try:
+            self.mock.ws_accept = False
+            wait_sk(lambda j: not j["ws"]["connected"], timeout=10)
+            self.mock.ws_accept = True
+            self.assertIsNotNone(wait_sk(lambda j: j["ws"]["connected"], timeout=25), sk_status())
+            _, _, _, js = req("POST", "/__harness/sk/sub", {"pattern": "tanks.*"})
+            h = js["handle"]
+            self.assertIsNotNone(wait_for(lambda: next((s for s in self.mock.subs
+                                                        if s.get("subscriptionId") == "tanks.*"), None), timeout=5))
+            _, _, _, sk0 = req("GET", "/api/v1/sk/status")
+            n_unsubs, n_subs = len(self.mock.unsubs), len(self.mock.subs)
+            st, _, _, js = req("POST", "/__harness/sk/sub", {"unsubscribe": h})
+            self.assertEqual(js["result"], "ESP_OK")
+            un = wait_for(lambda: self.mock.unsubs[n_unsubs] if len(self.mock.unsubs) > n_unsubs else None, timeout=5)
+            self.assertEqual(un, {"context": "*", "unsubscribe": [{"subscriptionId": "tanks.*"}]})
+            time.sleep(0.5)
+            self.assertEqual(len(self.mock.unsubs), n_unsubs + 1)    # that one alone
+            self.assertEqual(len(self.mock.subs), n_subs)            # and nothing subscribed again
+            self.assertEqual(self.mock.closed_on_unsub, 0)
+            _, _, _, sk1 = req("GET", "/api/v1/sk/status")
+            self.assertEqual(sk1["ws"]["reconnects"], sk0["ws"]["reconnects"])
+        finally:
+            self.mock.capabilities = None
 
 class WifiFailureTests(unittest.TestCase):
     """Driver reports AUTH_FAIL (202) on every attempt."""
