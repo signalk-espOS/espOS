@@ -196,7 +196,7 @@ bool WyomingSatellite::stop_wake_backend() {
       return false;
     }
   }
-  if (!wake_task_) return true;
+  if (!wake_task_) return !stuck_engine_;
   // The network wake task blocks in connect()/recv() with short timeouts, so
   // it notices wake_run_ on its next tick. Its own flag, not running_: the
   // server and mic tasks loop on running_ too, and a satellite that is
@@ -207,7 +207,7 @@ bool WyomingSatellite::stop_wake_backend() {
     return false;  // wake_task_ kept: the next teardown joins it again
   }
   wake_task_ = nullptr;
-  return true;
+  return !stuck_engine_;
 }
 
 void WyomingSatellite::keep_stuck_engine(WakeEngine* e) {
@@ -329,7 +329,7 @@ bool WyomingSatellite::set_wake_enabled(bool on) {
   if (on) {
     return wake_engine_.load() || wake_task_running() || start_wake_backend();
   }
-  if (!wake_engine_.load() && !wake_task_) return true;
+  if (!wake_engine_.load() && !wake_task_ && !stuck_engine_) return true;
   const bool ok = stop_wake_backend();
   // A warning about an unreachable wake service would otherwise outlive the
   // wake word it was about.
