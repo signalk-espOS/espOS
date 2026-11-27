@@ -49,8 +49,25 @@ voice where the silicon cannot run WakeNet.
 
 ## Wake word
 
-The satellite owns a `WakeEngine` directly, so on-device wake is not
-optional today. Detection pauses the engine for the duration of an
-utterance and re-arms it afterwards; see the note in `wake_engine.cpp`
-about restoring the shared I2S capture clock after playback, which is
-what stops WakeNet going deaf after the first TTS reply.
+The satellite owns a `WakeEngine` directly and listens with it unless
+`config.on_device_wake` is false; `set_wake_network()` moves detection to
+a network wake service (openWakeWord) at runtime. Detection pauses the
+engine for the duration of an utterance and re-arms it afterwards; see
+the note in `wake_engine.cpp` about restoring the shared I2S capture
+clock after playback, which is what stops WakeNet going deaf after the
+first TTS reply.
+
+`set_wake_enabled(false)` switches the wake word off and leaves the
+satellite on push-to-talk: the engine is deleted, which gives the mic and
+WakeNet's memory back, and a network wake task disconnects from its
+service. `set_wake_enabled(true)` brings back whichever of the two the
+satellite was set up for. Called before `start()`, it only records the
+choice, so a device that should not listen never loads WakeNet:
+
+```cpp
+sat.set_wake_enabled(false);  // push-to-talk only
+sat.start();
+```
+
+To switch voice off entirely, `stop()` the satellite: its port closes, and
+the orchestrator sees the device go away. `start()` brings it back.
