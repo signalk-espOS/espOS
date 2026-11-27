@@ -252,6 +252,16 @@ waits and retries on the same backoff curve as WiFi (`ws.next_retry_s`).
 Changes to the stream settings apply without a restart; `ws_enabled=false`
 closes the connection and keeps buffering.
 
+**During a firmware update.** Between `ESPOS_EVENT_UPDATE_STARTED` and
+`_FINISHED` (an OTA download, or a radio co-processor update) the client
+starts nothing new on the network: no token request or check, no scheme
+probe, no discovery round (a `POST /sk/discover` waits for the end), no
+metadata fetch and no stream connect. The download needs the airtime and the
+internal RAM, and on a chip without PSRAM a TLS handshake beside it competes
+for the same internal heap. A stream that is already open stays open. A
+successful install restarts the device; after a failed one the client
+carries on where it was, as it does when the network comes back.
+
 **Metadata.** `espos_sk_declare_meta(path, meta_json, period_ms)` records
 metadata for a path that is not in the Signal K specification; spec paths
 belong to the server ([Metadata is impossible to get wrong](#metadata-is-impossible-to-get-wrong)).

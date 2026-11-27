@@ -23,6 +23,9 @@ if the new one doesn't come up properly.
    (`CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT`) against the public key
    built into the running firmware. Anything else is rejected with
    `image rejected: bad signature or corrupt`, and nothing changes.
+   While the image downloads, Bluetooth scanning pauses and the Signal K
+   client starts no new requests (`ESPOS_EVENT_UPDATE_STARTED` /
+   `_FINISHED`); both resume if the install fails.
 3. **Restart.** About 1.5 s after the status says `ready`, the device
    restarts into the new slot.
 4. **Keep it or go back.** The new image starts as `pending_verify`

@@ -316,6 +316,20 @@ static inline int32_t espos_sk_buffer_kb(int32_t configured, bool is_set, int32_
     return firmware_default;
 }
 
+/* A firmware image is downloading: this chip's (espos_ota) or a radio
+ * co-processor's, between ESPOS_EVENT_UPDATE_STARTED and _FINISHED. Any task. */
+bool espos_sk_update_running(void);
+
+/* May the client start something on the network: a token leg, a scheme probe,
+ * a metadata fetch, a stream connect? Not without a network, and not while an
+ * image downloads -- the download wants the airtime and the internal RAM, and
+ * on a chip without PSRAM a TLS handshake next to it competes for the same
+ * heap. A stream already open stays open; nothing new starts. */
+static inline bool espos_sk_may_dial(bool net_up, bool update_running)
+{
+    return net_up && !update_running;
+}
+
 /* SignalK clock fallback: follows navigation.datetime while espos_time is
  * unset, and stands down once a better source syncs (sk_time.c). */
 void espos_sk_time_start(void);

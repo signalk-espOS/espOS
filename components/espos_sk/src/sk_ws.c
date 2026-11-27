@@ -762,7 +762,10 @@ static void ws_task(void *arg)
         bool have = espos_sk_get_server(&srv) == ESP_OK && espos_sk_get_token(token, sizeof(token)) == ESP_OK &&
                     allowed;
         bool ready = s.enabled && net_up && have;
-        check_stall(ready, connected, &down_since_ms);
+        /* An open stream stays open through a firmware download; a closed
+         * one waits for the download to end, and so does the stall alarm. */
+        bool update_running = espos_sk_update_running();
+        check_stall(ready && !update_running, connected, &down_since_ms);
         if (connected) {
             bool changed = strcmp(srv.host, cur_srv.host) != 0 || srv.port != cur_srv.port ||
                            srv.tls != cur_srv.tls || strcmp(token, cur_token) != 0;
@@ -813,6 +816,10 @@ static void ws_task(void *arg)
                 lock();
                 s.st.next_retry_s = 0;
                 unlock();
+                vTaskDelay(pdMS_TO_TICKS(idle));
+                continue;
+            }
+            if (update_running) {
                 vTaskDelay(pdMS_TO_TICKS(idle));
                 continue;
             }
@@ -899,6 +906,16 @@ static void ws_task(void *arg)
                 }
             }
 #endif
+            /* Waiting for the slot can take seconds, long enough for an
+             * update to have started in the meantime. */
+            if (espos_sk_update_running()) {
+#if CONFIG_ESPOS_SK_TLS
+                if (srv.tls) {
+                    espos_sk_tls_handshake_end();
+                }
+#endif
+                continue;
+            }
             const uint32_t connect_started_ms = now_ms();
             const int rc = esp_transport_connect(ws, srv.host, srv.port,
                                                  SK_WS_CONNECT_TIMEOUT_MS);

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 set(sk_src "${CMAKE_CURRENT_LIST_DIR}/../../../../components/espos_sk")
 idf_component_register(
-    SRCS test_main.c test_token_sm.c test_store.c test_delta.c test_parse.c test_tls_policy.c test_select.c test_meta.c test_ws_gather.c test_unsubscribe.c test_sub_frames.c test_http_report.c test_probe.c "${sk_src}/src/token_sm.c" "${sk_src}/src/sk_store.c" "${sk_src}/src/sk_delta.c" "${sk_src}/src/sk_parse.c" "${sk_src}/src/sk_tls_policy.c" "${sk_src}/src/sk_select.c" "${sk_src}/src/sk_meta.c" "${sk_src}/src/sk_inbound.c"
+    SRCS test_main.c test_token_sm.c test_store.c test_delta.c test_parse.c test_tls_policy.c test_select.c test_meta.c test_ws_gather.c test_unsubscribe.c test_sub_frames.c test_http_report.c test_probe.c test_dial.c "${sk_src}/src/token_sm.c" "${sk_src}/src/sk_store.c" "${sk_src}/src/sk_delta.c" "${sk_src}/src/sk_parse.c" "${sk_src}/src/sk_tls_policy.c" "${sk_src}/src/sk_select.c" "${sk_src}/src/sk_meta.c" "${sk_src}/src/sk_inbound.c"
     INCLUDE_DIRS "." "${sk_src}/include" "${sk_src}/src"
     PRIV_REQUIRES unity freertos nvs_flash esp_partition esp_hw_support espressif__cjson
     WHOLE_ARCHIVE)

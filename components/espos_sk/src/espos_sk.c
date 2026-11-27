@@ -7,6 +7,7 @@
  * components) talks to it through a command queue and reads a snapshot
  * under a mutex.
  */
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -115,7 +116,8 @@ static struct {
     uint32_t anchor_unheard_rounds;
     size_t server_count;
     uint32_t last_discovery_ms;
-    bool net_was_up;
+    bool could_dial; /* can_dial() as of the last pass of the task loop */
+    bool discover_requested; /* a POST /sk/discover held by a firmware update */
     char snap_source[12];
     char hostname[33];
 } s;
@@ -123,6 +125,36 @@ static struct {
 /* Set once by espos_start() before the first config load; a plain static
  * because it is read on the SK task and written before that task exists. */
 static char s_app_name[33];
+
+/* Set and cleared on the default event loop (on_update_event), read by both
+ * client tasks. */
+static atomic_bool s_update_running;
+
+bool espos_sk_update_running(void)
+{
+    return atomic_load(&s_update_running);
+}
+
+/* No FINISHED without a STARTED before it, but a STARTED may be dropped on a
+ * full queue (espos_ota retries only FINISHED), so this is a flag, not a count:
+ * a FINISHED nobody was waiting for clears nothing that was set. */
+static void on_update_event(void *arg, esp_event_base_t base, int32_t id, void *data)
+{
+    (void)arg;
+    (void)base;
+    (void)data;
+    bool running = id == ESPOS_EVENT_UPDATE_STARTED;
+    if (atomic_exchange(&s_update_running, running) != running) {
+        ESP_LOGI(TAG, "%s",
+                 running ? "firmware update downloading: starting nothing new until it ends" : "firmware update ended: resuming");
+    }
+}
+
+/* The network is up and no image is downloading; see espos_sk_may_dial(). */
+static bool can_dial(void)
+{
+    return espos_sk_may_dial(espos_net_is_up(), espos_sk_update_running());
+}
 
 static uint32_t now_ms(void)
 {
@@ -396,8 +428,10 @@ static bool resolve_scheme(espos_sk_server_t *srv, int advertised)
      * http" for (host, port), so a manual https server was never found by a
      * device that boots before its network is up -- every device -- or before
      * the server does, which on a boat is the usual order. The network coming
-     * up and every leg that runs on the guess ask again. */
-    if (!espos_net_is_up()) {
+     * up and every leg that runs on the guess ask again. A firmware download
+     * counts as no network here: the probe is a leg like any other, and the
+     * end of the download asks again the way the network coming up does. */
+    if (!can_dial()) {
         s.scheme_provisional = true;
         return false;
     }
@@ -772,6 +806,12 @@ static void handle_cmd(const cmd_t *c)
         break;
     }
     case CMD_DISCOVER:
+        /* Held while an image downloads, and run once the client may dial
+         * again (the edge in sk_task()). */
+        if (espos_sk_update_running()) {
+            s.discover_requested = true;
+            break;
+        }
         /* Deliberately NOT discovery_wanted(): this is an explicit request
          * from POST /sk/discover, and the endpoint has already answered
          * "discovering". A manual host suppresses the periodic browse, but
@@ -894,10 +934,25 @@ static bool run_action(void)
      * runs on it is the cadence to ask again at, so a server that came up
      * after the device is reached over the scheme it speaks. Cheap when it
      * answers; paced by the machine's own backoff when it does not. */
-    if (s.scheme_provisional && espos_net_is_up()) {
+    if (s.scheme_provisional && can_dial()) {
         select_server();
     }
     maybe_rotate_unreachable();
+    return true;
+}
+
+/* Waits up to wait_ms for a command and handles it. False on CMD_STOP. */
+static bool wait_cmd(uint32_t wait_ms)
+{
+    cmd_t c;
+    if (xQueueReceive(s.cmds, &c, pdMS_TO_TICKS(wait_ms)) == pdTRUE) {
+        if (c.type == CMD_STOP) {
+            espos_sk_tok_event(&s.sm, ESPOS_SK_EV_STOP, NULL);
+            return false;
+        }
+        handle_cmd(&c);
+        free(c.str);
+    }
     return true;
 }
 
@@ -920,8 +975,8 @@ static void sk_task(void *arg)
      * the network does come up -- ten seconds of a device on the cable doing
      * nothing. Discovered servers need no such care: there are none until
      * then. The up edge below selects. */
-    s.net_was_up = espos_net_is_up();
-    if (s.net_was_up) {
+    s.could_dial = can_dial();
+    if (s.could_dial) {
         select_server();
     }
     p_status_changed(NULL);
@@ -929,10 +984,11 @@ static void sk_task(void *arg)
     for (;;) {
         /* 0. network came up: discover right away (mDNS is useless before),
          * and select a manual host that could not be selected, or probed,
-         * without it */
+         * without it. The end of a firmware download is the same edge: what
+         * it held back runs now. */
         {
-            bool up = espos_net_is_up();
-            if (up && !s.net_was_up) {
+            bool up = can_dial();
+            if (up && !s.could_dial) {
                 if (discovery_wanted()) {
                     s.discover_due_ms = at(0);
                 }
@@ -940,10 +996,32 @@ static void sk_task(void *arg)
                     select_server();
                 }
             }
-            s.net_was_up = up;
+            s.could_dial = up;
+            /* after the edge, so this browse is the one it scheduled */
+            if (up && s.discover_requested) {
+                s.discover_requested = false;
+                if (s.discovery_enabled) {
+                    run_discovery();
+                }
+                s.discover_due_ms = at(s.discover_interval_ms);
+            }
         }
-        /* 1. run whatever the machine asked for (blocking HTTP) */
-        while (s.action != ACT_NONE && run_action()) {
+        /* While an image downloads: no leg, no timer, no browse, no metadata
+         * round. A queued action stays queued and a due timer stays due, so
+         * the machine carries on where it was once the download ends. Commands
+         * are still taken; a reselection they cause cannot probe (can_dial()). */
+        if (espos_sk_update_running()) {
+            if (!wait_cmd(1000)) {
+                break;
+            }
+            continue;
+        }
+        /* 1. run whatever the machine asked for (blocking HTTP). A leg takes
+         * seconds; an update that starts during one holds the next. */
+        while (s.action != ACT_NONE && !espos_sk_update_running() && run_action()) {
+        }
+        if (espos_sk_update_running()) {
+            continue;
         }
         /* 2. timers */
         uint32_t t = now_ms();
@@ -977,14 +1055,8 @@ static void sk_task(void *arg)
             int32_t d = (int32_t)(s.discover_due_ms - t);
             if (d < (int32_t)wait) wait = d > 0 ? (uint32_t)d : 0;
         }
-        cmd_t c;
-        if (xQueueReceive(s.cmds, &c, pdMS_TO_TICKS(wait)) == pdTRUE) {
-            if (c.type == CMD_STOP) {
-                espos_sk_tok_event(&s.sm, ESPOS_SK_EV_STOP, NULL);
-                break;
-            }
-            handle_cmd(&c);
-            free(c.str);
+        if (!wait_cmd(wait)) {
+            break;
         }
     }
     s.task = NULL;
@@ -1308,6 +1380,15 @@ esp_err_t espos_sk_start(void)
         s.api_registered = true;
     }
     espos_config_subscribe(on_config_change, NULL);
+    /* Both or neither: a STARTED without its FINISHED would hold the client
+     * until the next reboot. Without them espos_sk runs through an update as
+     * it did before. */
+    if (espos_event_subscribe(ESPOS_EVENT_UPDATE_STARTED, on_update_event, NULL) != ESP_OK ||
+        espos_event_subscribe(ESPOS_EVENT_UPDATE_FINISHED, on_update_event, NULL) != ESP_OK) {
+        espos_event_unsubscribe(ESPOS_EVENT_UPDATE_STARTED, on_update_event);
+        atomic_store(&s_update_running, false); /* in case a STARTED got in */
+        ESP_LOGW(TAG, "no update events: SignalK traffic continues during firmware updates");
+    }
     s.started = true;
     if (xTaskCreate(sk_task, "espos_sk", CONFIG_ESPOS_SK_TASK_STACK, NULL, tskIDLE_PRIORITY + 3, &s.task) != pdPASS) {
         s.started = false;
@@ -1323,12 +1404,17 @@ esp_err_t espos_sk_stop(void)
         return ESP_OK;
     }
     espos_config_unsubscribe(on_config_change, NULL);
+    espos_event_unsubscribe(ESPOS_EVENT_UPDATE_STARTED, on_update_event);
+    espos_event_unsubscribe(ESPOS_EVENT_UPDATE_FINISHED, on_update_event);
     espos_sk_time_stop();
     espos_sk_ws_stop();
     post_cmd(CMD_STOP, NULL);
     for (int i = 0; i < 100 && s.task; i++) {
         vTaskDelay(pdMS_TO_TICKS(100));
     }
+    /* Only now: cleared earlier, a paused task could run a queued leg on its
+     * way out. A start after this begins unpaused. */
+    atomic_store(&s_update_running, false);
     s.started = false;
     return ESP_OK;
 }
