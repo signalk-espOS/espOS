@@ -439,9 +439,6 @@ class WyomingSatellite {
     WakeEngine* e = nullptr;
   };
   char wake_word_[24] = "";  // the first engine's word, see wake_word()
-  // An engine a reader still held when it was torn down; stop_wake_backend()
-  // deletes it once the readers are gone. Under lifecycle_.
-  WakeEngine* zombie_ = nullptr;
 
   void
   start_wake_pipeline();  // detection -> pause engine -> run pipeline -> resume

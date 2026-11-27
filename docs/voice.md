@@ -70,9 +70,11 @@ if (sat.set_wake_enabled(false)) {  // push-to-talk only
 }
 ```
 
-Before `start()` nothing else holds the satellite's lifecycle lock, so a
-false there means another task was switching it at that moment and the
-choice was not recorded. Try again rather than start with WakeNet.
+Before `start()` a false means the choice was not recorded. Either
+another task was switching the satellite at that moment, and a second
+try succeeds, or the satellite could not create its lifecycle lock when
+it was constructed (out of memory), and every call fails. Do not start
+it with WakeNet in either case.
 
 While the satellite runs, `false` from `set_wake_enabled()` means the
 switch did not complete: a network wake task that is still in an

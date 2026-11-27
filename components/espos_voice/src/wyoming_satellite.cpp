@@ -50,10 +50,6 @@ WyomingSatellite::~WyomingSatellite() {
   // A wake task stop() could not join still gives wake_done_ and reads this
   // object on its way out; nothing here may go before it has.
   if (wake_task_) xSemaphoreTake(wake_done_, portMAX_DELAY);
-  if (zombie_) {
-    while (engine_readers_.load() > 0) vTaskDelay(pdMS_TO_TICKS(10));
-    delete zombie_;
-  }
   if (send_mutex_) vSemaphoreDelete(send_mutex_);
   if (mic_done_) vSemaphoreDelete(mic_done_);
   if (server_done_) vSemaphoreDelete(server_done_);
@@ -130,34 +126,21 @@ bool WyomingSatellite::start_wake_backend() {
 }
 
 bool WyomingSatellite::stop_wake_backend() {
-  // An engine a reader still held at the last teardown goes once it is free.
-  if (zombie_ && engine_readers_.load() == 0) {
-    delete zombie_;
-    zombie_ = nullptr;
-  }
   // DETACH the engine pointer first: a reader that loads it from now on sees
   // null. One that loaded it before holds an EngineRef, and the engine is
-  // stopped only once those are done -- probe_mic_levels() pauses and resumes
-  // it, and stop() deletes the semaphore those use.
+  // stopped and deleted only once those are done. Every reader is bounded
+  // (at most a 200 ms lock and a copy of the probe ring; the mic probe, the
+  // one long caller, holds lifecycle_ instead), so the wait has no limit and
+  // there is no engine left over to clean up later.
   if (WakeEngine* e = wake_engine_.exchange(nullptr)) {
-    // Readers are short; probe_mic_levels() is the longest at about 1 s.
-    for (int i = 0; i < 500 && engine_readers_.load() > 0; i++) {
+    for (int i = 0; engine_readers_.load() > 0; i++) {
+      if (i == 100) ESP_LOGW(kTag, "waiting for a wake engine reader");
       vTaskDelay(pdMS_TO_TICKS(10));
     }
     e->stop();  // joins the feed/fetch tasks + releases the mic
-    if (engine_readers_.load() == 0) {
-      delete e;
-    } else if (!zombie_) {
-      ESP_LOGE(kTag,
-               "wake engine still in use — deleting it at the next teardown");
-      zombie_ = e;
-    } else {
-      ESP_LOGE(
-          kTag,
-          "wake engine still in use, with one already waiting — leaking it");
-    }
+    delete e;
   }
-  if (!wake_task_) return !zombie_;
+  if (!wake_task_) return true;
   // The network wake task blocks in connect()/recv() with short timeouts, so
   // it notices wake_run_ on its next tick. Its own flag, not running_: the
   // server and mic tasks loop on running_ too, and a satellite that is
@@ -168,7 +151,7 @@ bool WyomingSatellite::stop_wake_backend() {
     return false;  // wake_task_ kept: the next teardown joins it again
   }
   wake_task_ = nullptr;
-  return !zombie_;
+  return true;
 }
 
 bool WyomingSatellite::set_wake_network(const std::string& host, uint16_t port,
