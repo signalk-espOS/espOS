@@ -162,8 +162,9 @@ void WakeEngine::fail_start() {
   running_.store(false);
 }
 
-void WakeEngine::stop() {
-  if (!running_.exchange(false)) return;
+bool WakeEngine::stop() {
+  if (stuck_) return false;
+  if (!running_.exchange(false)) return true;
   // JOIN both tasks: they observe running_==false and return within a tick
   // (feed after its ≤32 ms record_pcm, fetch after its ≤2 s AFE fetch), then
   // their tramps give feed_exited_/fetch_exited_. Only after BOTH have fully
@@ -171,21 +172,29 @@ void WakeEngine::stop() {
   // vTaskDelete a task that may be mid-WakeNet-inference or inside the
   // detection callback. The tasks self-delete, so no vTaskDelete here.
   //
-  // No time limit: destroying the AFE under a task that has not returned is
-  // a use-after-free, and both exit within seconds of running_ going false.
-  // A task still in the detection callback is the satellite's to end first
-  // (WyomingSatellite::stop_wake_backend() does).
-  auto join = [](SemaphoreHandle_t done, const char* which) {
-    while (xSemaphoreTake(done, pdMS_TO_TICKS(3000)) != pdTRUE) {
-      ESP_LOGW(kTag, "waiting for the wake %s task to exit", which);
-    }
+  // Bounded, and a task that misses it keeps everything: freeing the AFE or
+  // the semaphores under it would be a use-after-free, and waiting for ever
+  // on a driver read that never returns would hang the caller (the
+  // satellite holds its lifecycle lock here). The engine then stays as it
+  // is, stuck_, and must not be deleted. A task still in the detection
+  // callback is the satellite's to end first (stop_wake_backend() does).
+  auto joined = [](SemaphoreHandle_t done, const char* which) {
+    if (xSemaphoreTake(done, pdMS_TO_TICKS(5000)) == pdTRUE) return true;
+    ESP_LOGE(kTag, "wake %s task did not exit — keeping the engine", which);
+    return false;
   };
   if (feed_task_ && feed_exited_) {
-    join(feed_exited_, "feed");
+    if (!joined(feed_exited_, "feed")) {
+      stuck_ = true;
+      return false;
+    }
     feed_task_ = nullptr;
   }
   if (fetch_task_ && fetch_exited_) {
-    join(fetch_exited_, "fetch");
+    if (!joined(fetch_exited_, "fetch")) {
+      stuck_ = true;
+      return false;
+    }
     fetch_task_ = nullptr;
   }
   if (afe_data_ && afe_handle_) {
@@ -227,6 +236,7 @@ void WakeEngine::stop() {
   }
   probe_head_ = 0;
   probe_filled_ = 0;
+  return true;
 }
 
 size_t WakeEngine::pcm_snapshot(int16_t* out, size_t max_samples) {

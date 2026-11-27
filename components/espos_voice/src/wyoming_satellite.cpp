@@ -82,6 +82,22 @@ bool WyomingSatellite::start_wake_backend() {
   // a second one beside it would be two readers on a single-consumer mic.
   if (wake_task_ && !stop_wake_backend()) return false;
   if (config_.on_device_wake) {
+    // A stuck engine may still read the mic, which has one reader.
+    if (engine_stuck_) {
+      ESP_LOGE(kTag, "a wake engine that did not stop still holds the mic");
+      return false;
+    }
+    // An utterance's stream can still hold the mic: a detection cut short by
+    // a teardown leaves run_mic() in its release tail. Wait it out (bounded;
+    // false lets the caller try again).
+    for (int i = 0; i < 300 && (listening_.load() || mic_running_.load());
+         i++) {
+      vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    if (listening_.load() || mic_running_.load()) {
+      ESP_LOGW(kTag, "mic still streaming — wake word not started yet");
+      return false;
+    }
     // On-device wake: esp-sr AFE + WakeNet reads the mic locally. On a
     // detection it runs the same pipeline PTT does. Build + configure a local
     // first; only publish to wake_engine_ once it's live, so /hello never sees
@@ -146,14 +162,20 @@ bool WyomingSatellite::stop_wake_backend() {
       vTaskDelay(pdMS_TO_TICKS(10));
     }
     // A detection runs on the engine's fetch task and uses the engine until
-    // it returns. WakeEngine::stop() gives that task 3 s, an utterance takes
-    // up to 25: wait for the callback here, which the flag above cuts short.
-    for (int i = 0; in_detection_.load(); i++) {
-      if (i == 100) ESP_LOGW(kTag, "waiting for a wake detection to end");
+    // it returns; the flag above cuts its wait short. Bounded like the joins
+    // in WakeEngine::stop(): an engine whose tasks do not come out is left
+    // in place rather than freed under them or waited on for ever.
+    for (int i = 0; i < 500 && in_detection_.load(); i++) {
       vTaskDelay(pdMS_TO_TICKS(10));
     }
-    e->stop();  // joins the feed/fetch tasks + releases the mic
-    delete e;
+    if (!in_detection_.load() && e->stop()) {  // joins feed/fetch, frees mic
+      delete e;
+    } else {
+      ESP_LOGE(kTag, "wake engine did not stop — left in place");
+      espos_health_report("wakeService", ESPOS_HEALTH_WARN,
+                          "wake engine did not stop; restart the device");
+      engine_stuck_ = true;
+    }
   }
   if (!wake_task_) return true;
   // The network wake task blocks in connect()/recv() with short timeouts, so

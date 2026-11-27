@@ -55,7 +55,10 @@ class WakeEngine {
   // fetch tasks. Returns false if no model is present or AFE init fails
   // (wake is then simply unavailable; the rest of the satellite is fine).
   bool start();
-  void stop();
+  // False when a task did not exit in time: the engine then keeps the AFE,
+  // the mic and its semaphores for that task, and must not be deleted (a
+  // leak is the safe outcome; a restart frees it). True once stopped.
+  bool stop();
 
   // Pause / resume mic consumption. pause() blocks until the feed task has
   // released the mic (so the caller can hand it to run_mic()); resume()
@@ -81,7 +84,8 @@ class WakeEngine {
   void clear_probe();
 
  private:
-  void fail_start();  // undo a start() that failed before its tasks
+  bool stuck_ = false;  // stop() timed out on a task; see stop()
+  void fail_start();    // undo a start() that failed before its tasks
   static void feed_task_tramp(void* arg);
   static void fetch_task_tramp(void* arg);
   void feed_loop();
