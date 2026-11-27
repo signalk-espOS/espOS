@@ -21,6 +21,35 @@ extern std::atomic<WyomingSatellite*> g_ota_quiesce_target;
 
 namespace {
 constexpr const char* kTag = "wyoming_sat";
+
+// connect() without blocking, in slices: a host that drops SYNs keeps a
+// blocking connect() retransmitting far past stop_wake_backend()'s join
+// timeout, and a stop request has to be seen meanwhile. 5 s, or a
+// keep_going() that turns false, is a failed attempt.
+template <typename KeepGoing>
+bool connect_bounded(int sock, const sockaddr_in& addr, KeepGoing keep_going) {
+  const int flags = fcntl(sock, F_GETFL, 0);
+  fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+  bool ok = connect(sock, (const struct sockaddr*)&addr, sizeof(addr)) == 0;
+  if (!ok && errno == EINPROGRESS) {
+    for (int waited = 0; waited < 5000 && keep_going(); waited += 100) {
+      fd_set w;
+      FD_ZERO(&w);
+      FD_SET(sock, &w);
+      struct timeval tv = {.tv_sec = 0, .tv_usec = 100000};
+      const int r = select(sock + 1, nullptr, &w, nullptr, &tv);
+      if (r < 0) break;
+      if (r == 0) continue;
+      int err = 0;
+      socklen_t len = sizeof(err);
+      getsockopt(sock, SOL_SOCKET, SO_ERROR, &err, &len);
+      ok = err == 0;
+      break;
+    }
+  }
+  fcntl(sock, F_SETFL, flags);  // wake_session() sets its own timeouts
+  return ok;
+}
 }  // namespace
 
 WyomingSatellite::WyomingSatellite(espos_audio::AudioDriver* audio,
@@ -86,9 +115,22 @@ void WyomingSatellite::start() {
   }
 }
 
+void WyomingSatellite::free_stuck_engine() {
+  // A kept engine whose task has come out by now can go, and with it the
+  // block on starting another. Tried on every start and teardown.
+  if (stuck_engine_ && !in_detection_.load() && stuck_engine_->stop()) {
+    ESP_LOGI(kTag, "the wake engine that did not stop has stopped");
+    delete stuck_engine_;
+    stuck_engine_ = nullptr;
+    espos_health_report("wakeService", ESPOS_HEALTH_NORMAL,
+                        "");  // no restart needed
+  }
+}
+
 bool WyomingSatellite::start_wake_backend() {
   // An engine that did not stop may still read the mic, which has one
   // reader: no wake back-end of either kind starts beside it.
+  free_stuck_engine();
   if (stuck_engine_) {
     ESP_LOGE(kTag, "a wake engine that did not stop still holds the mic");
     return false;
@@ -164,15 +206,7 @@ bool WyomingSatellite::stop_wake_backend() {
     std::atomic<bool>& f;
     ~EndTeardown() { f.store(false); }
   } end_teardown{wake_teardown_};
-  // A kept engine whose task has come out by now can go, and with it the
-  // block on starting another.
-  if (stuck_engine_ && !in_detection_.load() && stuck_engine_->stop()) {
-    ESP_LOGI(kTag, "the wake engine that did not stop has stopped");
-    delete stuck_engine_;
-    stuck_engine_ = nullptr;
-    espos_health_report("wakeService", ESPOS_HEALTH_NORMAL,
-                        "");  // no restart needed
-  }
+  free_stuck_engine();
   // DETACH the engine pointer first: a reader that loads it from now on sees
   // null. One that loaded it before holds an EngineRef, and the engine is
   // stopped and deleted only once those are done. Every reader is bounded
@@ -875,7 +909,7 @@ void WyomingSatellite::run_wake() {
       close(sock);
       return;
     }
-    if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) != 0) {
+    if (!connect_bounded(sock, addr, [this] { return wake_should_run(); })) {
       close(sock);
       // Warn on the failed connect too, not only after a session drops: a
       // service that is unreachable from the start would otherwise retry

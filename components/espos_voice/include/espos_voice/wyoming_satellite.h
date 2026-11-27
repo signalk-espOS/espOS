@@ -474,6 +474,7 @@ class WyomingSatellite {
   // other wake back-end starts beside it. Under lifecycle_.
   WakeEngine* stuck_engine_ = nullptr;
   void keep_stuck_engine(WakeEngine* e);
+  void free_stuck_engine();
   // Serialises start()/stop()/set_wake_network()/set_wake_enabled() and the
   // OTA hooks: they all tear down and build up the same back-ends, and can
   // arrive from any task.
