@@ -232,10 +232,14 @@ class WyomingSatellite {
   void ota_quiesce();
   void ota_resume();
 
+  // True while a wake back-end runs: the on-device engine, or a network wake
+  // task that is alive and not told to stop.
   bool wake_enabled() const {
     if (!wake_wanted_.load()) return false;
-    return config_.on_device_wake ? wake_engine_.load() != nullptr
-                                  : !config_.wake_host.empty();
+    return config_.on_device_wake
+               ? wake_engine_.load() != nullptr
+               : !config_.wake_host.empty() && wake_task_alive_.load() &&
+                     wake_run_.load();
   }
   bool wake_on_device() const { return config_.on_device_wake; }
   bool wake_connected() const {
@@ -462,6 +466,10 @@ class WyomingSatellite {
   // While a detection's utterance holds the engine paused (see
   // start_wake_pipeline() and ota_resume()).
   std::atomic<bool> detection_paused_{false};
+  // While start_wake_pipeline() runs on the engine's fetch task, and while
+  // stop_wake_backend() tears a back-end down: the two wait on each other.
+  std::atomic<bool> in_detection_{false};
+  std::atomic<bool> wake_teardown_{false};
   // Serialises start()/stop()/set_wake_network()/set_wake_enabled() and the
   // OTA hooks: they all tear down and build up the same back-ends, and can
   // arrive from any task.

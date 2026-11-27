@@ -126,6 +126,14 @@ bool WyomingSatellite::start_wake_backend() {
 }
 
 bool WyomingSatellite::stop_wake_backend() {
+  // Ends a detection's utterance early (run_detection_pipeline()) and keeps a
+  // new one from starting, so neither the on-device fetch task nor the
+  // network wake task is held in a pipeline while the back-end goes.
+  wake_teardown_.store(true);
+  struct EndTeardown {
+    std::atomic<bool>& f;
+    ~EndTeardown() { f.store(false); }
+  } end_teardown{wake_teardown_};
   // DETACH the engine pointer first: a reader that loads it from now on sees
   // null. One that loaded it before holds an EngineRef, and the engine is
   // stopped and deleted only once those are done. Every reader is bounded
@@ -135,6 +143,13 @@ bool WyomingSatellite::stop_wake_backend() {
   if (WakeEngine* e = wake_engine_.exchange(nullptr)) {
     for (int i = 0; engine_readers_.load() > 0; i++) {
       if (i == 100) ESP_LOGW(kTag, "waiting for a wake engine reader");
+      vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    // A detection runs on the engine's fetch task and uses the engine until
+    // it returns. WakeEngine::stop() gives that task 3 s, an utterance takes
+    // up to 25: wait for the callback here, which the flag above cuts short.
+    for (int i = 0; in_detection_.load(); i++) {
+      if (i == 100) ESP_LOGW(kTag, "waiting for a wake detection to end");
       vTaskDelay(pdMS_TO_TICKS(10));
     }
     e->stop();  // joins the feed/fetch tasks + releases the mic
@@ -1158,13 +1173,22 @@ void WyomingSatellite::start_wake_pipeline() {
   // Called from the WakeEngine fetch task on a detection. Pause the engine so
   // it releases the mic (single consumer), play the awake cue, run the same
   // pipeline PTT does, then resume the engine to listen for the next word.
+  // Set before the teardown flag is read, which stop_wake_backend() sets
+  // before it reads this one: either the teardown waits for this call, or
+  // this call sees the teardown and returns.
+  in_detection_.store(true);
+  struct EndDetection {
+    std::atomic<bool>& f;
+    ~EndDetection() { f.store(false); }
+  } end_detection{in_detection_};
+  if (wake_teardown_.load()) return;
   if (!client_connected_.load() || !armed_) {
     ESP_LOGW(kTag, "wake ignored (no orchestrator / not armed)");
     return;
   }
   if (mic_muted()) return;
-  // Runs on the engine's own fetch task, so the engine outlives this call;
-  // snapshot the atomic once for the type.
+  // Runs on the engine's own fetch task, and teardown waits for it, so the
+  // engine outlives this call; snapshot the atomic once for the type.
   WakeEngine* e = wake_engine_.load();
   if (e) {
     detection_paused_.store(true);
@@ -1204,12 +1228,14 @@ void WyomingSatellite::run_detection_pipeline() {
   const TickType_t kStartTimeout = pdMS_TO_TICKS(1500);
   const TickType_t kMaxPipeline = pdMS_TO_TICKS(25000);
   TickType_t t0 = xTaskGetTickCount();
-  while (running_.load() && !listening_.load() &&
+  // A wake back-end being torn down ends the wait too: the wake word was
+  // switched off, and its task has to get out for the join.
+  while (running_.load() && !wake_teardown_.load() && !listening_.load() &&
          xTaskGetTickCount() - t0 < kStartTimeout) {
     vTaskDelay(pdMS_TO_TICKS(20));
   }
   t0 = xTaskGetTickCount();
-  while (running_.load() && listening_.load() &&
+  while (running_.load() && !wake_teardown_.load() && listening_.load() &&
          xTaskGetTickCount() - t0 < kMaxPipeline) {
     vTaskDelay(pdMS_TO_TICKS(50));
   }
