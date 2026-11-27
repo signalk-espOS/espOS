@@ -296,12 +296,24 @@ espos_sk_send_raw("{\"context\":\"vessels.self\",\"updates\":[…]}");
 * **Subscriptions** are exact paths or families (`prefix.*`, `prefix*`, `*`),
   up to 48 (`ESPOS_SK_MAX_SUBS`, fewer with `CONFIG_ESPOS_SK_MAX_SUBS`, see
   [Table sizes](#table-sizes)). The stream opens with
-  `subscribe=none&sendMeta=all`. After the hello, and after every reconnect,
-  one frame carries all subscriptions:
-  `{"context":"vessels.self","subscribe":[{"path","period","format":"delta","policy":"instant","minPeriod"}]}`.
-  A new subscription while connected goes out on its own, and
-  `espos_sk_unsubscribe` sends `unsubscribe` once nothing else covers the
-  pattern.
+  `subscribe=none&sendMeta=all`. After every connect, each pattern goes out
+  in a frame of its own, named by a `subscriptionId` that is the pattern:
+  `{"context":"vessels.self","subscriptionId":"<pattern>","subscribe":[{"path","period","format":"delta","policy":"instant","minPeriod"}]}`.
+  A pattern several handles share goes out once, at the shortest period
+  asked for. A handle added later, on a pattern the server already sends,
+  shares that subscription and its period.
+* **Unsubscribing.** `espos_sk_unsubscribe` tells the server once no other
+  handle covers the pattern, and how depends on the server's hello:
+  * If its `capabilities` list `subscriptionIds` (signalk-server#3288),
+    `{"context":"*","unsubscribe":[{"subscriptionId":"<pattern>"}]}` ends
+    that subscription alone.
+  * Every other server, signalk-server 2.38 among them, accepts no
+    unsubscribe but unsubscribe-all and closes the connection on any other.
+    There the client sends `{"context":"*","unsubscribe":[{"path":"*"}]}`
+    and subscribes the remaining patterns again. The server then replays the
+    current values and meta of those paths, so their callbacks see them a
+    second time. Before the hello has been read, the server counts as one
+    of these. So do more than 4 unsubscribes waiting for one frame.
 * **After `espos_sk_unsubscribe` returns, the callback is not called again**,
   so its `arg` may be freed and the path bound anew. A callback already
   running on the stream task finishes first: unsubscribe waits for it. Called

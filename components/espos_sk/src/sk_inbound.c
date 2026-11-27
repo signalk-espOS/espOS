@@ -26,6 +26,10 @@ static const char *TAG = "espos_skin";
 #define MAX_PUTS       8
 #define PUT_TIMEOUT_MS 10000
 #define MAX_RAW        16
+/* Unsubscribes by id that one frame carries. More than this before the
+ * stream task gets to them, and it ends them all and subscribes the rest
+ * again, which is just as correct. */
+#define MAX_UNSUB 4
 
 typedef struct {
     int handle;
@@ -81,8 +85,14 @@ static struct {
     size_t n_subs;
     int next_handle;
     bool dirty;                /* subs changed: (re)send subscribe frame */
-    char pending_unsub[4][ESPOS_SK_PATH_MAX];
+    /* Patterns to end on the server, by the subscriptionId they were sent
+     * with. Sent only to a server whose hello lists "subscriptionIds"
+     * (signalk-server#3288); every other one closes the connection on any
+     * unsubscribe but unsubscribe-all, so for those resync is set instead. */
+    char pending_unsub[MAX_UNSUB][ESPOS_SK_PATH_MAX];
     size_t n_unsub;
+    bool resync;               /* unsubscribe-all, then subscribe what is left */
+    bool server_ids;           /* this connection's hello lists subscriptionIds */
     put_t puts[MAX_PUTS];
     put_handler_t *handlers;   /* ESPOS_SK_MAX_PUT_HANDLERS, allocated on first register */
     uint32_t puts_in, puts_rejected;
@@ -141,16 +151,26 @@ esp_err_t espos_sk_unsubscribe(int handle)
     esp_err_t err = ESP_ERR_NOT_FOUND;
     for (size_t i = 0; i < s.n_subs; i++) {
         if (s.subs[i].handle == handle) {
-            /* only tell the server if no other sub covers the same pattern */
-            bool other = false;
-            for (size_t j = 0; j < s.n_subs; j++) {
-                if (j != i && strcmp(s.subs[j].pattern, s.subs[i].pattern) == 0) {
-                    other = true;
+            if (s.subs[i].sent) {
+                /* Another handle on the same pattern keeps the server's
+                 * subscription, and takes it over if it had not been sent
+                 * yet: a second subscribe under the same id would be refused
+                 * by a server that knows ids, and doubled by one that does
+                 * not. Only the last one tells the server. */
+                bool other = false;
+                for (size_t j = 0; j < s.n_subs; j++) {
+                    if (j != i && strcmp(s.subs[j].pattern, s.subs[i].pattern) == 0) {
+                        other = true;
+                        s.subs[j].sent = true;
+                    }
                 }
-            }
-            if (!other && s.subs[i].sent && s.n_unsub < 4) {
-                snprintf(s.pending_unsub[s.n_unsub++], ESPOS_SK_PATH_MAX, "%s", s.subs[i].pattern);
-                s.dirty = true;
+                if (!other) {
+                    if (s.n_unsub < MAX_UNSUB) {
+                        snprintf(s.pending_unsub[s.n_unsub++], ESPOS_SK_PATH_MAX, "%s", s.subs[i].pattern);
+                    } else {
+                        s.resync = true;
+                    }
+                }
             }
             memmove(&s.subs[i], &s.subs[i + 1], (s.n_subs - i - 1) * sizeof(sub_t));
             s.n_subs--;
@@ -362,11 +382,14 @@ void espos_sk_inbound_set_connected(bool connected)
     ensure_init();
     lock();
     s.connected = connected;
+    /* What the server can do is learned again from each connection's hello. */
+    s.server_ids = false;
     if (!connected) {
         for (size_t i = 0; i < s.n_subs; i++) {
             s.subs[i].sent = false;
         }
         s.n_unsub = 0;
+        s.resync = false;
         s.dirty = s.n_subs > 0;
         /* pending PUTs cannot complete any more */
         for (size_t i = 0; i < MAX_PUTS; i++) {
@@ -389,8 +412,25 @@ void espos_sk_inbound_set_connected(bool connected)
     unlock();
 }
 
-/* Build the subscribe (and unsubscribe) frames for what changed. Returns
- * malloc'ed frame or NULL. Call repeatedly until NULL. */
+/* Marks every subscription to pattern as sent. */
+static void mark_sent_locked(const char *pattern)
+{
+    for (size_t i = 0; i < s.n_subs; i++) {
+        if (strcmp(s.subs[i].pattern, pattern) == 0) {
+            s.subs[i].sent = true;
+        }
+    }
+}
+
+/* Build the subscribe and unsubscribe frames for what changed, one frame per
+ * call. Returns a malloc'ed frame or NULL. Call repeatedly until NULL.
+ *
+ * Every pattern goes out in a subscribe of its own, named by a subscriptionId
+ * that is the pattern itself, so that a server which knows ids
+ * (signalk-server#3288, "subscriptionIds" in the hello) can end it alone. A
+ * server that does not know them ignores the id. Unsubscribes go out before
+ * subscribes, so a pattern ended and taken again reaches the server in that
+ * order and its id is free when the new subscribe arrives. */
 char *espos_sk_inbound_take_frame(void)
 {
     ensure_init();
@@ -403,57 +443,83 @@ char *espos_sk_inbound_take_frame(void)
         unlock();
         return out;
     }
-    if (s.n_unsub) {
-        size_t cap = 64 + s.n_unsub * (ESPOS_SK_PATH_MAX + 16);
-        out = malloc(cap);
+    if (s.resync || (s.n_unsub && !s.server_ids)) {
+        /* Every server without ids -- signalk-server 2.38 among them --
+         * accepts no unsubscribe but unsubscribe-all and closes the
+         * connection on any other. So end everything and subscribe again
+         * what is still wanted. The server then replays the current values
+         * (and meta) of those paths, which their callbacks see a second
+         * time. Until the hello has been read the server counts as one
+         * without ids. */
+        out = strdup("{\"context\":\"*\",\"unsubscribe\":[{\"path\":\"*\"}]}");
         if (out) {
-            int n = snprintf(out, cap, "{\"context\":\"vessels.self\",\"unsubscribe\":[");
-            for (size_t i = 0; i < s.n_unsub; i++) {
-                n += snprintf(out + n, cap - n, "%s{\"path\":\"%s\"}", i ? "," : "", s.pending_unsub[i]);
+            for (size_t i = 0; i < s.n_subs; i++) {
+                s.subs[i].sent = false;
             }
-            snprintf(out + n, cap - n, "]}");
+            s.n_unsub = 0;
+            s.resync = false;
+            s.dirty = s.n_subs > 0;
+            ESP_LOGI(TAG, "ended every subscription on the server; subscribing %u again", (unsigned)s.n_subs);
         }
-        s.n_unsub = 0;
         unlock();
         return out;
     }
-    if (s.dirty) {
-        s.dirty = false;
-        size_t todo = 0;
+    if (s.n_unsub) {
+        size_t cap = 48 + s.n_unsub * (ESPOS_SK_PATH_MAX + 24);
+        out = malloc(cap);
+        if (out) {
+            int n = snprintf(out, cap, "{\"context\":\"*\",\"unsubscribe\":[");
+            for (size_t i = 0; i < s.n_unsub; i++) {
+                n += snprintf(out + n, cap - n, "%s{\"subscriptionId\":\"%s\"}", i ? "," : "", s.pending_unsub[i]);
+            }
+            snprintf(out + n, cap - n, "]}");
+            s.n_unsub = 0;
+        }
+        unlock();
+        return out;
+    }
+    while (s.dirty) {
+        size_t first = s.n_subs;
         for (size_t i = 0; i < s.n_subs; i++) {
             if (!s.subs[i].sent) {
-                todo++;
+                first = i;
+                break;
             }
         }
-        if (todo) {
-            size_t cap = 64 + todo * (ESPOS_SK_PATH_MAX + 64);
-            out = malloc(cap);
-            if (out) {
-                int n = snprintf(out, cap, "{\"context\":\"vessels.self\",\"subscribe\":[");
-                bool first = true;
-                for (size_t i = 0; i < s.n_subs; i++) {
-                    if (s.subs[i].sent) {
-                        continue;
-                    }
-                    /* the same pattern once, whichever period is shortest */
-                    bool dup = false;
-                    for (size_t j = 0; j < i; j++) {
-                        if (!s.subs[j].sent && strcmp(s.subs[j].pattern, s.subs[i].pattern) == 0) {
-                            dup = true;
-                        }
-                    }
-                    if (!dup) {
-                        n += snprintf(out + n, cap - n, "%s{\"path\":\"%s\",\"period\":%u,\"format\":\"delta\",\"policy\":\"instant\",\"minPeriod\":%u}",
-                                      first ? "" : ",", s.subs[i].pattern, (unsigned)s.subs[i].period_ms, (unsigned)s.subs[i].period_ms);
-                        first = false;
-                    }
-                }
-                snprintf(out + n, cap - n, "]}");
-                for (size_t i = 0; i < s.n_subs; i++) {
-                    s.subs[i].sent = true;
+        if (first == s.n_subs) {
+            s.dirty = false;
+            break;
+        }
+        const char *pattern = s.subs[first].pattern;
+        /* One subscribe per pattern, at the shortest period asked for. A
+         * pattern the server already sends is left as it is: a second
+         * subscribe under its id would be refused, or without ids doubled. */
+        bool live = false;
+        uint32_t period = UINT32_MAX;
+        for (size_t i = 0; i < s.n_subs; i++) {
+            if (strcmp(s.subs[i].pattern, pattern) == 0) {
+                if (s.subs[i].sent) {
+                    live = true;
+                } else if (s.subs[i].period_ms < period) {
+                    period = s.subs[i].period_ms;
                 }
             }
         }
+        if (live) {
+            mark_sent_locked(pattern);
+            continue;
+        }
+        size_t cap = 2 * ESPOS_SK_PATH_MAX + 160;
+        out = malloc(cap);
+        if (!out) {
+            break; /* still dirty: the next call tries again */
+        }
+        snprintf(out, cap,
+                 "{\"context\":\"vessels.self\",\"subscriptionId\":\"%s\",\"subscribe\":[{\"path\":\"%s\",\"period\":%u,"
+                 "\"format\":\"delta\",\"policy\":\"instant\",\"minPeriod\":%u}]}",
+                 pattern, pattern, (unsigned)period, (unsigned)period);
+        mark_sent_locked(pattern);
+        break; /* still dirty: the next call sends the next pattern */
     }
     unlock();
     return out;
@@ -602,6 +668,14 @@ bool espos_sk_inbound_handle_frame(const char *json, size_t len, char *err_out, 
     espos_sk_frame_parse(json, len, &info, route_item, &answered);
     bool is_error = false;
     switch (info.kind) {
+    case ESPOS_SK_FRAME_HELLO: {
+        bool ids = espos_sk_frame_has_capability(&info, "subscriptionIds");
+        lock();
+        s.server_ids = ids;
+        unlock();
+        ESP_LOGI(TAG, "server %s", ids ? "ends single subscriptions by id" : "ends subscriptions only all at once; an unsubscribe resubscribes the rest");
+        break;
+    }
     case ESPOS_SK_FRAME_PUT:
         /* A PUT whose items were all unusable (no path, or no value) still
          * gets an answer: silence costs the client a 60 s timeout, and a

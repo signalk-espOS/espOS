@@ -361,5 +361,9 @@ static inline espos_sk_ws_zero_t espos_sk_ws_zero_read(bool data_frame, bool con
 void espos_sk_inbound_set_connected(bool connected);
 char *espos_sk_inbound_take_frame(void);            /* malloc'ed; NULL when nothing to send */
 bool espos_sk_inbound_handle_frame(const char *json, size_t len, char *err_out, size_t err_size); /* false = server error frame */
+
+/* sk_parse.c: true when *info is a hello whose "capabilities" array lists
+ * capability. Private so that espos_sk_frame_t keeps its layout (the ABI). */
+bool espos_sk_frame_has_capability(const espos_sk_frame_t *info, const char *capability);
 void espos_sk_inbound_tick(uint32_t now_ms);
 void espos_sk_inbound_stats(espos_sk_ws_status_t *st);
