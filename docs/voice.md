@@ -69,5 +69,10 @@ sat.set_wake_enabled(false);  // push-to-talk only
 sat.start();
 ```
 
+While the satellite runs, `false` from `set_wake_enabled()` means the
+switch did not complete: a network wake task that is still in an
+utterance gets 8 s to exit, and one that has not may still be connected.
+Calling it again tries the join again.
+
 To switch voice off entirely, `stop()` the satellite: its port closes, and
 the orchestrator sees the device go away. `start()` brings it back.

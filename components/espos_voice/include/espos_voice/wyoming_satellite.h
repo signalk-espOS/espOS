@@ -191,9 +191,13 @@ class WyomingSatellite {
    * Before start() this only records the choice, so a device that should not
    * listen never loads WakeNet at all. The default is on.
    *
-   * Safe to call from any task except the wake task. Blocks while a network
-   * wake task exits (up to 8 s). Returns false when that exit timed out or the
-   * back-end could not be started; wake_wanted() still reports the choice.
+   * Safe to call from any task except the wake task. Waits up to 10 s for
+   * the lifecycle lock; when that times out it returns false without recording
+   * anything, and wake_wanted() still reports the previous choice. Otherwise
+   * the choice is recorded, and the call blocks while a network wake task
+   * exits (up to 8 s). It returns false when that exit timed out (the task may
+   * still be connected; a later call tries the join again) or the back-end
+   * could not be started; wake_wanted() then reports the new choice.
    */
   bool set_wake_enabled(bool on);
   bool wake_wanted() const { return wake_wanted_.load(); }
@@ -327,6 +331,7 @@ class WyomingSatellite {
   void run_wake();              // connect/reconnect loop
   bool wake_session(int sock);  // one wake-service connection's life
   bool wake_should_run() const { return running_.load() && wake_run_.load(); }
+  void wake_sleep(TickType_t t);  // vTaskDelay that a stop request cuts short
   // A wake task that is alive and meant to stay so; one kept after a missed
   // exit, or one already out of run_wake(), does not count.
   bool wake_task_running() const {

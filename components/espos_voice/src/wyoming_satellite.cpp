@@ -47,6 +47,9 @@ WyomingSatellite::~WyomingSatellite() {
   WyomingSatellite* self = this;
   g_ota_quiesce_target.compare_exchange_strong(self, nullptr);
   stop();  // joins the server (and transitively the mic) task before freeing
+  // A wake task stop() could not join still gives wake_done_ and reads this
+  // object on its way out; nothing here may go before it has.
+  if (wake_task_) xSemaphoreTake(wake_done_, portMAX_DELAY);
   if (send_mutex_) vSemaphoreDelete(send_mutex_);
   if (mic_done_) vSemaphoreDelete(mic_done_);
   if (server_done_) vSemaphoreDelete(server_done_);
@@ -123,6 +126,7 @@ bool WyomingSatellite::start_wake_backend() {
 }
 
 bool WyomingSatellite::stop_wake_backend() {
+  bool leaked = false;
   // DETACH the engine pointer first: a reader that loads it from now on sees
   // null. One that loaded it before holds an EngineRef, and the engine is
   // stopped only once those are done -- probe_mic_levels() pauses and resumes
@@ -135,11 +139,12 @@ bool WyomingSatellite::stop_wake_backend() {
     e->stop();  // joins the feed/fetch tasks + releases the mic
     if (engine_readers_.load() > 0) {
       ESP_LOGE(kTag, "wake engine still in use — leaking it");
+      leaked = true;
     } else {
       delete e;
     }
   }
-  if (!wake_task_) return true;
+  if (!wake_task_) return !leaked;
   // The network wake task blocks in connect()/recv() with short timeouts, so
   // it notices wake_run_ on its next tick. Its own flag, not running_: the
   // server and mic tasks loop on running_ too, and a satellite that is
@@ -150,7 +155,7 @@ bool WyomingSatellite::stop_wake_backend() {
     return false;  // wake_task_ kept: the next teardown joins it again
   }
   wake_task_ = nullptr;
-  return true;
+  return !leaked;
 }
 
 bool WyomingSatellite::set_wake_network(const std::string& host, uint16_t port,
@@ -201,7 +206,11 @@ bool WyomingSatellite::set_wake_network(const std::string& host, uint16_t port,
     return false;
   }
 
-  const WyomingSatelliteConfig prev = config_;
+  // Only the wake fields: run_mic() reads the stream gains without the lock.
+  const bool prev_on_device = config_.on_device_wake;
+  const std::string prev_host = config_.wake_host;
+  const uint16_t prev_port = config_.wake_port;
+  const std::vector<std::string> prev_words = config_.wake_words;
   config_.on_device_wake = false;
   config_.wake_host = host;
   config_.wake_port = port;
@@ -213,12 +222,18 @@ bool WyomingSatellite::set_wake_network(const std::string& host, uint16_t port,
   if (!start_wake_backend()) {
     // Returning true here would leave the device with no wake back-end at all
     // while reporting success. Put the one that ran before back.
-    config_ = prev;
-    start_wake_backend();
-    ESP_LOGE(kTag, "wake task creation failed — kept the previous wake word");
-    espos_health_report(
-        "wakeService", ESPOS_HEALTH_WARN,
-        "could not start network wake; using the previous wake word");
+    config_.on_device_wake = prev_on_device;
+    config_.wake_host = prev_host;
+    config_.wake_port = prev_port;
+    config_.wake_words = prev_words;
+    const bool restored = start_wake_backend();
+    ESP_LOGE(kTag, "wake task creation failed — %s",
+             restored ? "kept the previous wake word" : "push-to-talk only");
+    espos_health_report("wakeService", ESPOS_HEALTH_WARN,
+                        restored ? "could not start network wake; using the "
+                                   "previous wake word"
+                                 : "could not start network wake; "
+                                   "push-to-talk only");
     return false;
   }
   return true;
@@ -277,10 +292,9 @@ void WyomingSatellite::stop() {
   if (client_sock_ >= 0) {
     shutdown(client_sock_, SHUT_RDWR);
   }
-  if (!stop_wake_backend()) {
-    ESP_LOGE(kTag, "leaking the wake task handle");
-    wake_task_ = nullptr;
-  }
+  // A wake task that missed its exit keeps its handle: the next start()
+  // joins it before creating another, and the destructor waits for it.
+  stop_wake_backend();
   if (server_task_) {
     // Real join: serve() gives server_done_ just before the task self-deletes
     // (having already joined the mic task). Wait for it so the caller /
@@ -805,13 +819,13 @@ void WyomingSatellite::run_wake() {
       // forever in silence, which is the case most likely to be a
       // misconfiguration someone needs told about. Idempotence keeps this to
       // one notification however long the retry loop runs.
-      {
+      if (wake_should_run()) {
         char m[96];
         snprintf(m, sizeof(m), "wake service %s:%u unreachable",
                  config_.wake_host.c_str(), config_.wake_port);
         espos_health_report("wakeService", ESPOS_HEALTH_WARN, m);
       }
-      if (wake_should_run()) vTaskDelay(backoff);
+      wake_sleep(backoff);
       backoff = backoff * 2 > kMaxBackoff ? kMaxBackoff : backoff * 2;
       continue;
     }
@@ -827,13 +841,25 @@ void WyomingSatellite::run_wake() {
     // Say so. Otherwise the device simply stops waking, which from the outside
     // is indistinguishable from a dead mic or a mis-set wake word -- the
     // expensive kind of fault to chase.
-    {
+    // Not when told to stop: the warning would outlive the wake word.
+    if (wake_should_run()) {
       char m[96];
       snprintf(m, sizeof(m), "wake service %s:%u unreachable",
                config_.wake_host.c_str(), config_.wake_port);
       espos_health_report("wakeService", ESPOS_HEALTH_WARN, m);
     }
-    if (wake_should_run()) vTaskDelay(pdMS_TO_TICKS(500));
+    wake_sleep(pdMS_TO_TICKS(500));
+  }
+}
+
+void WyomingSatellite::wake_sleep(TickType_t t) {
+  // In slices, so a stop request is seen well within stop_wake_backend()'s
+  // join timeout even from the 10 s reconnect backoff.
+  const TickType_t kSlice = pdMS_TO_TICKS(100);
+  while (t > 0 && wake_should_run()) {
+    const TickType_t d = t < kSlice ? t : kSlice;
+    vTaskDelay(d);
+    t -= d;
   }
 }
 
@@ -852,7 +878,10 @@ bool WyomingSatellite::wake_session(int sock) {
     while (off < b.size()) {
       int s = send(sock, b.data() + off, b.size() - off, MSG_NOSIGNAL);
       if (s <= 0) {
-        if (s < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+        // A service that stopped reading would hold a stop request off for
+        // as long as it keeps the connection.
+        if (s < 0 && (errno == EAGAIN || errno == EWOULDBLOCK) &&
+            wake_should_run()) {
           vTaskDelay(pdMS_TO_TICKS(5));
           continue;
         }
@@ -933,6 +962,7 @@ bool WyomingSatellite::wake_session(int sock) {
     // whole utterance — exactly right, the mic has one owner at a time.
     if (wake_detected_.exchange(false)) {
       close_capture();
+      if (!wake_should_run()) break;  // the wake word went off meanwhile
       // Network detection: the word was finished before the service replied,
       // so there is nothing to skip (see wake_skip_applies_).
       wake_skip_applies_.store(false);
@@ -1264,8 +1294,20 @@ bool WyomingSatellite::probe_mic_levels(
   //   branch was released, so on a network-wake panel the probe collided with
   //   a live capture and wedged the wake stream (chunks frozen at a fixed
   //   count with capturing=true, until the session reconnected).
-  EngineRef r(this);
-  WakeEngine* e = config_.on_device_wake ? r.e : nullptr;
+  //
+  // The lifecycle lock is held for the probe's ~1 s: a wake back-end started
+  // meanwhile would open the RX under it, and the OTA hooks take it too. An
+  // engine the OTA hooks parked stays parked: that pause is theirs, and
+  // resuming it here would bring the AFE back mid-download.
+  if (lifecycle_) xSemaphoreTake(lifecycle_, portMAX_DELAY);
+  struct Unlock {
+    SemaphoreHandle_t m;
+    ~Unlock() {
+      if (m) xSemaphoreGive(m);
+    }
+  } unlock{lifecycle_};
+  WakeEngine* e =
+      config_.on_device_wake && !ota_parked_ ? wake_engine_.load() : nullptr;
   if (e) e->pause();
   const bool net_wake = !config_.on_device_wake;
   if (net_wake) {
