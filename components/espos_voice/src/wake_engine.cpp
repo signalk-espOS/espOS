@@ -53,6 +53,13 @@ bool WakeEngine::start() {
   feed_exited_ = xSemaphoreCreateBinary();
   fetch_exited_ = xSemaphoreCreateBinary();
   probe_mutex_ = xSemaphoreCreateMutex();
+  // stop() joins the tasks on the exit semaphores, and they give them as they
+  // leave: without one there is nothing safe to join on.
+  if (!feed_paused_ || !feed_exited_ || !fetch_exited_ || !probe_mutex_) {
+    ESP_LOGE(kTag, "out of memory for the wake engine's semaphores");
+    fail_start();
+    return false;
+  }
 
   // NOTE: do NOT dereference srmodel_list_t fields here — mirror the esp-sr
   // Arduino HAL, which passes the opaque list straight to afe_config_init()
@@ -62,7 +69,7 @@ bool WakeEngine::start() {
   srmodel_list_t* models = esp_srmodel_init("model");
   if (!models) {
     ESP_LOGE(kTag, "esp_srmodel_init('model') returned null — wake disabled");
-    running_.store(false);
+    fail_start();
     return false;
   }
 
@@ -78,7 +85,7 @@ bool WakeEngine::start() {
       afe_config_init(afe_format, models, AFE_TYPE_SR, AFE_MODE_LOW_COST);
   if (!cfg) {
     ESP_LOGE(kTag, "afe_config_init failed — wake disabled");
-    running_.store(false);
+    fail_start();
     return false;
   }
   // afe_config_init auto-selects the wakenet from the loaded list; if none is
@@ -86,7 +93,7 @@ bool WakeEngine::start() {
   if (!cfg->wakenet_model_name) {
     ESP_LOGE(kTag, "no WakeNet model in partition — wake disabled");
     afe_config_free(cfg);
-    running_.store(false);
+    fail_start();
     return false;
   }
   strncpy(word_, cfg->wakenet_model_name, sizeof(word_) - 1);
@@ -101,7 +108,7 @@ bool WakeEngine::start() {
   afe_config_free(cfg);
   if (!data) {
     ESP_LOGE(kTag, "AFE create failed — on-device wake disabled");
-    running_.store(false);
+    fail_start();
     return false;
   }
   afe_handle_ = (void*)handle;
@@ -119,33 +126,79 @@ bool WakeEngine::start() {
 
   // Feed + fetch on core 0 (SK WS / LVGL live on the app core). Feed needs a
   // modest stack; fetch runs WakeNet inference — give it room.
-  xTaskCreatePinnedToCore(&WakeEngine::feed_task_tramp, "wake_feed",
-                          CONFIG_ESPOS_VOICE_WAKENET_STACK_SIZE, this, 5,
-                          &feed_task_, 0);
-  xTaskCreatePinnedToCore(&WakeEngine::fetch_task_tramp, "wake_fetch",
-                          CONFIG_ESPOS_VOICE_WAKENET_STACK_SIZE, this, 5,
-                          &fetch_task_, 0);
+  if (xTaskCreatePinnedToCore(&WakeEngine::feed_task_tramp, "wake_feed",
+                              CONFIG_ESPOS_VOICE_WAKENET_STACK_SIZE, this, 5,
+                              &feed_task_, 0) != pdPASS) {
+    feed_task_ = nullptr;
+  }
+  if (feed_task_ &&
+      xTaskCreatePinnedToCore(&WakeEngine::fetch_task_tramp, "wake_fetch",
+                              CONFIG_ESPOS_VOICE_WAKENET_STACK_SIZE, this, 5,
+                              &fetch_task_, 0) != pdPASS) {
+    fetch_task_ = nullptr;
+  }
+  if (!feed_task_ || !fetch_task_) {
+    // stop() joins whichever task did start, then frees the AFE, the mic and
+    // the semaphores.
+    ESP_LOGE(kTag, "could not create the wake tasks — wake disabled");
+    stop();
+    return false;
+  }
   ESP_LOGI(kTag, "on-device wake started (chunk=%d ch=%d)", feed_chunk_,
            feed_channels_);
   return true;
 }
 
-void WakeEngine::stop() {
-  if (!running_.exchange(false)) return;
+void WakeEngine::fail_start() {
+  // Before any task or the AFE exists, so there is nothing to join; stop()
+  // would return at once with running_ cleared and leave these behind.
+  for (SemaphoreHandle_t* h :
+       {&feed_paused_, &feed_exited_, &fetch_exited_, &probe_mutex_}) {
+    if (*h) {
+      vSemaphoreDelete(*h);
+      *h = nullptr;
+    }
+  }
+  running_.store(false);
+}
+
+bool WakeEngine::stop() {
+  // The first call clears running_. A call after a missed join tries that
+  // join again and, once it succeeds, finishes the teardown.
+  if (!running_.exchange(false) && !stuck_) return true;
   // JOIN both tasks: they observe running_==false and return within a tick
   // (feed after its ≤32 ms record_pcm, fetch after its ≤2 s AFE fetch), then
   // their tramps give feed_exited_/fetch_exited_. Only after BOTH have fully
   // returned is it safe to destroy the AFE and release the mic — never
   // vTaskDelete a task that may be mid-WakeNet-inference or inside the
   // detection callback. The tasks self-delete, so no vTaskDelete here.
+  //
+  // Bounded, and a task that misses it keeps everything: freeing the AFE or
+  // the semaphores under it would be a use-after-free, and waiting for ever
+  // on a driver read that never returns would hang the caller (the
+  // satellite holds its lifecycle lock here). The engine then stays as it
+  // is, stuck_, and must not be deleted. A task still in the detection
+  // callback is the satellite's to end first (stop_wake_backend() does).
+  auto joined = [](SemaphoreHandle_t done, const char* which) {
+    if (xSemaphoreTake(done, pdMS_TO_TICKS(5000)) == pdTRUE) return true;
+    ESP_LOGE(kTag, "wake %s task did not exit — keeping the engine", which);
+    return false;
+  };
   if (feed_task_ && feed_exited_) {
-    xSemaphoreTake(feed_exited_, pdMS_TO_TICKS(3000));
+    if (!joined(feed_exited_, "feed")) {
+      stuck_ = true;
+      return false;
+    }
     feed_task_ = nullptr;
   }
   if (fetch_task_ && fetch_exited_) {
-    xSemaphoreTake(fetch_exited_, pdMS_TO_TICKS(3000));
+    if (!joined(fetch_exited_, "fetch")) {
+      stuck_ = true;
+      return false;
+    }
     fetch_task_ = nullptr;
   }
+  stuck_ = false;
   if (afe_data_ && afe_handle_) {
     afe_if(afe_handle_)->destroy(afe_dat(afe_data_));
   }
@@ -185,6 +238,7 @@ void WakeEngine::stop() {
   }
   probe_head_ = 0;
   probe_filled_ = 0;
+  return true;
 }
 
 size_t WakeEngine::pcm_snapshot(int16_t* out, size_t max_samples) {

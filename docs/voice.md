@@ -49,8 +49,37 @@ voice where the silicon cannot run WakeNet.
 
 ## Wake word
 
-The satellite owns a `WakeEngine` directly, so on-device wake is not
-optional today. Detection pauses the engine for the duration of an
-utterance and re-arms it afterwards; see the note in `wake_engine.cpp`
-about restoring the shared I2S capture clock after playback, which is
-what stops WakeNet going deaf after the first TTS reply.
+The satellite owns a `WakeEngine` directly and listens with it unless
+`config.on_device_wake` is false; `set_wake_network()` moves detection to
+a network wake service (openWakeWord) at runtime. Detection pauses the
+engine for the duration of an utterance and re-arms it afterwards; see
+the note in `wake_engine.cpp` about restoring the shared I2S capture
+clock after playback, which is what stops WakeNet going deaf after the
+first TTS reply.
+
+`set_wake_enabled(false)` switches the wake word off and leaves the
+satellite on push-to-talk: the engine is deleted, which gives the mic and
+WakeNet's memory back, and a network wake task disconnects from its
+service. `set_wake_enabled(true)` brings back whichever of the two the
+satellite was set up for. Called before `start()`, it only records the
+choice, so a device that should not listen never loads WakeNet:
+
+```cpp
+if (sat.set_wake_enabled(false)) {  // push-to-talk only
+  sat.start();
+}
+```
+
+Before `start()` a false means the choice was not recorded. Either
+another task was switching the satellite at that moment, and a later
+try can succeed, or the satellite could not create its lifecycle lock
+when it was constructed (out of memory), and every call fails. Check
+each try, and start the satellite only once one returns true.
+
+While the satellite runs, `false` from `set_wake_enabled()` means the
+switch did not complete: a network wake task that is still in an
+utterance gets 8 s to exit, and one that has not may still be connected.
+Calling it again tries the join again.
+
+To switch voice off entirely, `stop()` the satellite: its port closes, and
+the orchestrator sees the device go away. `start()` brings it back.

@@ -32,6 +32,9 @@
 // captures while idle and PAUSES itself for the duration of a pipeline
 // stream (whether triggered by a detection or a PTT press), so run_mic() and
 // the wake loop never call record_pcm() concurrently.
+//
+// The wake word, on-device or network, can be switched off and on again with
+// set_wake_enabled(); push-to-talk and playback keep running either way.
 
 #include <atomic>
 #include <functional>
@@ -168,10 +171,36 @@ class WyomingSatellite {
    * a momentary outage should reconnect rather than flip the panel to a
    * different wake word behind the user's back; run_wake() already retries.
    *
+   * With the wake word switched off (set_wake_enabled(false)) the service is
+   * only recorded, and used once it is switched back on.
+   *
    * Safe to call from any task. Returns false if `host` is empty.
    */
   bool set_wake_network(const std::string& host, uint16_t port = 10400,
                         const std::vector<std::string>& words = {});
+
+  /**
+   * Switch the wake word off, or back on. Push-to-talk and playback are not
+   * affected.
+   *
+   * Off tears the wake back-end down: the on-device engine is deleted, which
+   * releases the mic and WakeNet's memory, and a network wake task
+   * disconnects from its service. On brings back the back-end the satellite
+   * is configured for, on-device or the service set_wake_network() named.
+   *
+   * Before start() this only records the choice, so a device that should not
+   * listen never loads WakeNet at all. The default is on.
+   *
+   * Safe to call from any task except the wake task. Waits up to 10 s for
+   * the lifecycle lock; when that times out it returns false without recording
+   * anything, and wake_wanted() still reports the previous choice. Otherwise
+   * the choice is recorded, and the call blocks while a network wake task
+   * exits (up to 8 s). It returns false when that exit timed out (the task may
+   * still be connected; a later call tries the join again) or the back-end
+   * could not be started; wake_wanted() then reports the new choice.
+   */
+  bool set_wake_enabled(bool on);
+  bool wake_wanted() const { return wake_wanted_.load(); }
 
   // Push-to-talk, LEVEL-triggered (press-and-hold): set held=true on the mic
   // button press, held=false on release. Safe to call from any task (e.g. the
@@ -203,20 +232,25 @@ class WyomingSatellite {
   void ota_quiesce();
   void ota_resume();
 
+  // True while a wake back-end runs: the on-device engine, or a network wake
+  // task that is alive and not told to stop.
   bool wake_enabled() const {
-    return config_.on_device_wake ? wake_engine_.load() != nullptr
-                                  : !config_.wake_host.empty();
+    if (!wake_wanted_.load()) return false;
+    return config_.on_device_wake
+               ? wake_engine_.load() != nullptr
+               : !config_.wake_host.empty() && wake_task_alive_.load() &&
+                     wake_run_.load();
   }
   bool wake_on_device() const { return config_.on_device_wake; }
   bool wake_connected() const {
     if (!config_.on_device_wake) return wake_connected_.load();
-    WakeEngine* e = wake_engine_.load();
-    return e && e->running();
+    EngineRef r(this);
+    return r.e && r.e->running();
   }
   bool wake_capturing() const {
     if (!config_.on_device_wake) return wake_capturing_.load();
-    WakeEngine* e = wake_engine_.load();
-    return e && e->listening();
+    EngineRef r(this);
+    return r.e && r.e->listening();
   }
   // Monotonic count of audio-chunks streamed to the network wake service — a
   // nonzero and growing value proves the mic is feeding detection (network
@@ -224,13 +258,14 @@ class WyomingSatellite {
   uint32_t wake_chunks() const { return wake_chunks_.load(); }
   uint32_t wake_detections() const {
     if (!config_.on_device_wake) return wake_detections_.load();
-    WakeEngine* e = wake_engine_.load();
-    return e ? e->detections() : 0;
+    EngineRef r(this);
+    return r.e ? r.e->detections() : 0;
   }
+  // The satellite's own copy: the engine's goes with the engine, and a caller
+  // may still hold the pointer when the wake word is switched off.
   const char* wake_word() const {
-    if (!config_.on_device_wake) return "";
-    WakeEngine* e = wake_engine_.load();
-    return e ? e->word() : "";
+    if (!config_.on_device_wake || !wake_engine_.load()) return "";
+    return wake_word_;
   }
   // Peak |sample| seen in the most recent capture window (0..32767). Reading
   // it resets the running peak. NOTE: fed only by the NETWORK wake path — on
@@ -299,7 +334,20 @@ class WyomingSatellite {
   static void wake_task(void* arg);
   void run_wake();              // connect/reconnect loop
   bool wake_session(int sock);  // one wake-service connection's life
-  bool mic_muted() const {      // consult the privacy gate
+  bool wake_should_run() const { return running_.load() && wake_run_.load(); }
+  void wake_sleep(TickType_t t);  // vTaskDelay that a stop request cuts short
+  // A wake task that is alive and meant to stay so; one kept after a missed
+  // exit, or one already out of run_wake(), does not count.
+  bool wake_task_running() const {
+    return wake_task_ && wake_task_alive_.load() && wake_run_.load();
+  }
+
+  // Bring up / tear down whichever wake back-end config_ names. Called with
+  // lifecycle_ held. stop_wake_backend() returns false when a network wake
+  // task did not exit in time; wake_task_ is then kept for the next join.
+  bool start_wake_backend();
+  bool stop_wake_backend();
+  bool mic_muted() const {  // consult the privacy gate
     return mic_muted_fn_ && mic_muted_fn_();
   }
   // Request + await a pipeline toward the orchestrator (used by a detection).
@@ -378,9 +426,23 @@ class WyomingSatellite {
 
   // On-device wake (config_.on_device_wake): esp-sr AFE + WakeNet. Owns the
   // mic while listening; on detection it fires start_wake_pipeline().
-  // Atomic so /hello diagnostics can read it concurrently with stop()'s
-  // detach-then-delete without a use-after-free.
+  // A reader on another task (/hello, /mic_probe, the mic mute) takes it
+  // through an EngineRef: teardown detaches the pointer, then waits for the
+  // readers that loaded it before deleting the engine.
   std::atomic<WakeEngine*> wake_engine_{nullptr};
+  mutable std::atomic<int> engine_readers_{0};
+  struct EngineRef {
+    explicit EngineRef(const WyomingSatellite* s) : sat(s) {
+      sat->engine_readers_.fetch_add(1);
+      e = sat->wake_engine_.load();
+    }
+    ~EngineRef() { sat->engine_readers_.fetch_sub(1); }
+    EngineRef(const EngineRef&) = delete;
+    EngineRef& operator=(const EngineRef&) = delete;
+    const WyomingSatellite* sat;
+    WakeEngine* e = nullptr;
+  };
+  char wake_word_[24] = "";  // the first engine's word, see wake_word()
 
   void
   start_wake_pipeline();  // detection -> pause engine -> run pipeline -> resume
@@ -388,8 +450,34 @@ class WyomingSatellite {
   // Network wake (legacy). wake_task_ runs run_wake() when wake_host is set.
   TaskHandle_t wake_task_ = nullptr;
   SemaphoreHandle_t wake_done_ = nullptr;  // given when run_wake() exits
-  // Serialises start()/stop()/set_wake_network(): they all tear down and build
-  // up the same back-ends, and set_wake_network() can arrive from any task.
+  // Ends the wake task without touching running_, which the server and mic
+  // tasks also loop on.
+  std::atomic<bool> wake_run_{false};
+  // From before the wake task is created until just before it gives
+  // wake_done_: tells a handle kept after a missed exit from a task that
+  // still serves.
+  std::atomic<bool> wake_task_alive_{false};
+  // set_wake_enabled()'s choice; start() and set_wake_network() honour it.
+  std::atomic<bool> wake_wanted_{true};
+  // Between ota_quiesce() and ota_resume(), so an engine started in between
+  // starts parked. Atomic: start_wake_pipeline() reads it on the engine's
+  // fetch task, without lifecycle_.
+  std::atomic<bool> ota_parked_{false};
+  // While a detection's utterance holds the engine paused (see
+  // start_wake_pipeline() and ota_resume()).
+  std::atomic<bool> detection_paused_{false};
+  // While start_wake_pipeline() runs on the engine's fetch task, and while
+  // stop_wake_backend() tears a back-end down: the two wait on each other.
+  std::atomic<bool> in_detection_{false};
+  std::atomic<bool> wake_teardown_{false};
+  // An engine that did not stop, kept rather than freed under its tasks; no
+  // other wake back-end starts beside it. Under lifecycle_.
+  WakeEngine* stuck_engine_ = nullptr;
+  void keep_stuck_engine(WakeEngine* e);
+  void free_stuck_engine();
+  // Serialises start()/stop()/set_wake_network()/set_wake_enabled() and the
+  // OTA hooks: they all tear down and build up the same back-ends, and can
+  // arrive from any task.
   SemaphoreHandle_t lifecycle_ = nullptr;
   // The wake task's own handle, so a switch requested from inside run_wake()
   // is refused rather than deadlocking on its own exit.
