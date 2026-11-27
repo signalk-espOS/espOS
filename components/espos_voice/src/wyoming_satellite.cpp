@@ -50,6 +50,15 @@ WyomingSatellite::~WyomingSatellite() {
   // A wake task stop() could not join still gives wake_done_ and reads this
   // object on its way out; nothing here may go before it has.
   if (wake_task_) xSemaphoreTake(wake_done_, portMAX_DELAY);
+  // A kept engine still calls back into this object: it has to stop first,
+  // whatever that takes.
+  if (stuck_engine_) {
+    while (in_detection_.load()) vTaskDelay(pdMS_TO_TICKS(10));
+    while (!stuck_engine_->stop()) {  // each try waits 5 s per task
+      ESP_LOGE(kTag, "waiting for a stuck wake engine before freeing");
+    }
+    delete stuck_engine_;
+  }
   if (send_mutex_) vSemaphoreDelete(send_mutex_);
   if (mic_done_) vSemaphoreDelete(mic_done_);
   if (server_done_) vSemaphoreDelete(server_done_);
@@ -78,15 +87,16 @@ void WyomingSatellite::start() {
 }
 
 bool WyomingSatellite::start_wake_backend() {
+  // An engine that did not stop may still read the mic, which has one
+  // reader: no wake back-end of either kind starts beside it.
+  if (stuck_engine_) {
+    ESP_LOGE(kTag, "a wake engine that did not stop still holds the mic");
+    return false;
+  }
   // A wake task that missed its exit deadline earlier is still winding down;
   // a second one beside it would be two readers on a single-consumer mic.
   if (wake_task_ && !stop_wake_backend()) return false;
   if (config_.on_device_wake) {
-    // A stuck engine may still read the mic, which has one reader.
-    if (engine_stuck_) {
-      ESP_LOGE(kTag, "a wake engine that did not stop still holds the mic");
-      return false;
-    }
     // An utterance's stream can still hold the mic: a detection cut short by
     // a teardown leaves run_mic() in its release tail. Wait it out (bounded;
     // false lets the caller try again).
@@ -112,8 +122,12 @@ bool WyomingSatellite::start_wake_backend() {
     e->set_input_gain(config_.wake_input_gain);
     e->set_threshold(config_.wake_threshold);
     if (!e->start()) {
-      ESP_LOGW(kTag, "on-device wake unavailable — tap-to-talk only");
-      delete e;
+      if (e->stuck()) {
+        keep_stuck_engine(e);  // a task it started has not come back out
+      } else {
+        ESP_LOGW(kTag, "on-device wake unavailable — tap-to-talk only");
+        delete e;
+      }
       return false;
     }
     // Brought up while an image downloads: park it as ota_quiesce() would
@@ -150,6 +164,13 @@ bool WyomingSatellite::stop_wake_backend() {
     std::atomic<bool>& f;
     ~EndTeardown() { f.store(false); }
   } end_teardown{wake_teardown_};
+  // A kept engine whose task has come out by now can go, and with it the
+  // block on starting another.
+  if (stuck_engine_ && !in_detection_.load() && stuck_engine_->stop()) {
+    ESP_LOGI(kTag, "the wake engine that did not stop has stopped");
+    delete stuck_engine_;
+    stuck_engine_ = nullptr;
+  }
   // DETACH the engine pointer first: a reader that loads it from now on sees
   // null. One that loaded it before holds an EngineRef, and the engine is
   // stopped and deleted only once those are done. Every reader is bounded
@@ -171,10 +192,8 @@ bool WyomingSatellite::stop_wake_backend() {
     if (!in_detection_.load() && e->stop()) {  // joins feed/fetch, frees mic
       delete e;
     } else {
-      ESP_LOGE(kTag, "wake engine did not stop — left in place");
-      espos_health_report("wakeService", ESPOS_HEALTH_WARN,
-                          "wake engine did not stop; restart the device");
-      engine_stuck_ = true;
+      keep_stuck_engine(e);
+      return false;
     }
   }
   if (!wake_task_) return true;
@@ -189,6 +208,15 @@ bool WyomingSatellite::stop_wake_backend() {
   }
   wake_task_ = nullptr;
   return true;
+}
+
+void WyomingSatellite::keep_stuck_engine(WakeEngine* e) {
+  // Kept, not freed: a task of it may still run, and it calls back into this
+  // satellite. The destructor stops it once it can.
+  ESP_LOGE(kTag, "wake engine did not stop — left in place");
+  espos_health_report("wakeService", ESPOS_HEALTH_WARN,
+                      "wake engine did not stop; restart the device");
+  if (!stuck_engine_) stuck_engine_ = e;  // a second one would need a second
 }
 
 bool WyomingSatellite::set_wake_network(const std::string& host, uint16_t port,
@@ -1227,7 +1255,21 @@ void WyomingSatellite::start_wake_pipeline() {
     // before it reads the OTA one, ota_resume() the other way round, so at
     // least one of the two sees the other done (resume() is idempotent).
     detection_paused_.store(false);
-    if (!ota_parked_.load()) e->resume();
+    // Not during a teardown, which stops this engine next. And not while the
+    // utterance's stream still holds the mic, which has one reader: a
+    // pipeline that timed out or was cut short leaves run_mic() in its
+    // release tail.
+    for (int i = 0; i < 300 && (listening_.load() || mic_running_.load());
+         i++) {
+      if (wake_teardown_.load()) break;
+      vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    const bool mic_free = !listening_.load() && !mic_running_.load();
+    if (!ota_parked_.load() && !wake_teardown_.load() && mic_free) {
+      e->resume();
+    } else if (!mic_free && !wake_teardown_.load()) {
+      ESP_LOGW(kTag, "mic still streaming — wake word resumes on the next one");
+    }
   }
 }
 

@@ -470,9 +470,10 @@ class WyomingSatellite {
   // stop_wake_backend() tears a back-end down: the two wait on each other.
   std::atomic<bool> in_detection_{false};
   std::atomic<bool> wake_teardown_{false};
-  // An engine whose tasks did not stop was left in place; no other engine
-  // starts beside it. Under lifecycle_.
-  bool engine_stuck_ = false;
+  // An engine that did not stop, kept rather than freed under its tasks; no
+  // other wake back-end starts beside it. Under lifecycle_.
+  WakeEngine* stuck_engine_ = nullptr;
+  void keep_stuck_engine(WakeEngine* e);
   // Serialises start()/stop()/set_wake_network()/set_wake_enabled() and the
   // OTA hooks: they all tear down and build up the same back-ends, and can
   // arrive from any task.

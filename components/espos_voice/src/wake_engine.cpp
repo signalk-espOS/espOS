@@ -163,8 +163,9 @@ void WakeEngine::fail_start() {
 }
 
 bool WakeEngine::stop() {
-  if (stuck_) return false;
-  if (!running_.exchange(false)) return true;
+  // The first call clears running_. A call after a missed join tries that
+  // join again and, once it succeeds, finishes the teardown.
+  if (!running_.exchange(false) && !stuck_) return true;
   // JOIN both tasks: they observe running_==false and return within a tick
   // (feed after its ≤32 ms record_pcm, fetch after its ≤2 s AFE fetch), then
   // their tramps give feed_exited_/fetch_exited_. Only after BOTH have fully
@@ -197,6 +198,7 @@ bool WakeEngine::stop() {
     }
     fetch_task_ = nullptr;
   }
+  stuck_ = false;
   if (afe_data_ && afe_handle_) {
     afe_if(afe_handle_)->destroy(afe_dat(afe_data_));
   }

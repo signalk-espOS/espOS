@@ -56,9 +56,11 @@ class WakeEngine {
   // (wake is then simply unavailable; the rest of the satellite is fine).
   bool start();
   // False when a task did not exit in time: the engine then keeps the AFE,
-  // the mic and its semaphores for that task, and must not be deleted (a
-  // leak is the safe outcome; a restart frees it). True once stopped.
+  // the mic and its semaphores for that task, stuck() is true, and it must
+  // not be deleted. Calling stop() again tries the join again. True once
+  // stopped.
   bool stop();
+  bool stuck() const { return stuck_; }
 
   // Pause / resume mic consumption. pause() blocks until the feed task has
   // released the mic (so the caller can hand it to run_mic()); resume()
