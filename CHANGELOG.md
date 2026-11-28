@@ -15,6 +15,20 @@ pull request. The `[Unreleased]` block below was written by hand before the
 switch; its entries belong to the next feature release and are folded into
 that section when it is cut.
 
+## 0.33.0 (2026-11-27)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Added
+* feat(voice): switch the wake word off and on at runtime by @dirkwa in https://github.com/signalk-espOS/espOS/pull/342
+### Other
+* feat(sk): a smaller offline buffer default on chips without PSRAM by @marcelrv in https://github.com/signalk-espOS/espOS/pull/345
+* fix(sk): skip the https probe leg when the plain connect failed by @marcelrv in https://github.com/signalk-espOS/espOS/pull/343
+
+
+**Full Changelog**: https://github.com/signalk-espOS/espOS/compare/v0.32.3...v0.33.0
+
 ## 0.32.3 (2026-11-27)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
