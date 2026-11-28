@@ -188,7 +188,7 @@ them.
 | `OTA_AVAILABLE` | a newer firmware is on offer | `{version}` |
 | `TIME_SYNCED` | something set the clock, every time | `{source, unix_ms}` |
 | `PORTAL_UP` / `PORTAL_DOWN` | the setup network came up or went away. On a P4 WiFi and Bluetooth share one radio, so anything that scans should pause in between | |
-| `UPDATE_STARTED` / `_FINISHED` | a firmware or radio co-processor update began or ended, successful or not. Bluetooth scanning pauses in between | |
+| `UPDATE_STARTED` / `_FINISHED` | a firmware or radio co-processor update began or ended, successful or not. Bluetooth scanning pauses in between, and the Signal K client starts no new requests or connections | |
 
 The full names start with `ESPOS_EVENT_`, and the data types are
 `espos_event_network_t`, `espos_event_sk_server_t`, `espos_event_ota_t` and

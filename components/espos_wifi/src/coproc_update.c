@@ -278,16 +278,26 @@ static bool cp_has_activate(void)
     return major > 2 || (major == 2 && minor >= 6);
 }
 
-/* FINISHED must arrive: espos_event_post() gives up after 50 ms on a full
- * queue, and a subscriber that heard STARTED (the BLE gateway suspends its
- * scan) would wait for the matching FINISHED until the next reboot. A failed
- * install does not reboot, so retry for up to ~5 s; STARTED may be dropped, as
- * a FINISHED nobody was waiting for is a no-op. */
-static void post_update_finished(void)
+/* Both must arrive: espos_event_post() gives up after 50 ms on a full queue.
+ * A dropped FINISHED leaves a subscriber that heard STARTED (the BLE gateway
+ * suspends its scan, espos_sk holds its connections) waiting until the next
+ * reboot, and a failed install does not reboot. A dropped STARTED lets them
+ * run through the whole download. So retry: 100 posts, each waiting up to
+ * 50 ms for room, 50 ms apart -- 5 to 10 s on a queue that stays full. A
+ * FINISHED nobody was waiting for is a no-op. */
+static void post_update_event(int32_t id)
 {
-    for (int i = 0; i < 100 && espos_event_post(ESPOS_EVENT_UPDATE_FINISHED, NULL, 0) != ESP_OK; i++) {
+    for (int i = 0; i < 100; i++) {
+        if (espos_event_post(id, NULL, 0) == ESP_OK) {
+            return;
+        }
         vTaskDelay(pdMS_TO_TICKS(50));
     }
+    /* Five to ten seconds of a full default event loop: the WiFi events queue
+     * behind the same loop, so the device has bigger trouble than this. The
+     * update goes ahead; what the subscribers do around it is best effort. */
+    ESP_LOGW(TAG, "%s not delivered: the event loop stayed full",
+             id == ESPOS_EVENT_UPDATE_STARTED ? "UPDATE_STARTED" : "UPDATE_FINISHED");
 }
 
 static void quiesce(bool on)
@@ -297,14 +307,14 @@ static void quiesce(bool on)
     }
     s_quiesced = on;
     if (on) {
-        (void)espos_event_post(ESPOS_EVENT_UPDATE_STARTED, NULL, 0);
+        post_update_event(ESPOS_EVENT_UPDATE_STARTED);
     }
     void (*hook)(void) = on ? espos_ota_quiesce_hook : espos_ota_resume_hook;
     if (hook) {
         hook();
     }
     if (!on) {
-        post_update_finished();
+        post_update_event(ESPOS_EVENT_UPDATE_FINISHED);
     }
 }
 

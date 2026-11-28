@@ -354,7 +354,15 @@ void espos_sk_ws_meta_round(void)
     uint32_t epoch = s.meta.epoch;
     uint32_t conn = s.meta.conn;
     unlock();
+    /* A firmware download that starts during the round stops it before the
+     * next request. The path it stopped at keeps no outcome and the round no
+     * backoff: the first round after the download asks again at once. */
+    bool held = false;
     for (size_t k = 0; k < n && stop == ESPOS_SK_META_DONE; k++) {
+        if (espos_sk_update_running()) {
+            held = true;
+            break;
+        }
         char path[ESPOS_SK_PATH_MAX];
         lock();
         size_t i = espos_sk_meta_index(&s.meta, n, k);
@@ -383,6 +391,11 @@ void espos_sk_ws_meta_round(void)
         espos_sk_meta_seen_t seen;
         int st = espos_sk_http_get_meta(&srv, token, path, replaced, &seen);
         free(replaced);
+        if (st == ESPOS_SK_HTTP_HELD) {
+            free(meta);
+            held = true;
+            break;
+        }
         espos_sk_meta_step_t step = espos_sk_meta_after_get(st, seen);
         if (step == ESPOS_SK_META_DONE) {
             ESP_LOGI(TAG, "meta %s: server has its own%s, keeping it", path,
@@ -397,9 +410,16 @@ void espos_sk_ws_meta_round(void)
             unlock();
             int put = 0;
             step = ESPOS_SK_META_LATER;
-            if (!stale) {
+            if (!stale && espos_sk_update_running()) {
+                put = ESPOS_SK_HTTP_HELD;
+            } else if (!stale) {
                 put = espos_sk_http_put_meta(&srv, token, path, meta);
                 step = espos_sk_meta_after_put(put);
+            }
+            if (put == ESPOS_SK_HTTP_HELD) {
+                free(meta);
+                held = true;
+                break;
             }
             if (step == ESPOS_SK_META_DONE) {
                 lock();
@@ -424,6 +444,10 @@ void espos_sk_ws_meta_round(void)
         if (step == ESPOS_SK_META_UNAUTHORIZED || step == ESPOS_SK_META_BACK_OFF) {
             stop = step;
         }
+    }
+    if (held) {
+        ESP_LOGI(TAG, "meta: round held by a firmware update, asking again after it");
+        return;
     }
     if (stop == ESPOS_SK_META_UNAUTHORIZED) {
         espos_sk_report_unauthorized();
@@ -762,7 +786,10 @@ static void ws_task(void *arg)
         bool have = espos_sk_get_server(&srv) == ESP_OK && espos_sk_get_token(token, sizeof(token)) == ESP_OK &&
                     allowed;
         bool ready = s.enabled && net_up && have;
-        check_stall(ready, connected, &down_since_ms);
+        /* An open stream stays open through a firmware download; a closed
+         * one waits for the download to end, and so does the stall alarm. */
+        bool update_running = espos_sk_update_running();
+        check_stall(ready && !update_running, connected, &down_since_ms);
         if (connected) {
             bool changed = strcmp(srv.host, cur_srv.host) != 0 || srv.port != cur_srv.port ||
                            srv.tls != cur_srv.tls || strcmp(token, cur_token) != 0;
@@ -813,6 +840,10 @@ static void ws_task(void *arg)
                 lock();
                 s.st.next_retry_s = 0;
                 unlock();
+                vTaskDelay(pdMS_TO_TICKS(idle));
+                continue;
+            }
+            if (update_running) {
                 vTaskDelay(pdMS_TO_TICKS(idle));
                 continue;
             }
@@ -899,6 +930,16 @@ static void ws_task(void *arg)
                 }
             }
 #endif
+            /* Waiting for the slot can take seconds, long enough for an
+             * update to have started in the meantime. */
+            if (espos_sk_update_running()) {
+#if CONFIG_ESPOS_SK_TLS
+                if (srv.tls) {
+                    espos_sk_tls_handshake_end();
+                }
+#endif
+                continue;
+            }
             const uint32_t connect_started_ms = now_ms();
             const int rc = esp_transport_connect(ws, srv.host, srv.port,
                                                  SK_WS_CONNECT_TIMEOUT_MS);
