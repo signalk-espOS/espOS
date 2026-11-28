@@ -295,7 +295,7 @@ export function createMock(opts: MockOptions): Mock {
     token: { state: "no_server", has_token: false, busy: false, last_http_status: 0, last_error: "", counts: { requests: 0, approved: 0, denied: 0, unauthorized: 0, local_errors: 0 } } as SkToken,
     server: { source: "none" } as SkServer, client_id: profile.clientId, vessel_context: profile.vesselContext, description: `espOS ${profile.hostname}`, permissions: "readwrite",
     discovery: { enabled: true, count: 0, last_s: null as number | null },
-    ws: { enabled: true, connected: false, reconnects: 0, sent: 0, send_errors: 0, pending: 0, buffered: 0, buffered_bytes: 0, dropped: 0, last_error: "", meta: { declared: 3, reconciled: 0 }, in: { subs: 2, frames: 0, received: 0 }, put: { pending: 0, ok: 0, failed: 0 } },
+    ws: { enabled: true, connected: false, reconnects: 0, sent: 0, send_errors: 0, pending: 0, buffered: 0, buffered_bytes: 0, dropped: 0, live_dropped: 0, last_error: "", meta: { declared: 3, reconciled: 0 }, in: { subs: 2, frames: 0, received: 0 }, put: { pending: 0, ok: 0, failed: 0 } },
   };
   let discovered: ((typeof servers)[number] & { seen_s: number })[] = [];
   let discoverAt = 0;

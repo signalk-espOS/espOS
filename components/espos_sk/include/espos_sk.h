@@ -124,6 +124,41 @@ esp_err_t espos_sk_publish_string_ctx_at(const char *context, const char *path, 
 esp_err_t espos_sk_publish_bool_ctx_at(const char *context, const char *path, bool value, int64_t at_ms);
 esp_err_t espos_sk_publish_json_ctx_at(const char *context, const char *path, const char *value_json, int64_t at_ms);
 
+/* espos_sk_pub_opts_t.flags. LIVE: send if the stream is up, drop if it is
+ * not -- for periodic telemetry, whose next value supersedes this one. */
+#define ESPOS_SK_PUB_LIVE (1u << 0)
+
+/** Options for the _opts calls. A zeroed struct, or NULL, is no options. */
+typedef struct {
+    int64_t at_ms;  /* as the _at calls: unix ms the value was measured at; 0 = now */
+    uint32_t flags; /* ESPOS_SK_PUB_*; an unknown flag is refused (ESP_ERR_INVALID_ARG) */
+} espos_sk_pub_opts_t;
+
+/**
+ * Publish with options. `context` NULL is vessels.self here (the _ctx calls
+ * refuse it because there it is most likely a bug); `opts` NULL is none.
+ * Batched and timestamped like the calls above.
+ *
+ * With ESPOS_SK_PUB_LIVE the value is sent if the stream is up and dropped if
+ * it is not: published while offline, or still in the batch window when the
+ * stream drops. It is not replayed after a reconnect, and a dropped value
+ * still returns ESP_OK -- "send if you can" -- counted in the status
+ * document's `ws.live_dropped`, not in `ws.dropped`. The caller publishes
+ * again on its next period; a slow publisher that wants its value on the
+ * server soon after a reconnect restates it on
+ * ESPOS_EVENT_SK_STREAM_CONNECTED. Within a batch window the newest value of a
+ * path and timestamp (at_ms) wins, flag and all; values of one path with
+ * different timestamps are separate updates. Messages already in the offline
+ * buffer stay there.
+ *
+ * String and bool values go through the json call with espos_sk_json_string()
+ * (espos_sk_delta.h) or "true"/"false".
+ */
+esp_err_t espos_sk_publish_json_opts(const char *context, const char *path, const char *value_json,
+                                     const espos_sk_pub_opts_t *opts);
+esp_err_t espos_sk_publish_number_opts(const char *context, const char *path, double value,
+                                       const espos_sk_pub_opts_t *opts);
+
 /**
  * Refuse new values with ESP_ERR_NO_MEM when the outbound ring is full instead
  * of dropping its oldest message. Off by default, because the ring is the
@@ -327,6 +362,7 @@ typedef struct {
     uint32_t puts_sent, puts_failed;
     uint32_t puts_in;         /* inbound PUT items received from the server */
     uint32_t puts_rejected;   /* of those, answered 405 (no handler) or 502 */
+    uint32_t live_dropped;    /* ESPOS_SK_PUB_LIVE values dropped while the stream was down */
 } espos_sk_ws_status_t;
 esp_err_t espos_sk_ws_get_status(espos_sk_ws_status_t *out);
 

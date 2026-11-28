@@ -2297,11 +2297,18 @@ class SkTests(unittest.TestCase):
         self.assertEqual(st, 202, js)
         st, _, _, js = req("POST", "/api/v1/sk/publish", {"path": "espos.test.b", "value": "hello"})
         self.assertEqual(st, 202, js)
-        ok = wait_for(lambda: len(self.mock.deltas) > n0 or None, timeout=5)
-        self.assertTrue(ok, "no delta arrived")
-        d = self.mock.deltas[n0]
+        # Not necessarily the first delta after n0: the device's own health
+        # telemetry (every sk.health_s) can land in between.
+        def ours():
+            for d in self.mock.deltas[n0:]:
+                for u in d.get("updates", []):
+                    if any(v.get("path") == "espos.test.a" for v in u.get("values", [])):
+                        return d, u
+            return None
+        found = wait_for(ours, timeout=5)
+        self.assertTrue(found, "no delta with the published values arrived")
+        d, upd = found
         self.assertEqual(d["context"], "vessels.self")
-        upd = d["updates"][0]
         self.assertEqual(upd["source"]["label"], "espos-1a2b")
         vals = {v["path"]: v["value"] for v in upd["values"]}
         self.assertEqual(vals.get("espos.test.a"), 1.5)

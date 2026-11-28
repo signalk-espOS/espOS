@@ -748,7 +748,8 @@ the cap is refused with `ESP_ERR_NO_MEM` and logged by `espos_sse`.
   "discovery": {"enabled": true, "count": 2, "last_s": 12},
   "ws": {"enabled": true, "connected": true, "connected_s": 300, "reconnects": 1,
          "sent": 1234, "send_errors": 0, "pending": 0,
-         "buffered": 0, "buffered_bytes": 0, "dropped": 0, "last_error": "",
+         "buffered": 0, "buffered_bytes": 0, "dropped": 0, "live_dropped": 0,
+         "last_error": "",
          "meta": {"declared": 8, "reconciled": 8},
          "in": {"subs": 2, "frames": 590, "received": 586},
          "put": {"pending": 0, "ok": 3, "failed": 1}}
@@ -783,6 +784,8 @@ differed; `DELETE /sk/tls` accepts the new certificate. See
 `ws` (M4) is the delta stream: `pending` = values in the open batching
 window, `buffered`/`buffered_bytes` = messages held in the offline ring,
 `dropped` = messages the ring had to discard (oldest first),
+`live_dropped` = live values (`ESPOS_SK_PUB_LIVE`) dropped because the
+stream was down,
 `next_retry_s` while disconnected, `meta` = declared / reconciled counts.
 `in` (M7): active subscriptions, text frames read, value/meta items
 delivered; `put` (M7): requests in flight, answered OK, failed/timed out.

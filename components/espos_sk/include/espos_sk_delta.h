@@ -9,6 +9,7 @@
  *                             an update per timestamp
  *   connected              →  message goes out (backlog drains oldest-first, rate-limited)
  *   offline                →  message enters the ring (bounded by count and bytes, oldest dropped)
+ *   live value, offline    →  dropped (ESPOS_SK_DELTA_LIVE; see espos_sk_delta_set_online())
  *
  * The owner calls espos_sk_delta_take() from its sender task and transmits
  * what it gets; espos_sk_delta_requeue() puts a message back if the send
@@ -38,6 +39,11 @@ extern "C" {
 /* Distinct contexts one batch window holds before it closes early. */
 #define ESPOS_SK_CONTEXTS_MAX 4
 
+/* espos_sk_delta_publish_ex() flags. LIVE: send if the stream is up, drop if
+ * it is not -- periodic telemetry whose next value supersedes this one, and
+ * which is worth nothing replayed from the ring after an outage. */
+#define ESPOS_SK_DELTA_LIVE (1u << 0)
+
 typedef struct {
     const char *label;        /* source label, e.g. the hostname */
     uint32_t batch_ms;        /* coalescing window (default 100) */
@@ -54,6 +60,7 @@ typedef struct {
     uint32_t dropped;         /* messages dropped because the ring was full */
     uint32_t built;           /* messages built */
     uint32_t taken;           /* messages handed to the sender */
+    uint32_t live_dropped;    /* LIVE values dropped because the stream was down */
 } espos_sk_delta_stats_t;
 
 typedef struct espos_sk_delta espos_sk_delta_t;
@@ -86,6 +93,20 @@ esp_err_t espos_sk_delta_publish_ctx(espos_sk_delta_t *d, const char *context, c
  * messages: nothing is enqueued, so the caller can wait and retry. */
 esp_err_t espos_sk_delta_publish_at(espos_sk_delta_t *d, const char *context, const char *path,
                                     const char *value_json, int64_t at_ms, uint32_t now_ms);
+/** The same with ESPOS_SK_DELTA_* `flags`; 0 is publish_at(). A LIVE value
+ * published while the engine is offline is dropped, counted in
+ * live_dropped, and still returns ESP_OK: the caller asked for "send if you
+ * can". One already pending when the window closes offline is dropped the
+ * same way, and the window's other values are queued as usual. Within a
+ * window the newest value of a path and timestamp wins, flag and all.
+ * ESP_ERR_INVALID_ARG for an unknown flag. */
+esp_err_t espos_sk_delta_publish_ex(espos_sk_delta_t *d, const char *context, const char *path,
+                                    const char *value_json, int64_t at_ms, uint32_t flags, uint32_t now_ms);
+/** Whether the stream is up, for LIVE values. The owner sets it wherever its
+ * connection state changes, before flushing on a disconnect. Starts offline,
+ * so a LIVE value published before the first connection is dropped. Messages
+ * already in the ring are not affected. */
+void espos_sk_delta_set_online(espos_sk_delta_t *d, bool online);
 
 /** Sender side. Returns a malloc'ed message to transmit now, or NULL.
  * connected=false only batches into the ring. */

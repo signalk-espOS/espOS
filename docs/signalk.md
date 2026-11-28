@@ -202,6 +202,33 @@ other vessels (`onlySelf`). Nothing acknowledges a delta, and the buffer
 drops its oldest messages when it is full, so a dated delta is no safer than
 any other. A backlog that must arrive complete goes as an upload.
 
+**Live values.** Periodic telemetry gains nothing from the offline buffer:
+after an outage only its latest value matters, and that arrives with the
+next period anyway. `espos_sk_publish_json_opts(context, path, value, opts)`
+and `espos_sk_publish_number_opts()` take an options struct, and
+`ESPOS_SK_PUB_LIVE` in `opts.flags` means "send if the stream is up, drop if
+it is not".
+
+```c
+const espos_sk_pub_opts_t live = { .flags = ESPOS_SK_PUB_LIVE };
+espos_sk_publish_number_opts(NULL, "electrical.batteries.house.voltage", 12.7, &live);
+```
+
+* A NULL context is `vessels.self` here, and a NULL `opts` is no options;
+  `opts.at_ms` works as in the `_at` calls.
+* A live value published while the stream is down is dropped and the call
+  still returns `ESP_OK`. One still waiting in the batch when the stream drops
+  is dropped too. Neither is replayed after the reconnect, and neither counts
+  in `ws.dropped`; `ws.live_dropped` counts them.
+* A slow publisher that wants its value on the server soon after a reconnect
+  restates it on `ESPOS_EVENT_SK_STREAM_CONNECTED`.
+* Within one batch the newest value of a path and timestamp wins, flag and
+  all. Values of one path with different timestamps stay separate updates.
+* Messages already in the buffer when the stream drops stay there.
+
+espOS's own health telemetry (`espos.<label>.*`, every `sk.health_s`) is
+published this way.
+
 **Waiting instead of dropping.** When the buffer is full it drops its oldest
 message, which is right for an offline buffer. Code forwarding a backlog it
 can't afford to lose can call `espos_sk_set_no_drop(true)` instead. Then a

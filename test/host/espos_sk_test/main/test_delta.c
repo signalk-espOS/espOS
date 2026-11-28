@@ -696,3 +696,220 @@ TEST_CASE("offline buffer size: a firmware default replaces the key's default on
     /* below the key's minimum reads as the minimum */
     TEST_ASSERT_EQUAL_INT32(4, espos_sk_buffer_kb(32, false, 2));
 }
+
+TEST_CASE("live: a value published offline is dropped, counted, and still ESP_OK", "[delta]")
+{
+    espos_sk_delta_t *d = mk(8, 0, 20);
+    /* a new engine starts offline */
+    TEST_ESP_OK(espos_sk_delta_publish_ex(d, NULL, "espos.x.uptime", "1", 0, ESPOS_SK_DELTA_LIVE, 1000));
+    espos_sk_delta_stats_t st;
+    espos_sk_delta_stats(d, &st);
+    TEST_ASSERT_EQUAL(0, st.pending);
+    TEST_ASSERT_EQUAL(1, st.live_dropped);
+    TEST_ASSERT_EQUAL(0, st.dropped);
+    TEST_ASSERT_NULL(espos_sk_delta_take(d, 2000, false));
+    espos_sk_delta_stats(d, &st);
+    TEST_ASSERT_EQUAL(0, st.buffered);
+    /* a plain value offline still buffers */
+    TEST_ESP_OK(espos_sk_delta_publish(d, "a.b", "1", 3000));
+    TEST_ASSERT_NULL(espos_sk_delta_take(d, 3100, false));
+    espos_sk_delta_stats(d, &st);
+    TEST_ASSERT_EQUAL(1, st.buffered);
+    espos_sk_delta_destroy(d);
+}
+
+TEST_CASE("live: online, a live value goes out like any other", "[delta]")
+{
+    espos_sk_delta_t *d = mk(8, 0, 20);
+    espos_sk_delta_set_online(d, true);
+    TEST_ESP_OK(espos_sk_delta_publish_ex(d, NULL, "espos.x.uptime", "7", 0, ESPOS_SK_DELTA_LIVE, 1000));
+    char *m = espos_sk_delta_take(d, 1100, true);
+    TEST_ASSERT_NOT_NULL(m);
+    TEST_ASSERT_NOT_NULL(strstr(m, "\"path\":\"espos.x.uptime\",\"value\":7"));
+    free(m);
+    espos_sk_delta_stats_t st;
+    espos_sk_delta_stats(d, &st);
+    TEST_ASSERT_EQUAL(0, st.live_dropped);
+    espos_sk_delta_destroy(d);
+}
+
+TEST_CASE("live: the window closing offline drops live values, queues the rest", "[delta]")
+{
+    espos_sk_delta_t *d = mk(8, 0, 20);
+    espos_sk_delta_set_online(d, true);
+    TEST_ESP_OK(espos_sk_delta_publish_ex(d, NULL, "espos.x.uptime", "1", 0, ESPOS_SK_DELTA_LIVE, 1000));
+    TEST_ESP_OK(espos_sk_delta_publish(d, "a.b", "2", 1010));
+    TEST_ESP_OK(espos_sk_delta_publish_ex(d, NULL, "espos.x.rssi", "-60", 0, ESPOS_SK_DELTA_LIVE, 1020));
+    /* the stream drops; the owner flushes the window on its way down */
+    espos_sk_delta_set_online(d, false);
+    TEST_ESP_OK(espos_sk_delta_flush(d, 1030));
+    espos_sk_delta_stats_t st;
+    espos_sk_delta_stats(d, &st);
+    TEST_ASSERT_EQUAL(2, st.live_dropped);
+    TEST_ASSERT_EQUAL(1, st.buffered);
+    espos_sk_delta_set_online(d, true);
+    char *m = espos_sk_delta_take(d, 5000, true);
+    TEST_ASSERT_NOT_NULL(m);
+    TEST_ASSERT_EQUAL_STRING("{\"context\":\"vessels.self\",\"updates\":[{\"source\":{\"label\":\"espos-1a2b\"},"
+                             "\"values\":[{\"path\":\"a.b\",\"value\":2}]}]}",
+                             m);
+    free(m);
+    espos_sk_delta_destroy(d);
+}
+
+TEST_CASE("live: a window of only live values closing offline builds no message", "[delta]")
+{
+    espos_sk_delta_t *d = mk(8, 0, 20);
+    espos_sk_delta_set_online(d, true);
+    TEST_ESP_OK(espos_sk_delta_publish_ex(d, NULL, "espos.x.uptime", "1", 0, ESPOS_SK_DELTA_LIVE, 1000));
+    TEST_ESP_OK(espos_sk_delta_publish_ex(d, "vessels.urn:mrn:signalk:uuid:x", "a.b", "1", 0, ESPOS_SK_DELTA_LIVE,
+                                          1010));
+    espos_sk_delta_set_online(d, false);
+    TEST_ASSERT_NULL(espos_sk_delta_take(d, 1200, false)); /* the batch is due and closes offline */
+    espos_sk_delta_stats_t st;
+    espos_sk_delta_stats(d, &st);
+    TEST_ASSERT_EQUAL(0, st.built);
+    TEST_ASSERT_EQUAL(0, st.buffered);
+    TEST_ASSERT_EQUAL(0, st.pending);
+    TEST_ASSERT_EQUAL(2, st.live_dropped);
+    /* the window is empty and reusable */
+    espos_sk_delta_set_online(d, true);
+    TEST_ESP_OK(espos_sk_delta_publish(d, "c.d", "3", 2000));
+    char *m = espos_sk_delta_take(d, 2100, true);
+    TEST_ASSERT_NOT_NULL(m);
+    TEST_ASSERT_NOT_NULL(strstr(m, "\"context\":\"vessels.self\""));
+    free(m);
+    espos_sk_delta_destroy(d);
+}
+
+TEST_CASE("live: the newest value of a path brings its flag with it", "[delta]")
+{
+    espos_sk_delta_t *d = mk(8, 0, 20);
+    espos_sk_delta_set_online(d, true);
+    /* plain, then live: the live one replaces it and goes when offline */
+    TEST_ESP_OK(espos_sk_delta_publish(d, "a.b", "1", 1000));
+    TEST_ESP_OK(espos_sk_delta_publish_ex(d, NULL, "a.b", "2", 0, ESPOS_SK_DELTA_LIVE, 1010));
+    /* live, then plain: the plain one replaces it and stays */
+    TEST_ESP_OK(espos_sk_delta_publish_ex(d, NULL, "c.d", "3", 0, ESPOS_SK_DELTA_LIVE, 1020));
+    TEST_ESP_OK(espos_sk_delta_publish(d, "c.d", "4", 1030));
+    espos_sk_delta_set_online(d, false);
+    TEST_ESP_OK(espos_sk_delta_flush(d, 1040));
+    espos_sk_delta_set_online(d, true);
+    char *m = espos_sk_delta_take(d, 5000, true);
+    TEST_ASSERT_NOT_NULL(m);
+    TEST_ASSERT_NULL(strstr(m, "\"a.b\""));
+    TEST_ASSERT_NOT_NULL(strstr(m, "\"path\":\"c.d\",\"value\":4"));
+    free(m);
+    espos_sk_delta_stats_t st;
+    espos_sk_delta_stats(d, &st);
+    TEST_ASSERT_EQUAL(1, st.live_dropped);
+    espos_sk_delta_destroy(d);
+}
+
+TEST_CASE("live: an unknown flag is refused", "[delta]")
+{
+    espos_sk_delta_t *d = mk(8, 0, 20);
+    espos_sk_delta_set_online(d, true);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, espos_sk_delta_publish_ex(d, NULL, "a.b", "1", 0, 1u << 5, 1000));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG,
+                      espos_sk_delta_publish_ex(d, NULL, "a.b", "1", 0, ESPOS_SK_DELTA_LIVE | (1u << 31), 1000));
+    /* argument checks come first, offline or not */
+    espos_sk_delta_set_online(d, false);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, espos_sk_delta_publish_ex(d, NULL, "", "1", 0, ESPOS_SK_DELTA_LIVE, 1000));
+    espos_sk_delta_destroy(d);
+}
+
+TEST_CASE("live: offline, a live value also drops the pending value it supersedes", "[delta]")
+{
+    espos_sk_delta_t *d = mk(8, 0, 20);
+    /* offline from the start: a plain value pends, then a live one for the
+     * same path would have replaced it */
+    TEST_ESP_OK(espos_sk_delta_publish(d, "a.b", "1", 1000));
+    TEST_ESP_OK(espos_sk_delta_publish(d, "c.d", "2", 1005));
+    TEST_ESP_OK(espos_sk_delta_publish_ex(d, NULL, "a.b", "3", 0, ESPOS_SK_DELTA_LIVE, 1010));
+    espos_sk_delta_stats_t st;
+    espos_sk_delta_stats(d, &st);
+    TEST_ASSERT_EQUAL(1, st.pending);
+    TEST_ASSERT_EQUAL(1, st.live_dropped);
+    TEST_ESP_OK(espos_sk_delta_flush(d, 1020));
+    espos_sk_delta_set_online(d, true);
+    char *m = espos_sk_delta_take(d, 5000, true);
+    TEST_ASSERT_NOT_NULL(m);
+    TEST_ASSERT_NULL(strstr(m, "\"a.b\""));
+    TEST_ASSERT_NOT_NULL(strstr(m, "\"path\":\"c.d\",\"value\":2"));
+    free(m);
+    /* the only pending value superseded: the window is empty and reusable */
+    espos_sk_delta_set_online(d, false);
+    TEST_ESP_OK(espos_sk_delta_publish(d, "e.f", "4", 6000));
+    TEST_ESP_OK(espos_sk_delta_publish_ex(d, NULL, "e.f", "5", 0, ESPOS_SK_DELTA_LIVE, 6010));
+    espos_sk_delta_stats(d, &st);
+    TEST_ASSERT_EQUAL(0, st.pending);
+    TEST_ASSERT_NULL(espos_sk_delta_take(d, 7000, false));
+    espos_sk_delta_stats(d, &st);
+    TEST_ASSERT_EQUAL(0, st.buffered);
+    espos_sk_delta_destroy(d);
+}
+
+TEST_CASE("live: superseded values give their update numbers back", "[delta]")
+{
+    espos_sk_delta_t *d = mk(8, 0, 20);
+    const int64_t t0 = 1767225600000LL; /* 2026-01-01T00:00:00.000Z */
+    /* offline throughout: one dated value stays, then 300 dated values each
+     * superseded by a live one -- more than an 8-bit update number holds */
+    TEST_ESP_OK(espos_sk_delta_publish_at(d, NULL, "a.b", "1", t0, 1000));
+    for (int i = 1; i <= 300; i++) {
+        TEST_ESP_OK(espos_sk_delta_publish_at(d, NULL, "c.d", "2", t0 + i * 1000, 1000));
+        TEST_ESP_OK(espos_sk_delta_publish_ex(d, NULL, "c.d", "3", t0 + i * 1000, ESPOS_SK_DELTA_LIVE, 1000));
+    }
+    TEST_ESP_OK(espos_sk_delta_publish_at(d, NULL, "e.f", "4", t0 + 999000, 1000));
+    TEST_ESP_OK(espos_sk_delta_flush(d, 1010));
+    espos_sk_delta_set_online(d, true);
+    char *m = espos_sk_delta_take(d, 5000, true);
+    TEST_ASSERT_NOT_NULL(m);
+    /* two updates with their own times, not one merged under t0 */
+    TEST_ASSERT_NOT_NULL(strstr(m, "\"timestamp\":\"2026-01-01T00:00:00.000Z\",\"source\":{\"label\":\"espos-1a2b\"},"
+                                   "\"values\":[{\"path\":\"a.b\",\"value\":1}]"));
+    TEST_ASSERT_NOT_NULL(strstr(m, "\"timestamp\":\"2026-01-01T00:16:39.000Z\",\"source\":{\"label\":\"espos-1a2b\"},"
+                                   "\"values\":[{\"path\":\"e.f\",\"value\":4}]"));
+    TEST_ASSERT_NULL(strstr(m, "\"c.d\""));
+    free(m);
+    espos_sk_delta_destroy(d);
+}
+
+TEST_CASE("live: a window kept by no_drop keeps no gaps in its update numbers", "[delta]")
+{
+    espos_sk_delta_t *d = mk(1, 0, 20);
+    espos_sk_delta_set_no_drop(d, true);
+    const int64_t t0 = 1767225600000LL; /* 2026-01-01T00:00:00.000Z */
+    /* the ring's one slot taken, offline */
+    TEST_ESP_OK(espos_sk_delta_publish(d, "x.y", "0", 1000));
+    TEST_ESP_OK(espos_sk_delta_flush(d, 1010));
+    /* a dated value the full ring keeps in the window */
+    TEST_ESP_OK(espos_sk_delta_publish_at(d, NULL, "a.b", "1", t0, 1020));
+    TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, espos_sk_delta_flush(d, 1030));
+    /* again and again: a live value online, then the flush offline drops it
+     * and the ring refuses the rest -- more times than an 8-bit number holds */
+    for (int i = 1; i <= 300; i++) {
+        espos_sk_delta_set_online(d, true);
+        TEST_ESP_OK(espos_sk_delta_publish_ex(d, NULL, "c.d", "2", t0 + i * 1000, ESPOS_SK_DELTA_LIVE, 1040));
+        espos_sk_delta_set_online(d, false);
+        TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, espos_sk_delta_flush(d, 1050));
+    }
+    TEST_ESP_OK(espos_sk_delta_publish_at(d, NULL, "e.f", "4", t0 + 999000, 1060));
+    /* drain the ring, then the kept window goes out */
+    espos_sk_delta_set_online(d, true);
+    free(espos_sk_delta_take(d, 5000, true));
+    TEST_ESP_OK(espos_sk_delta_flush(d, 6000));
+    char *m = espos_sk_delta_take(d, 7000, true);
+    TEST_ASSERT_NOT_NULL(m);
+    TEST_ASSERT_NOT_NULL(strstr(m, "\"timestamp\":\"2026-01-01T00:00:00.000Z\",\"source\":{\"label\":\"espos-1a2b\"},"
+                                   "\"values\":[{\"path\":\"a.b\",\"value\":1}]"));
+    TEST_ASSERT_NOT_NULL(strstr(m, "\"timestamp\":\"2026-01-01T00:16:39.000Z\",\"source\":{\"label\":\"espos-1a2b\"},"
+                                   "\"values\":[{\"path\":\"e.f\",\"value\":4}]"));
+    TEST_ASSERT_NULL(strstr(m, "\"c.d\""));
+    free(m);
+    espos_sk_delta_stats_t st;
+    espos_sk_delta_stats(d, &st);
+    TEST_ASSERT_EQUAL(300, st.live_dropped);
+    espos_sk_delta_destroy(d);
+}

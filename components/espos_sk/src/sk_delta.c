@@ -22,6 +22,7 @@ typedef struct {
     int64_t at_ms; /* unix ms the caller measured it at; 0 = dated when the batch closes */
     uint8_t ctx;   /* index into espos_sk_delta.ctx, in order of first publish */
     uint8_t upd;   /* the update it goes out in; updates are numbered in order of first publish */
+    bool live;     /* ESPOS_SK_DELTA_LIVE: dropped if the window closes offline */
 } pending_t;
 
 #define SELF_CONTEXT "vessels.self"
@@ -69,6 +70,7 @@ struct espos_sk_delta {
     const char *unstamped;
     size_t unstamped_at;
     uint32_t unstamped_batch_ms;
+    bool online; /* espos_sk_delta_set_online(); LIVE values need it */
     espos_sk_delta_stats_t st;
 };
 
@@ -292,14 +294,52 @@ static bool overtakes(const espos_sk_delta_t *d, int ctx, int upd, const char *p
     return false;
 }
 
+/* Take entry i out of the open window. An update left without values gives
+ * its number back, the later ones moving down, so the numbering stays dense
+ * and in order: upd is a uint8_t, and an open window that kept losing values
+ * would otherwise count past it. */
+static void remove_pending(espos_sk_delta_t *d, size_t i)
+{
+    uint8_t gone = d->pending[i].upd;
+    memmove(&d->pending[i], &d->pending[i + 1], (d->pending_n - i - 1) * sizeof(d->pending[0]));
+    d->pending_n--;
+    d->st.pending = d->pending_n;
+    for (size_t j = 0; j < d->pending_n; j++) {
+        if (d->pending[j].upd == gone) {
+            return; /* the update still has values */
+        }
+    }
+    for (size_t j = 0; j < d->pending_n; j++) {
+        if (d->pending[j].upd > gone) {
+            d->pending[j].upd--;
+        }
+    }
+    d->upd_n--;
+}
+
 static bool flush_window(espos_sk_delta_t *d, uint32_t now_ms);
 
 esp_err_t espos_sk_delta_publish_at(espos_sk_delta_t *d, const char *context, const char *path, const char *value_json,
                                     int64_t at_ms, uint32_t now_ms)
 {
-    if (!d || !path || !*path || !value_json || !*value_json || (at_ms && (at_ms < AT_MS_MIN || at_ms > AT_MS_MAX))) {
+    return espos_sk_delta_publish_ex(d, context, path, value_json, at_ms, 0, now_ms);
+}
+
+void espos_sk_delta_set_online(espos_sk_delta_t *d, bool online)
+{
+    if (d) {
+        d->online = online;
+    }
+}
+
+esp_err_t espos_sk_delta_publish_ex(espos_sk_delta_t *d, const char *context, const char *path, const char *value_json,
+                                    int64_t at_ms, uint32_t flags, uint32_t now_ms)
+{
+    if (!d || !path || !*path || !value_json || !*value_json || (at_ms && (at_ms < AT_MS_MIN || at_ms > AT_MS_MAX)) ||
+        (flags & ~ESPOS_SK_DELTA_LIVE)) {
         return ESP_ERR_INVALID_ARG;
     }
+    const bool live = (flags & ESPOS_SK_DELTA_LIVE) != 0;
     if (!context) {
         context = SELF_CONTEXT;
     }
@@ -310,12 +350,36 @@ esp_err_t espos_sk_delta_publish_at(espos_sk_delta_t *d, const char *context, co
     if (strlen(path) >= ESPOS_SK_PATH_MAX || strlen(value_json) >= ESPOS_SK_VALUE_MAX) {
         return ESP_ERR_INVALID_SIZE;
     }
+    if (live && !d->online) {
+        /* "Send if you can": nothing to send it on. It still supersedes a
+         * value it would have replaced, which must not be replayed in its
+         * place after the reconnect. */
+        for (size_t c = 0; c < d->ctx_n; c++) {
+            if (strcmp(d->ctx[c], context) != 0) {
+                continue;
+            }
+            for (size_t i = 0; i < d->pending_n; i++) {
+                if (d->pending[i].ctx == c && d->pending[i].at_ms == at_ms && strcmp(d->pending[i].path, path) == 0) {
+                    remove_pending(d, i);
+                    break;
+                }
+            }
+            break;
+        }
+        if (d->pending_n == 0) {
+            d->ctx_n = 0;
+            d->upd_n = 0;
+        }
+        d->st.live_dropped++;
+        return ESP_OK;
+    }
     int ctx = context_slot(d, context);
     bool reorder = ctx >= 0 && overtakes(d, ctx, update_of(d, ctx, at_ms), path);
     if (ctx >= 0 && !reorder) {
         for (size_t i = 0; i < d->pending_n; i++) {
             if (d->pending[i].ctx == ctx && d->pending[i].at_ms == at_ms && strcmp(d->pending[i].path, path) == 0) {
                 strcpy(d->pending[i].value, value_json); /* newest wins within the window */
+                d->pending[i].live = live;               /* its flag with it */
                 return ESP_OK;
             }
         }
@@ -335,6 +399,7 @@ esp_err_t espos_sk_delta_publish_at(espos_sk_delta_t *d, const char *context, co
     d->pending[d->pending_n].at_ms = at_ms;
     d->pending[d->pending_n].ctx = (uint8_t)ctx;
     d->pending[d->pending_n].upd = (uint8_t)(upd >= 0 ? upd : (int)d->upd_n++);
+    d->pending[d->pending_n].live = live;
     d->pending_n++;
     d->st.pending = d->pending_n;
     return ESP_OK;
@@ -412,6 +477,26 @@ static char *build_message(espos_sk_delta_t *d, uint8_t ctx, size_t *stamp_at)
     return m;
 }
 
+/* Offline, the window's LIVE values go: kept, they would sit in the ring and
+ * be replayed after the outage, superseded by then. Contexts left without
+ * values stay in the table until the window closes; build_message() skips
+ * them. */
+static void drop_live(espos_sk_delta_t *d)
+{
+    /* Through remove_pending(), which renumbers: under no_drop a full ring can
+     * keep the rest of this window, and it must not keep the gaps too. */
+    for (size_t i = d->pending_n; i-- > 0;) {
+        if (d->pending[i].live) {
+            d->st.live_dropped++;
+            remove_pending(d, i);
+        }
+    }
+    if (d->pending_n == 0) {
+        d->ctx_n = 0;
+        d->upd_n = 0;
+    }
+}
+
 /* Close the window: build one message per context and queue it. Under no_drop
  * a window that could fit an empty ring but does not fit now is kept (nothing
  * queued, returns false) so the caller retries once the ring drains. A window
@@ -422,6 +507,12 @@ static bool flush_window(espos_sk_delta_t *d, uint32_t now_ms)
 {
     if (!d || d->pending_n == 0) {
         return true;
+    }
+    if (!d->online) {
+        drop_live(d);
+        if (d->pending_n == 0) {
+            return true; /* nothing but live values: no message at all */
+        }
     }
     /* The values in this batch were published between pending_since_ms and
      * now; the batch window is at most a few hundred milliseconds wide, so the
