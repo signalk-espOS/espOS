@@ -286,9 +286,17 @@ static bool cp_has_activate(void)
  * was waiting for is a no-op. */
 static void post_update_event(int32_t id)
 {
-    for (int i = 0; i < 100 && espos_event_post(id, NULL, 0) != ESP_OK; i++) {
+    for (int i = 0; i < 100; i++) {
+        if (espos_event_post(id, NULL, 0) == ESP_OK) {
+            return;
+        }
         vTaskDelay(pdMS_TO_TICKS(50));
     }
+    /* Five seconds of a full default event loop: the WiFi events queue
+     * behind the same loop, so the device has bigger trouble than this. The
+     * update goes ahead; what the subscribers do around it is best effort. */
+    ESP_LOGW(TAG, "%s not delivered: the event loop stayed full",
+             id == ESPOS_EVENT_UPDATE_STARTED ? "UPDATE_STARTED" : "UPDATE_FINISHED");
 }
 
 static void quiesce(bool on)
