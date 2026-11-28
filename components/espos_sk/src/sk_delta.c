@@ -328,8 +328,29 @@ esp_err_t espos_sk_delta_publish_ex(espos_sk_delta_t *d, const char *context, co
         return ESP_ERR_INVALID_SIZE;
     }
     if (live && !d->online) {
+        /* "Send if you can": nothing to send it on. It still supersedes a
+         * value it would have replaced, which must not be replayed in its
+         * place after the reconnect. */
+        for (size_t c = 0; c < d->ctx_n; c++) {
+            if (strcmp(d->ctx[c], context) != 0) {
+                continue;
+            }
+            for (size_t i = 0; i < d->pending_n; i++) {
+                if (d->pending[i].ctx == c && d->pending[i].at_ms == at_ms && strcmp(d->pending[i].path, path) == 0) {
+                    memmove(&d->pending[i], &d->pending[i + 1], (d->pending_n - i - 1) * sizeof(d->pending[0]));
+                    d->pending_n--;
+                    d->st.pending = d->pending_n;
+                    break;
+                }
+            }
+            break;
+        }
+        if (d->pending_n == 0) {
+            d->ctx_n = 0;
+            d->upd_n = 0;
+        }
         d->st.live_dropped++;
-        return ESP_OK; /* "send if you can": nothing to send it on */
+        return ESP_OK;
     }
     int ctx = context_slot(d, context);
     bool reorder = ctx >= 0 && overtakes(d, ctx, update_of(d, ctx, at_ms), path);

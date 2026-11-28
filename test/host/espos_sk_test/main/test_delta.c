@@ -818,3 +818,34 @@ TEST_CASE("live: an unknown flag is refused", "[delta]")
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, espos_sk_delta_publish_ex(d, NULL, "", "1", 0, ESPOS_SK_DELTA_LIVE, 1000));
     espos_sk_delta_destroy(d);
 }
+
+TEST_CASE("live: offline, a live value also drops the pending value it supersedes", "[delta]")
+{
+    espos_sk_delta_t *d = mk(8, 0, 20);
+    /* offline from the start: a plain value pends, then a live one for the
+     * same path would have replaced it */
+    TEST_ESP_OK(espos_sk_delta_publish(d, "a.b", "1", 1000));
+    TEST_ESP_OK(espos_sk_delta_publish(d, "c.d", "2", 1005));
+    TEST_ESP_OK(espos_sk_delta_publish_ex(d, NULL, "a.b", "3", 0, ESPOS_SK_DELTA_LIVE, 1010));
+    espos_sk_delta_stats_t st;
+    espos_sk_delta_stats(d, &st);
+    TEST_ASSERT_EQUAL(1, st.pending);
+    TEST_ASSERT_EQUAL(1, st.live_dropped);
+    TEST_ESP_OK(espos_sk_delta_flush(d, 1020));
+    espos_sk_delta_set_online(d, true);
+    char *m = espos_sk_delta_take(d, 5000, true);
+    TEST_ASSERT_NOT_NULL(m);
+    TEST_ASSERT_NULL(strstr(m, "\"a.b\""));
+    TEST_ASSERT_NOT_NULL(strstr(m, "\"path\":\"c.d\",\"value\":2"));
+    free(m);
+    /* the only pending value superseded: the window is empty and reusable */
+    espos_sk_delta_set_online(d, false);
+    TEST_ESP_OK(espos_sk_delta_publish(d, "e.f", "4", 6000));
+    TEST_ESP_OK(espos_sk_delta_publish_ex(d, NULL, "e.f", "5", 0, ESPOS_SK_DELTA_LIVE, 6010));
+    espos_sk_delta_stats(d, &st);
+    TEST_ASSERT_EQUAL(0, st.pending);
+    TEST_ASSERT_NULL(espos_sk_delta_take(d, 7000, false));
+    espos_sk_delta_stats(d, &st);
+    TEST_ASSERT_EQUAL(0, st.buffered);
+    espos_sk_delta_destroy(d);
+}
