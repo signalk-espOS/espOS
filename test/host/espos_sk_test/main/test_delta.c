@@ -875,3 +875,41 @@ TEST_CASE("live: superseded values give their update numbers back", "[delta]")
     free(m);
     espos_sk_delta_destroy(d);
 }
+
+TEST_CASE("live: a window kept by no_drop keeps no gaps in its update numbers", "[delta]")
+{
+    espos_sk_delta_t *d = mk(1, 0, 20);
+    espos_sk_delta_set_no_drop(d, true);
+    const int64_t t0 = 1767225600000LL; /* 2026-01-01T00:00:00.000Z */
+    /* the ring's one slot taken, offline */
+    TEST_ESP_OK(espos_sk_delta_publish(d, "x.y", "0", 1000));
+    TEST_ESP_OK(espos_sk_delta_flush(d, 1010));
+    /* a dated value the full ring keeps in the window */
+    TEST_ESP_OK(espos_sk_delta_publish_at(d, NULL, "a.b", "1", t0, 1020));
+    TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, espos_sk_delta_flush(d, 1030));
+    /* again and again: a live value online, then the flush offline drops it
+     * and the ring refuses the rest -- more times than an 8-bit number holds */
+    for (int i = 1; i <= 300; i++) {
+        espos_sk_delta_set_online(d, true);
+        TEST_ESP_OK(espos_sk_delta_publish_ex(d, NULL, "c.d", "2", t0 + i * 1000, ESPOS_SK_DELTA_LIVE, 1040));
+        espos_sk_delta_set_online(d, false);
+        TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, espos_sk_delta_flush(d, 1050));
+    }
+    TEST_ESP_OK(espos_sk_delta_publish_at(d, NULL, "e.f", "4", t0 + 999000, 1060));
+    /* drain the ring, then the kept window goes out */
+    espos_sk_delta_set_online(d, true);
+    free(espos_sk_delta_take(d, 5000, true));
+    TEST_ESP_OK(espos_sk_delta_flush(d, 6000));
+    char *m = espos_sk_delta_take(d, 7000, true);
+    TEST_ASSERT_NOT_NULL(m);
+    TEST_ASSERT_NOT_NULL(strstr(m, "\"timestamp\":\"2026-01-01T00:00:00.000Z\",\"source\":{\"label\":\"espos-1a2b\"},"
+                                   "\"values\":[{\"path\":\"a.b\",\"value\":1}]"));
+    TEST_ASSERT_NOT_NULL(strstr(m, "\"timestamp\":\"2026-01-01T00:16:39.000Z\",\"source\":{\"label\":\"espos-1a2b\"},"
+                                   "\"values\":[{\"path\":\"e.f\",\"value\":4}]"));
+    TEST_ASSERT_NULL(strstr(m, "\"c.d\""));
+    free(m);
+    espos_sk_delta_stats_t st;
+    espos_sk_delta_stats(d, &st);
+    TEST_ASSERT_EQUAL(300, st.live_dropped);
+    espos_sk_delta_destroy(d);
+}

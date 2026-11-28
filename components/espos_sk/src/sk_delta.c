@@ -477,36 +477,32 @@ static char *build_message(espos_sk_delta_t *d, uint8_t ctx, size_t *stamp_at)
     return m;
 }
 
+/* Offline, the window's LIVE values go: kept, they would sit in the ring and
+ * be replayed after the outage, superseded by then. Contexts left without
+ * values stay in the table until the window closes; build_message() skips
+ * them. */
+static void drop_live(espos_sk_delta_t *d)
+{
+    /* Through remove_pending(), which renumbers: under no_drop a full ring can
+     * keep the rest of this window, and it must not keep the gaps too. */
+    for (size_t i = d->pending_n; i-- > 0;) {
+        if (d->pending[i].live) {
+            d->st.live_dropped++;
+            remove_pending(d, i);
+        }
+    }
+    if (d->pending_n == 0) {
+        d->ctx_n = 0;
+        d->upd_n = 0;
+    }
+}
+
 /* Close the window: build one message per context and queue it. Under no_drop
  * a window that could fit an empty ring but does not fit now is kept (nothing
  * queued, returns false) so the caller retries once the ring drains. A window
  * too large for the ring ever -- unreachable by message count with the
  * supported config, reachable by bytes -- cannot be helped by waiting, so it
  * is queued with the ordinary drop behaviour instead of blocking forever. */
-/* Offline, the window's LIVE values go: kept, they would sit in the ring and
- * be replayed after the outage, superseded by then. Compacting leaves gaps in
- * the context and update numbering, which build_message() already skips. */
-static void drop_live(espos_sk_delta_t *d)
-{
-    size_t keep = 0;
-    for (size_t i = 0; i < d->pending_n; i++) {
-        if (d->pending[i].live) {
-            d->st.live_dropped++;
-            continue;
-        }
-        if (keep != i) {
-            d->pending[keep] = d->pending[i];
-        }
-        keep++;
-    }
-    d->pending_n = keep;
-    d->st.pending = keep;
-    if (keep == 0) {
-        d->ctx_n = 0;
-        d->upd_n = 0;
-    }
-}
-
 static bool flush_window(espos_sk_delta_t *d, uint32_t now_ms)
 {
     if (!d || d->pending_n == 0) {
