@@ -1087,6 +1087,10 @@ static void ws_task(void *arg)
                 s.st.send_errors++;
                 s.st.connected = false;
                 espos_sk_delta_set_online(s.delta, false);
+                if (s.delta) {
+                    /* close the window offline: its live values go, as on a close */
+                    espos_sk_delta_flush(s.delta, now_ms());
+                }
                 unlock();
                 set_error("send failed");
                 esp_transport_close(ws);
@@ -1118,6 +1122,10 @@ static void ws_task(void *arg)
                 s.st.send_errors++;
                 s.st.connected = false;
                 espos_sk_delta_set_online(s.delta, false);
+                if (s.delta) {
+                    /* close the window offline: its live values go, as on a close */
+                    espos_sk_delta_flush(s.delta, now_ms());
+                }
                 unlock();
                 set_error("send failed");
                 esp_transport_close(ws);
@@ -1271,6 +1279,10 @@ static void ws_task(void *arg)
                 lock();
                 s.st.connected = false;
                 espos_sk_delta_set_online(s.delta, false);
+                if (s.delta) {
+                    /* close the window offline: its live values go, as on a close */
+                    espos_sk_delta_flush(s.delta, now_ms());
+                }
                 unlock();
                 set_error(stalled ? "message incomplete" : "closed by server");
                 esp_transport_close(ws);
@@ -1283,6 +1295,10 @@ static void ws_task(void *arg)
             lock();
             s.st.connected = false;
             espos_sk_delta_set_online(s.delta, false);
+            if (s.delta) {
+                /* close the window offline: its live values go, as on a close */
+                espos_sk_delta_flush(s.delta, now_ms());
+            }
             unlock();
             set_error("connection error");
             esp_transport_close(ws);
