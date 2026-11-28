@@ -200,12 +200,24 @@ esp_err_t espos_sk_http_perform(const espos_sk_http_req_t *rq, espos_sk_http_res
         r->err = err;
         return err;
     }
+    /* Held before waiting for anything, and again after each wait: a request
+     * that could not get a slot while an update started is held, not failed. */
+    const bool holdable = rq->hold_during_update;
+    if (holdable && espos_sk_update_running()) {
+        ESP_LOGI(TAG, "%s %s: held, a firmware update is downloading", method_name(rq->method), url);
+        r->err = ESP_ERR_NOT_FINISHED;
+        return r->err;
+    }
     SemaphoreHandle_t sem = slots();
     if (!sem) {
         r->err = ESP_ERR_NO_MEM;
         return r->err;
     }
     if (xSemaphoreTake(sem, pdMS_TO_TICKS(rq->timeout_ms)) != pdTRUE) {
+        if (holdable && espos_sk_update_running()) {
+            r->err = ESP_ERR_NOT_FINISHED;
+            return r->err;
+        }
         ESP_LOGW(TAG, "%s %s: %d requests already in flight, none finished within %u ms", method_name(rq->method), url,
                  CONFIG_ESPOS_SK_HTTP_MAX_CONCURRENT, (unsigned)rq->timeout_ms);
         set_local(r, "request slots busy");
@@ -243,6 +255,10 @@ esp_err_t espos_sk_http_perform(const espos_sk_http_req_t *rq, espos_sk_http_res
         if (hs != ESP_OK) {
             xSemaphoreGive(sem);
             free(b.buf);
+            if (holdable && espos_sk_update_running()) {
+                r->err = ESP_ERR_NOT_FINISHED;
+                return r->err;
+            }
             ESP_LOGW(TAG, "%s %s: deferred (%s)", method_name(rq->method), url, esp_err_to_name(hs));
             if (hs == ESP_ERR_NO_MEM) {
                 set_local(r, "no memory for TLS");
@@ -254,7 +270,7 @@ esp_err_t espos_sk_http_perform(const espos_sk_http_req_t *rq, espos_sk_http_res
         }
     }
 #endif
-    if (rq->hold_during_update && espos_sk_update_running()) {
+    if (holdable && espos_sk_update_running()) {
 #if CONFIG_ESPOS_SK_TLS
         if (rq->srv->tls) {
             espos_sk_tls_handshake_end();
