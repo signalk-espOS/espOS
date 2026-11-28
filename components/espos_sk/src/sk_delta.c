@@ -294,6 +294,29 @@ static bool overtakes(const espos_sk_delta_t *d, int ctx, int upd, const char *p
     return false;
 }
 
+/* Take entry i out of the open window. An update left without values gives
+ * its number back, the later ones moving down, so the numbering stays dense
+ * and in order: upd is a uint8_t, and an open window that kept losing values
+ * would otherwise count past it. */
+static void remove_pending(espos_sk_delta_t *d, size_t i)
+{
+    uint8_t gone = d->pending[i].upd;
+    memmove(&d->pending[i], &d->pending[i + 1], (d->pending_n - i - 1) * sizeof(d->pending[0]));
+    d->pending_n--;
+    d->st.pending = d->pending_n;
+    for (size_t j = 0; j < d->pending_n; j++) {
+        if (d->pending[j].upd == gone) {
+            return; /* the update still has values */
+        }
+    }
+    for (size_t j = 0; j < d->pending_n; j++) {
+        if (d->pending[j].upd > gone) {
+            d->pending[j].upd--;
+        }
+    }
+    d->upd_n--;
+}
+
 static bool flush_window(espos_sk_delta_t *d, uint32_t now_ms);
 
 esp_err_t espos_sk_delta_publish_at(espos_sk_delta_t *d, const char *context, const char *path, const char *value_json,
@@ -337,9 +360,7 @@ esp_err_t espos_sk_delta_publish_ex(espos_sk_delta_t *d, const char *context, co
             }
             for (size_t i = 0; i < d->pending_n; i++) {
                 if (d->pending[i].ctx == c && d->pending[i].at_ms == at_ms && strcmp(d->pending[i].path, path) == 0) {
-                    memmove(&d->pending[i], &d->pending[i + 1], (d->pending_n - i - 1) * sizeof(d->pending[0]));
-                    d->pending_n--;
-                    d->st.pending = d->pending_n;
+                    remove_pending(d, i);
                     break;
                 }
             }

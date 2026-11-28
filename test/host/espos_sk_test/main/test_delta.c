@@ -849,3 +849,29 @@ TEST_CASE("live: offline, a live value also drops the pending value it supersede
     TEST_ASSERT_EQUAL(0, st.buffered);
     espos_sk_delta_destroy(d);
 }
+
+TEST_CASE("live: superseded values give their update numbers back", "[delta]")
+{
+    espos_sk_delta_t *d = mk(8, 0, 20);
+    const int64_t t0 = 1767225600000LL; /* 2026-01-01T00:00:00.000Z */
+    /* offline throughout: one dated value stays, then 300 dated values each
+     * superseded by a live one -- more than an 8-bit update number holds */
+    TEST_ESP_OK(espos_sk_delta_publish_at(d, NULL, "a.b", "1", t0, 1000));
+    for (int i = 1; i <= 300; i++) {
+        TEST_ESP_OK(espos_sk_delta_publish_at(d, NULL, "c.d", "2", t0 + i * 1000, 1000));
+        TEST_ESP_OK(espos_sk_delta_publish_ex(d, NULL, "c.d", "3", t0 + i * 1000, ESPOS_SK_DELTA_LIVE, 1000));
+    }
+    TEST_ESP_OK(espos_sk_delta_publish_at(d, NULL, "e.f", "4", t0 + 999000, 1000));
+    TEST_ESP_OK(espos_sk_delta_flush(d, 1010));
+    espos_sk_delta_set_online(d, true);
+    char *m = espos_sk_delta_take(d, 5000, true);
+    TEST_ASSERT_NOT_NULL(m);
+    /* two updates with their own times, not one merged under t0 */
+    TEST_ASSERT_NOT_NULL(strstr(m, "\"timestamp\":\"2026-01-01T00:00:00.000Z\",\"source\":{\"label\":\"espos-1a2b\"},"
+                                   "\"values\":[{\"path\":\"a.b\",\"value\":1}]"));
+    TEST_ASSERT_NOT_NULL(strstr(m, "\"timestamp\":\"2026-01-01T00:16:39.000Z\",\"source\":{\"label\":\"espos-1a2b\"},"
+                                   "\"values\":[{\"path\":\"e.f\",\"value\":4}]"));
+    TEST_ASSERT_NULL(strstr(m, "\"c.d\""));
+    free(m);
+    espos_sk_delta_destroy(d);
+}
