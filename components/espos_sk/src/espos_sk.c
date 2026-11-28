@@ -126,9 +126,13 @@ static struct {
  * because it is read on the SK task and written before that task exists. */
 static char s_app_name[33];
 
-/* Set and cleared on the default event loop (on_update_event), read by both
- * client tasks. s_update_since_ms is the tick count it was last set at. */
-static atomic_bool s_update_running;
+/* The hold: bit 0 is "an update is running", the bits above it a generation
+ * that every set bumps. Set and cleared on the default event loop
+ * (on_update_event), at start, and by reconcile_update_hold(); read by both
+ * client tasks. The generation is what lets the reconciliation clear only the
+ * hold it looked at, never one a newer STARTED set meanwhile.
+ * s_update_since_ms is the tick count of the last set. */
+static atomic_uint_least32_t s_hold;
 static atomic_uint_least32_t s_update_since_ms;
 
 /* Who can say whether an update really runs. Weak, as espos_ota references
@@ -138,7 +142,34 @@ extern bool espos_wifi_coproc_busy(void) __attribute__((weak));
 
 bool espos_sk_update_running(void)
 {
-    return atomic_load(&s_update_running);
+    return (atomic_load(&s_hold) & 1u) != 0;
+}
+
+/* Returns whether the hold was already set. */
+static bool hold_set(void)
+{
+    atomic_store(&s_update_since_ms, (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS));
+    uint_least32_t v = atomic_load(&s_hold);
+    while (!atomic_compare_exchange_weak(&s_hold, &v, (uint_least32_t)((v | 1u) + 2u))) {
+    }
+    return (v & 1u) != 0;
+}
+
+/* Returns whether it was set. */
+static bool hold_clear(void)
+{
+    uint_least32_t v = atomic_load(&s_hold);
+    while ((v & 1u) && !atomic_compare_exchange_weak(&s_hold, &v, v & ~(uint_least32_t)1u)) {
+    }
+    return (v & 1u) != 0;
+}
+
+/* Whether an owner of an update says one runs; *can_ask false when neither is
+ * linked. */
+static bool update_owner_busy(bool *can_ask)
+{
+    *can_ask = espos_ota_busy || espos_wifi_coproc_busy;
+    return (espos_ota_busy && espos_ota_busy()) || (espos_wifi_coproc_busy && espos_wifi_coproc_busy());
 }
 
 /* A flag, not a count: the producers retry both events for a few seconds on a
@@ -149,13 +180,12 @@ static void on_update_event(void *arg, esp_event_base_t base, int32_t id, void *
     (void)arg;
     (void)base;
     (void)data;
-    bool running = id == ESPOS_EVENT_UPDATE_STARTED;
-    if (running) {
-        atomic_store(&s_update_since_ms, (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS));
-    }
-    if (atomic_exchange(&s_update_running, running) != running) {
-        ESP_LOGI(TAG, "%s",
-                 running ? "firmware update downloading: starting nothing new until it ends" : "firmware update ended: resuming");
+    if (id == ESPOS_EVENT_UPDATE_STARTED) {
+        if (!hold_set()) {
+            ESP_LOGI(TAG, "firmware update downloading: starting nothing new until it ends");
+        }
+    } else if (hold_clear()) {
+        ESP_LOGI(TAG, "firmware update ended: resuming");
     }
 }
 
@@ -175,12 +205,17 @@ static uint32_t now_ms(void)
  * Called on the SK task while held. */
 static void reconcile_update_hold(void)
 {
-    bool can_ask = espos_ota_busy || espos_wifi_coproc_busy;
-    bool busy = (espos_ota_busy && espos_ota_busy()) || (espos_wifi_coproc_busy && espos_wifi_coproc_busy());
+    uint_least32_t seen = atomic_load(&s_hold);
+    if (!(seen & 1u)) {
+        return;
+    }
     uint32_t held = now_ms() - (uint32_t)atomic_load(&s_update_since_ms);
-    bool expected = true;
+    bool can_ask;
+    bool busy = update_owner_busy(&can_ask);
+    /* Only the hold looked at: a STARTED since bumped the generation, and the
+     * exchange then fails. */
     if (espos_sk_update_hold_stale(held, can_ask, busy) &&
-        atomic_compare_exchange_strong(&s_update_running, &expected, false)) {
+        atomic_compare_exchange_strong(&s_hold, &seen, seen & ~(uint_least32_t)1u)) {
         ESP_LOGW(TAG, "firmware update no longer running, but its end was never announced: resuming");
     }
 }
@@ -1421,8 +1456,17 @@ esp_err_t espos_sk_start(void)
     if (espos_event_subscribe(ESPOS_EVENT_UPDATE_STARTED, on_update_event, NULL) != ESP_OK ||
         espos_event_subscribe(ESPOS_EVENT_UPDATE_FINISHED, on_update_event, NULL) != ESP_OK) {
         espos_event_unsubscribe(ESPOS_EVENT_UPDATE_STARTED, on_update_event);
-        atomic_store(&s_update_running, false); /* in case a STARTED got in */
+        (void)hold_clear(); /* in case a STARTED got in */
         ESP_LOGW(TAG, "no update events: SignalK traffic continues during firmware updates");
+    } else {
+        /* An update that began before this start sent its STARTED to nobody.
+         * Asked after subscribing, so one that begins now is caught either
+         * way; a hold set here whose FINISHED went to nobody either is let go
+         * by reconcile_update_hold() once the owners are idle. */
+        bool can_ask;
+        if (update_owner_busy(&can_ask) && !hold_set()) {
+            ESP_LOGI(TAG, "firmware update already downloading: starting nothing new until it ends");
+        }
     }
     s.started = true;
     if (xTaskCreate(sk_task, "espos_sk", CONFIG_ESPOS_SK_TASK_STACK, NULL, tskIDLE_PRIORITY + 3, &s.task) != pdPASS) {
@@ -1449,7 +1493,7 @@ esp_err_t espos_sk_stop(void)
     }
     /* Only now: cleared earlier, a paused task could run a queued leg on its
      * way out. A start after this begins unpaused. */
-    atomic_store(&s_update_running, false);
+    (void)hold_clear();
     s.started = false;
     return ESP_OK;
 }
