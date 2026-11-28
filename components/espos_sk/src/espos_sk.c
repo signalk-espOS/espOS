@@ -127,23 +127,32 @@ static struct {
 static char s_app_name[33];
 
 /* Set and cleared on the default event loop (on_update_event), read by both
- * client tasks. */
+ * client tasks. s_update_since_ms is the tick count it was last set at. */
 static atomic_bool s_update_running;
+static atomic_uint_least32_t s_update_since_ms;
+
+/* Who can say whether an update really runs. Weak, as espos_ota references
+ * espos_wifi's: espos_sk depends on neither, and NULL means not linked. */
+extern bool espos_ota_busy(void) __attribute__((weak));
+extern bool espos_wifi_coproc_busy(void) __attribute__((weak));
 
 bool espos_sk_update_running(void)
 {
     return atomic_load(&s_update_running);
 }
 
-/* No FINISHED without a STARTED before it, but a STARTED may be dropped on a
- * full queue (espos_ota retries only FINISHED), so this is a flag, not a count:
- * a FINISHED nobody was waiting for clears nothing that was set. */
+/* A flag, not a count: the producers retry both events for a few seconds on a
+ * full queue, but one can still be lost, and a FINISHED nobody was waiting for
+ * must clear nothing. */
 static void on_update_event(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     (void)arg;
     (void)base;
     (void)data;
     bool running = id == ESPOS_EVENT_UPDATE_STARTED;
+    if (running) {
+        atomic_store(&s_update_since_ms, (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS));
+    }
     if (atomic_exchange(&s_update_running, running) != running) {
         ESP_LOGI(TAG, "%s",
                  running ? "firmware update downloading: starting nothing new until it ends" : "firmware update ended: resuming");
@@ -159,6 +168,21 @@ static bool can_dial(void)
 static uint32_t now_ms(void)
 {
     return (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+}
+
+/* Lets go of a hold whose FINISHED was lost: every retry of the post failed,
+ * and a failed install does not reboot, so nothing else would ever end it.
+ * Called on the SK task while held. */
+static void reconcile_update_hold(void)
+{
+    bool can_ask = espos_ota_busy || espos_wifi_coproc_busy;
+    bool busy = (espos_ota_busy && espos_ota_busy()) || (espos_wifi_coproc_busy && espos_wifi_coproc_busy());
+    uint32_t held = now_ms() - (uint32_t)atomic_load(&s_update_since_ms);
+    bool expected = true;
+    if (espos_sk_update_hold_stale(held, can_ask, busy) &&
+        atomic_compare_exchange_strong(&s_update_running, &expected, false)) {
+        ESP_LOGW(TAG, "firmware update no longer running, but its end was never announced: resuming");
+    }
 }
 
 /* A deadline that is never 0 (0 means "none"; the tick count starts at 0). */
@@ -899,10 +923,12 @@ static void maybe_rotate_unreachable(void)
 }
 
 /* Runs the leg the machine asked for and feeds it the result. Returns false
- * when the result could not even be allocated: the action then stays queued
- * and runs on the next pass of the task loop, a second or less later. The
- * machine sits busy until it answers, and every timer is ignored while it
- * does, so dropping the action would leave it busy for good. */
+ * when the result could not even be allocated, or when a firmware update held
+ * the leg before it was sent (ESPOS_SK_HTTP_HELD): the action then stays
+ * queued and runs on a later pass of the task loop. The machine sits busy
+ * until it answers, and every timer is ignored while it does, so dropping the
+ * action would leave it busy for good -- and a held leg is no answer to give
+ * it, neither the server's nor a failure. */
 static bool run_action(void)
 {
     action_t a = s.action;
@@ -913,22 +939,30 @@ static bool run_action(void)
     }
     s.action = ACT_NONE;
     espos_sk_server_t srv = s.action_srv;
+    espos_sk_tok_event_t ev;
     switch (a) {
     case ACT_REQUEST:
         espos_sk_http_request(&srv, &s.cfg, r);
-        espos_sk_tok_event(&s.sm, ESPOS_SK_EV_REQUEST_RESULT, r);
+        ev = ESPOS_SK_EV_REQUEST_RESULT;
         break;
     case ACT_POLL:
         espos_sk_http_poll(&srv, s.action_href, r);
-        espos_sk_tok_event(&s.sm, ESPOS_SK_EV_POLL_RESULT, r);
+        ev = ESPOS_SK_EV_POLL_RESULT;
         break;
     case ACT_VERIFY:
         espos_sk_http_verify(&srv, s.action_token, r);
-        espos_sk_tok_event(&s.sm, ESPOS_SK_EV_VERIFY_RESULT, r);
+        ev = ESPOS_SK_EV_VERIFY_RESULT;
         break;
     default:
-        break;
+        free(r);
+        return true;
     }
+    if (r->http_status == ESPOS_SK_HTTP_HELD) {
+        s.action = a; /* action_srv, action_href and action_token are untouched */
+        free(r);
+        return false;
+    }
+    espos_sk_tok_event(&s.sm, ev, r);
     free(r);
     /* The scheme is a guess because the probe went unanswered: every leg that
      * runs on it is the cadence to ask again at, so a server that came up
@@ -1011,6 +1045,7 @@ static void sk_task(void *arg)
          * the machine carries on where it was once the download ends. Commands
          * are still taken; a reselection they cause cannot probe (can_dial()). */
         if (espos_sk_update_running()) {
+            reconcile_update_hold();
             if (!wait_cmd(1000)) {
                 break;
             }

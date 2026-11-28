@@ -354,7 +354,15 @@ void espos_sk_ws_meta_round(void)
     uint32_t epoch = s.meta.epoch;
     uint32_t conn = s.meta.conn;
     unlock();
+    /* A firmware download that starts during the round stops it before the
+     * next request. The path it stopped at keeps no outcome and the round no
+     * backoff: the first round after the download asks again at once. */
+    bool held = false;
     for (size_t k = 0; k < n && stop == ESPOS_SK_META_DONE; k++) {
+        if (espos_sk_update_running()) {
+            held = true;
+            break;
+        }
         char path[ESPOS_SK_PATH_MAX];
         lock();
         size_t i = espos_sk_meta_index(&s.meta, n, k);
@@ -383,6 +391,11 @@ void espos_sk_ws_meta_round(void)
         espos_sk_meta_seen_t seen;
         int st = espos_sk_http_get_meta(&srv, token, path, replaced, &seen);
         free(replaced);
+        if (st == ESPOS_SK_HTTP_HELD) {
+            free(meta);
+            held = true;
+            break;
+        }
         espos_sk_meta_step_t step = espos_sk_meta_after_get(st, seen);
         if (step == ESPOS_SK_META_DONE) {
             ESP_LOGI(TAG, "meta %s: server has its own%s, keeping it", path,
@@ -397,9 +410,16 @@ void espos_sk_ws_meta_round(void)
             unlock();
             int put = 0;
             step = ESPOS_SK_META_LATER;
-            if (!stale) {
+            if (!stale && espos_sk_update_running()) {
+                put = ESPOS_SK_HTTP_HELD;
+            } else if (!stale) {
                 put = espos_sk_http_put_meta(&srv, token, path, meta);
                 step = espos_sk_meta_after_put(put);
+            }
+            if (put == ESPOS_SK_HTTP_HELD) {
+                free(meta);
+                held = true;
+                break;
             }
             if (step == ESPOS_SK_META_DONE) {
                 lock();
@@ -424,6 +444,10 @@ void espos_sk_ws_meta_round(void)
         if (step == ESPOS_SK_META_UNAUTHORIZED || step == ESPOS_SK_META_BACK_OFF) {
             stop = step;
         }
+    }
+    if (held) {
+        ESP_LOGI(TAG, "meta: round held by a firmware update, asking again after it");
+        return;
     }
     if (stop == ESPOS_SK_META_UNAUTHORIZED) {
         espos_sk_report_unauthorized();

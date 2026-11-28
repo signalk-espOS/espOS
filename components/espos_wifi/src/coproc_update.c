@@ -278,14 +278,15 @@ static bool cp_has_activate(void)
     return major > 2 || (major == 2 && minor >= 6);
 }
 
-/* FINISHED must arrive: espos_event_post() gives up after 50 ms on a full
- * queue, and a subscriber that heard STARTED (the BLE gateway suspends its
- * scan) would wait for the matching FINISHED until the next reboot. A failed
- * install does not reboot, so retry for up to ~5 s; STARTED may be dropped, as
- * a FINISHED nobody was waiting for is a no-op. */
-static void post_update_finished(void)
+/* Both must arrive: espos_event_post() gives up after 50 ms on a full queue.
+ * A dropped FINISHED leaves a subscriber that heard STARTED (the BLE gateway
+ * suspends its scan, espos_sk holds its connections) waiting until the next
+ * reboot, and a failed install does not reboot. A dropped STARTED lets them
+ * run through the whole download. So retry for up to ~5 s; a FINISHED nobody
+ * was waiting for is a no-op. */
+static void post_update_event(int32_t id)
 {
-    for (int i = 0; i < 100 && espos_event_post(ESPOS_EVENT_UPDATE_FINISHED, NULL, 0) != ESP_OK; i++) {
+    for (int i = 0; i < 100 && espos_event_post(id, NULL, 0) != ESP_OK; i++) {
         vTaskDelay(pdMS_TO_TICKS(50));
     }
 }
@@ -297,14 +298,14 @@ static void quiesce(bool on)
     }
     s_quiesced = on;
     if (on) {
-        (void)espos_event_post(ESPOS_EVENT_UPDATE_STARTED, NULL, 0);
+        post_update_event(ESPOS_EVENT_UPDATE_STARTED);
     }
     void (*hook)(void) = on ? espos_ota_quiesce_hook : espos_ota_resume_hook;
     if (hook) {
         hook();
     }
     if (!on) {
-        post_update_finished();
+        post_update_event(ESPOS_EVENT_UPDATE_FINISHED);
     }
 }
 

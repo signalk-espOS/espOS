@@ -260,7 +260,10 @@ metadata fetch and no stream connect. The download needs the airtime and the
 internal RAM, and on a chip without PSRAM a TLS handshake beside it competes
 for the same internal heap. A stream that is already open stays open. A
 successful install restarts the device; after a failed one the client
-carries on where it was, as it does when the network comes back.
+carries on where it was, as it does when the network comes back. Should the
+end of an update never be announced, the client lets go once `espos_ota`
+and the co-processor update both report themselves idle, at the earliest
+30 s after the start.
 
 **Metadata.** `espos_sk_declare_meta(path, meta_json, period_ms)` records
 metadata for a path that is not in the Signal K specification; spec paths

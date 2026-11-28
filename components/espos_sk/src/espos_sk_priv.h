@@ -120,7 +120,17 @@ typedef struct {
      * asking. NULL = do not capture. */
     char *capture_location;
     size_t capture_location_size;
+    /* The client's own legs (token, probe, metadata): do not start while a
+     * firmware image downloads. Checked again after the wait for the TLS
+     * handshake slot, which can outlast the start of an update; such a
+     * request returns ESP_ERR_NOT_FINISHED without having been sent. A
+     * caller's own request (espos_sk_http_get()) leaves it false. */
+    bool hold_during_update;
 } espos_sk_http_req_t;
+
+/* What the client's legs return for a request held by a firmware update
+ * (hold_during_update): not sent, so neither an answer nor a failure. */
+#define ESPOS_SK_HTTP_HELD (-1)
 
 esp_err_t espos_sk_http_perform(const espos_sk_http_req_t *rq, espos_sk_http_resp_t *r);
 /* What the scheme probe learned. NO_ANSWER is not "plain http": nothing
@@ -328,6 +338,18 @@ bool espos_sk_update_running(void);
 static inline bool espos_sk_may_dial(bool net_up, bool update_running)
 {
     return net_up && !update_running;
+}
+
+/* The hold's backstop for a FINISHED that never arrived (the producers retry
+ * it for a few seconds, then give up). After this long, a hold that the
+ * update owners no longer confirm -- espos_ota_busy() and
+ * espos_wifi_coproc_busy(), whichever is linked -- is let go. `can_ask` is
+ * false when neither is linked: then only the event can end it. */
+#define ESPOS_SK_UPDATE_HOLD_CHECK_MS 30000u
+
+static inline bool espos_sk_update_hold_stale(uint32_t held_ms, bool can_ask, bool busy)
+{
+    return can_ask && !busy && held_ms >= ESPOS_SK_UPDATE_HOLD_CHECK_MS;
 }
 
 /* SignalK clock fallback: follows navigation.datetime while espos_time is
