@@ -264,8 +264,8 @@ carries on where it was, as it does when the network comes back. An update
 already running when the client starts holds it too. Should the end of an
 update never be announced, the client lets go once `espos_ota` and the
 co-processor update both report themselves idle, at the earliest 30 s after
-the start. The hold rests on the events, which the update retries for 5 s:
-a start that cannot be posted in that time (the default event loop full
+the start. The hold rests on the events, which the update retries for 5 to
+10 s: a start that cannot be posted in that time (the default event loop full
 throughout) is logged, and the client then runs through that update.
 
 **Metadata.** `espos_sk_declare_meta(path, meta_json, period_ms)` records

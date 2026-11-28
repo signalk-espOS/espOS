@@ -282,8 +282,9 @@ static bool cp_has_activate(void)
  * A dropped FINISHED leaves a subscriber that heard STARTED (the BLE gateway
  * suspends its scan, espos_sk holds its connections) waiting until the next
  * reboot, and a failed install does not reboot. A dropped STARTED lets them
- * run through the whole download. So retry for up to ~5 s; a FINISHED nobody
- * was waiting for is a no-op. */
+ * run through the whole download. So retry: 100 posts, each waiting up to
+ * 50 ms for room, 50 ms apart -- 5 to 10 s on a queue that stays full. A
+ * FINISHED nobody was waiting for is a no-op. */
 static void post_update_event(int32_t id)
 {
     for (int i = 0; i < 100; i++) {
@@ -292,7 +293,7 @@ static void post_update_event(int32_t id)
         }
         vTaskDelay(pdMS_TO_TICKS(50));
     }
-    /* Five seconds of a full default event loop: the WiFi events queue
+    /* Five to ten seconds of a full default event loop: the WiFi events queue
      * behind the same loop, so the device has bigger trouble than this. The
      * update goes ahead; what the subscribers do around it is best effort. */
     ESP_LOGW(TAG, "%s not delivered: the event loop stayed full",
