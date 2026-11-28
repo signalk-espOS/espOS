@@ -171,6 +171,7 @@ static void load_cfg(void)
         if (nd) {
             espos_sk_delta_destroy(s.delta);
             s.delta = nd;
+            espos_sk_delta_set_online(nd, s.st.connected); /* a new engine starts offline */
             ESP_LOGI(TAG, "offline buffer: up to %u messages / %u KiB", (unsigned)msgs, (unsigned)(bytes / 1024));
         }
     } else {
@@ -197,15 +198,39 @@ void espos_sk_ws_config_changed(void)
 
 /* ----------------------------------------------------------- publish */
 
-static esp_err_t publish(const char *context, const char *path, const char *value_json, int64_t at_ms)
+static esp_err_t publish_flags(const char *context, const char *path, const char *value_json, int64_t at_ms,
+                               uint32_t flags)
 {
     if (!s.lock || !s.delta) {
         return ESP_ERR_INVALID_STATE;
     }
     lock();
-    esp_err_t err = espos_sk_delta_publish_at(s.delta, context, path, value_json, at_ms, now_ms());
+    esp_err_t err = espos_sk_delta_publish_ex(s.delta, context, path, value_json, at_ms, flags, now_ms());
     unlock();
     return err;
+}
+
+static esp_err_t publish(const char *context, const char *path, const char *value_json, int64_t at_ms)
+{
+    return publish_flags(context, path, value_json, at_ms, 0);
+}
+
+/* The public flags are the engine's, bit for bit: passed straight through, an
+ * unknown one is refused there. */
+_Static_assert(ESPOS_SK_PUB_LIVE == ESPOS_SK_DELTA_LIVE, "ESPOS_SK_PUB_LIVE must be the engine's LIVE bit");
+
+esp_err_t espos_sk_publish_json_opts(const char *context, const char *path, const char *value_json,
+                                     const espos_sk_pub_opts_t *opts)
+{
+    return publish_flags(context, path, value_json, opts ? opts->at_ms : 0, opts ? opts->flags : 0);
+}
+
+esp_err_t espos_sk_publish_number_opts(const char *context, const char *path, double value,
+                                       const espos_sk_pub_opts_t *opts)
+{
+    char v[32];
+    espos_sk_json_number(v, sizeof(v), value);
+    return espos_sk_publish_json_opts(context, path, v, opts);
 }
 
 static esp_err_t publish_string(const char *context, const char *path, const char *value, int64_t at_ms)
@@ -599,6 +624,26 @@ static int64_t uptime_s(void)
 #endif
 }
 
+/* espOS's own telemetry is LIVE: it is published every sk.health_s, and a
+ * value replayed from the offline buffer after an outage is superseded long
+ * before it arrives. publish_health() runs only while connected, but a tick
+ * still in the batch window when the stream drops would otherwise land in the
+ * ring. */
+static void health_number(const char *path, double v)
+{
+    char b[32];
+    espos_sk_json_number(b, sizeof(b), v);
+    (void)publish_flags(NULL, path, b, 0, ESPOS_SK_DELTA_LIVE);
+}
+
+static void health_string(const char *path, const char *v)
+{
+    char b[ESPOS_SK_VALUE_MAX];
+    if (espos_sk_json_string(b, sizeof(b), v) > 0) {
+        (void)publish_flags(NULL, path, b, 0, ESPOS_SK_DELTA_LIVE);
+    }
+}
+
 static void publish_health(void)
 {
     char base[64];
@@ -629,19 +674,19 @@ static void publish_health(void)
     }
     char p[ESPOS_SK_PATH_MAX];
     snprintf(p, sizeof(p), "%suptime", base);
-    espos_sk_publish_number(p, (double)uptime_s());
+    health_number(p, (double)uptime_s());
     snprintf(p, sizeof(p), "%sfreeHeap", base);
-    espos_sk_publish_number(p, esp_get_free_heap_size());
+    health_number(p, esp_get_free_heap_size());
     snprintf(p, sizeof(p), "%sminFreeHeap", base);
-    espos_sk_publish_number(p, esp_get_minimum_free_heap_size());
+    health_number(p, esp_get_minimum_free_heap_size());
     /* Internal RAM separately from the total: on a PSRAM board it is the
      * scarce pool, and the total hides it. Telemetry only -- the thresholds
      * and the lowMemory condition live in espos_health's policy, which runs
      * with or without SignalK. */
     snprintf(p, sizeof(p), "%sinternalFree", base);
-    espos_sk_publish_number(p, heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    health_number(p, heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
     snprintf(p, sizeof(p), "%slargestBlock", base);
-    espos_sk_publish_number(p, heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    health_number(p, heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
     /* From the network seam, not the radio: rssi is 0 when the route is not
      * WiFi, and the path keeps its name (wifiReconnects) so dashboards built
      * on it keep working — it counts default-route re-establishments now,
@@ -649,19 +694,19 @@ static void publish_health(void)
     espos_net_status_t ns;
     if (espos_net_get_status(&ns) == ESP_OK) {
         snprintf(p, sizeof(p), "%srssi", base);
-        espos_sk_publish_number(p, ns.rssi);
+        health_number(p, ns.rssi);
         snprintf(p, sizeof(p), "%swifiReconnects", base);
-        espos_sk_publish_number(p, ns.up_count > 0 ? ns.up_count - 1 : 0);
+        health_number(p, ns.up_count > 0 ? ns.up_count - 1 : 0);
     }
     snprintf(p, sizeof(p), "%sskReconnects", base);
-    espos_sk_publish_number(p, s.st.reconnects > 0 ? s.st.reconnects - 1 : 0);
+    health_number(p, s.st.reconnects > 0 ? s.st.reconnects - 1 : 0);
 
     snprintf(p, sizeof(p), "%sresetReason", base);
     static const char *const reasons[] = { "unknown", "poweron", "external", "software", "panic", "int_wdt",
                                            "task_wdt", "wdt", "deepsleep", "brownout", "sdio", "usb", "jtag",
                                            "efuse", "power_glitch", "cpu_lockup" };
     int r = (int)esp_reset_reason();
-    espos_sk_publish_string(p, (r >= 0 && r < (int)(sizeof(reasons) / sizeof(reasons[0]))) ? reasons[r] : "unknown");
+    health_string(p, (r >= 0 && r < (int)(sizeof(reasons) / sizeof(reasons[0]))) ? reasons[r] : "unknown");
 }
 
 /* ------------------------------------------------------------- stream */
@@ -789,6 +834,7 @@ static void ws_task(void *arg)
                 set_stream_connected(false);
                 lock();
                 s.st.connected = false;
+                espos_sk_delta_set_online(s.delta, false);
                 if (s.delta) {
                     espos_sk_delta_flush(s.delta, now_ms());
                 }
@@ -1001,6 +1047,7 @@ static void ws_task(void *arg)
             s.retry_at_ms = 0;
             lock();
             s.st.connected = true;
+            espos_sk_delta_set_online(s.delta, true);
             s.st.reconnects++;
             s.st.next_retry_s = 0;
             espos_sk_meta_connected(&s.meta); /* the client task reconciles at once */
@@ -1039,6 +1086,7 @@ static void ws_task(void *arg)
                 lock();
                 s.st.send_errors++;
                 s.st.connected = false;
+                espos_sk_delta_set_online(s.delta, false);
                 unlock();
                 set_error("send failed");
                 esp_transport_close(ws);
@@ -1069,6 +1117,7 @@ static void ws_task(void *arg)
                 s.sending = false;
                 s.st.send_errors++;
                 s.st.connected = false;
+                espos_sk_delta_set_online(s.delta, false);
                 unlock();
                 set_error("send failed");
                 esp_transport_close(ws);
@@ -1221,6 +1270,7 @@ static void ws_task(void *arg)
                 }
                 lock();
                 s.st.connected = false;
+                espos_sk_delta_set_online(s.delta, false);
                 unlock();
                 set_error(stalled ? "message incomplete" : "closed by server");
                 esp_transport_close(ws);
@@ -1232,6 +1282,7 @@ static void ws_task(void *arg)
         } else if (pr < 0) {
             lock();
             s.st.connected = false;
+            espos_sk_delta_set_online(s.delta, false);
             unlock();
             set_error("connection error");
             esp_transport_close(ws);
@@ -1333,6 +1384,7 @@ esp_err_t espos_sk_ws_get_status(espos_sk_ws_status_t *out)
         out->buffered = ds.buffered;
         out->buffered_bytes = ds.buffered_bytes;
         out->dropped = ds.dropped;
+        out->live_dropped = ds.live_dropped;
     }
     out->meta_declared = s.meta.n;
     out->meta_reconciled = 0;
@@ -1365,6 +1417,7 @@ char *espos_sk_ws_status_json(void)
     cJSON_AddNumberToObject(j, "buffered", (double)st.buffered);
     cJSON_AddNumberToObject(j, "buffered_bytes", (double)st.buffered_bytes);
     cJSON_AddNumberToObject(j, "dropped", st.dropped);
+    cJSON_AddNumberToObject(j, "live_dropped", st.live_dropped);
     cJSON_AddStringToObject(j, "last_error", st.last_error);
     cJSON *m = cJSON_AddObjectToObject(j, "meta");
     cJSON_AddNumberToObject(m, "declared", (double)st.meta_declared);

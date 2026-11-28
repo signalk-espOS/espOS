@@ -117,8 +117,11 @@ const char *espos_board(void);
  * A binding generated from the headers records the value it was built
  * against and compares it with espos_abi_version() at run time.
  */
-#define ESPOS_ABI_VERSION 10
+#define ESPOS_ABI_VERSION 11
 /* History, so that a binding pinned to an older value can tell what moved:
+ *   11 espos_sk_delta_stats_t and espos_sk_ws_status_t gained live_dropped
+ *      (appended, sizeof), for values published with ESPOS_SK_PUB_LIVE that
+ *      the stream was not up to send -- espOS #341.
  *   10 espos_sk_http_resp_t and espos_sk_http_result_t gained local_error +
  *      local_reason, espos_sk_tok_port_t gained stream_live and
  *      espos_sk_tok_status_t gained local_error_count (all appended,
