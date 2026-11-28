@@ -1066,8 +1066,9 @@ static void sk_task(void *arg)
                 }
             }
             s.could_dial = up;
-            /* after the edge, so this browse is the one it scheduled */
-            if (up && s.discover_requested) {
+            /* after the edge, so this browse is the one it scheduled; asked
+             * again, as the edge's probe can outlast the start of an update */
+            if (s.discover_requested && can_dial()) {
                 s.discover_requested = false;
                 if (s.discovery_enabled) {
                     run_discovery();
