@@ -222,7 +222,8 @@ espos_sk_publish_number_opts(NULL, "electrical.batteries.house.voltage", 12.7, &
   in `ws.dropped`; `ws.live_dropped` counts them.
 * A slow publisher that wants its value on the server soon after a reconnect
   restates it on `ESPOS_EVENT_SK_STREAM_CONNECTED`.
-* Within one batch the newest value of a path wins, flag and all.
+* Within one batch the newest value of a path and timestamp wins, flag and
+  all. Values of one path with different timestamps stay separate updates.
 * Messages already in the buffer when the stream drops stay there.
 
 espOS's own health telemetry (`espos.<label>.*`, every `sk.health_s`) is

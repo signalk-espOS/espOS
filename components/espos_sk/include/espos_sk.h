@@ -147,7 +147,9 @@ typedef struct {
  * again on its next period; a slow publisher that wants its value on the
  * server soon after a reconnect restates it on
  * ESPOS_EVENT_SK_STREAM_CONNECTED. Within a batch window the newest value of a
- * path wins, flag and all. Messages already in the offline buffer stay there.
+ * path and timestamp (at_ms) wins, flag and all; values of one path with
+ * different timestamps are separate updates. Messages already in the offline
+ * buffer stay there.
  *
  * String and bool values go through the json call with espos_sk_json_string()
  * (espos_sk_delta.h) or "true"/"false".
